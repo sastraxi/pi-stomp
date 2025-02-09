@@ -187,7 +187,7 @@ def run_ui():
             diff_val = freq - ideal_freq
             diff_val = max(-tolerance, min(tolerance, diff_val))
             angle = 270 + (diff_val / tolerance) * 60
-            needle_color = "green" if abs(freq - ideal_freq) < 0.5 else "red"
+            needle_color = "green" if abs(freq - ideal_freq) < 0.2 else "red"
             theta = math.radians(angle)
             nx = int(round(cx + needle_length * math.cos(theta)))
             ny = int(round(cy + needle_length * math.sin(theta)))
@@ -201,7 +201,7 @@ def run_ui():
         # Draw Note Text (with Drop Shadow) as before.
         note_center = (cx, cy + 24)  # (160,192)
         if display_note:
-            text_color = "green" if abs(freq - ideal_freq) < 0.5 else "red"
+            text_color = "green" if abs(freq - ideal_freq) < 0.2 else "red"
             bbox_text = draw.textbbox((0, 0), display_note, font=large_font)
             text_w = bbox_text[2] - bbox_text[0]
             text_h = bbox_text[3] - bbox_text[1]
