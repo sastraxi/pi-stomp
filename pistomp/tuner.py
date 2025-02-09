@@ -23,7 +23,6 @@ import time
 import queue
 import threading
 import gc
-import subprocess
 
 # =============================================================================
 # Configuration Constants
@@ -70,6 +69,11 @@ running    = False
 proc_thread = None
 client      = None
 
+# Global variables for sharing the latest tuning results.
+latest_closest_note = ""  # e.g., "A4"
+latest_freq         = 0.0 # the detected (smoothed) frequency in Hz
+latest_ideal_freq   = 0.0 # the ideal frequency for that note in Hz
+
 # =============================================================================
 # Helper Function: Note Detection
 # =============================================================================
@@ -109,6 +113,8 @@ def processing_thread():
     samples have been collected.
     """
     global processing_buffer, freqBuffer, running
+    global latest_closest_note, latest_freq, latest_ideal_freq
+
     # Enable garbage collection in this thread.
     gc.enable()
     while running:
@@ -199,9 +205,17 @@ def processing_thread():
 
             stable_note, stable_pitch = find_closest_note(smoothed_freq)
 
-            # Clear the terminal and print the result.
-            os.system('cls' if os.name == 'nt' else 'clear')
-            print(f"Closest note: {stable_note}  (freq: {round(smoothed_freq,1)} Hz, ideal: {round(stable_pitch,1)} Hz)")
+            # Update the global variables.
+            latest_closest_note = stable_note
+            latest_freq         = round(smoothed_freq, 1)
+            latest_ideal_freq   = round(stable_pitch, 1)
+
+            # Optionally, clear the terminal and print the result.
+            #os.system('cls' if os.name == 'nt' else 'clear')
+            print(
+                f"Closest note: {latest_closest_note}  "
+                f"(freq: {latest_freq} Hz, ideal: {latest_ideal_freq} Hz)"
+            )
     return
 
 # =============================================================================
@@ -224,6 +238,9 @@ def tuner_on():
     # Clear any previous state.
     processing_buffer = np.zeros(0, dtype=np.float32)
     freqBuffer = []
+    latest_closest_note = ""
+    latest_freq         = 0.0
+    latest_ideal_freq   = 0.0
 
     # Disable garbage collection in the realtime callback (to reduce jitter).
     gc.disable()
@@ -240,9 +257,6 @@ def tuner_on():
         print("Connected to input port:", capture_port)
     except jack.JackError as err:
         print("Error while connecting to", capture_port, ":", err)
-
-    cmd = "amixer -q -- sset 'DAC Soft Mute' 'on'"
-    subprocess.check_output(cmd, shell=True)
 
     proc_thread = threading.Thread(target=processing_thread)
     proc_thread.start()
