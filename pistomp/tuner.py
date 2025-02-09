@@ -31,9 +31,9 @@ SAMPLE_FREQ        = 48000          # sample frequency in Hz
 WINDOW_SIZE        = 48000          # FFT window size in samples
 WINDOW_STEP        = 12000          # number of samples to slide the window each time
 NUM_HPS            = 5              # maximum number of harmonic product spectrums
-POWER_THRESH       = 1e-6           # skip processing if the signal power is below this
+POWER_THRESH       = 1e-5           # skip processing if the signal power is below this
 CONCERT_PITCH      = 440            # A4 = 440 Hz
-WHITE_NOISE_THRESH = 0.2            # fraction for noise suppression
+WHITE_NOISE_THRESH = 0.8            # fraction for noise suppression
 
 # Frequency resolution:
 DELTA_FREQ = SAMPLE_FREQ / WINDOW_SIZE
@@ -55,7 +55,7 @@ HANN_WINDOW = np.hanning(WINDOW_SIZE)
 # Globals for Threading and Buffering
 # =============================================================================
 # A thread-safe queue for passing audio blocks from the JACK realtime callback.
-sample_queue = queue.Queue(maxsize=100)
+sample_queue = queue.Queue(maxsize=150)
 
 # A rolling buffer to accumulate enough samples for processing.
 processing_buffer = np.zeros(0, dtype=np.float32)
@@ -210,12 +210,6 @@ def processing_thread():
             latest_freq         = round(smoothed_freq, 1)
             latest_ideal_freq   = round(stable_pitch, 1)
 
-            # Optionally, clear the terminal and print the result.
-            #os.system('cls' if os.name == 'nt' else 'clear')
-            print(
-                f"Closest note: {latest_closest_note}  "
-                f"(freq: {latest_freq} Hz, ideal: {latest_ideal_freq} Hz)"
-            )
     return
 
 # =============================================================================
@@ -254,13 +248,11 @@ def tuner_on():
     capture_port = "system:capture_1"
     try:
         client.connect(capture_port, client.inports[0])
-        print("Connected to input port:", capture_port)
     except jack.JackError as err:
         print("Error while connecting to", capture_port, ":", err)
 
     proc_thread = threading.Thread(target=processing_thread)
     proc_thread.start()
-    print("Tuner is on.")
 
 def tuner_off():
     """
@@ -276,16 +268,3 @@ def tuner_off():
         client.deactivate()
         client.close()
         client = None
-    print("Tuner is off.")
-
-# =============================================================================
-# Example usage when run as a script
-# =============================================================================
-if __name__ == "__main__":
-    tuner_on()
-    try:
-        # Run indefinitely until interrupted.
-        while True:
-            time.sleep(1)
-    except KeyboardInterrupt:
-        tuner_off()
