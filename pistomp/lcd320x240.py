@@ -106,6 +106,7 @@ class Lcd(abstract_lcd.Lcd):
         self.w_splash = None
         self.w_info_msg = None
         self.w_parameter_dialogs = {}
+        self.w_tuner = None
 
         # panels
         self.pstack = PanelStack(display, image_format='RGB', use_dimming=True)  # TODO use dimming without loosing FS's
@@ -173,8 +174,9 @@ class Lcd(abstract_lcd.Lcd):
     # Toolbar
     #
     def draw_tools(self, wifi_type=None, eq_type=None, bypass_type=None, system_type=None):
-        self.w_power = ImageWidget(box=Box.xywh(190, 0, 20, 20), image_path=os.path.join(self.imagedir,
+        self.w_tuner = ImageWidget(box=Box.xywh(180, 0, 20, 20), image_path=os.path.join(self.imagedir,
                                    'tuner.png'), parent=self.main_panel, action=self.draw_tuner)
+        self.main_panel.add_sel_widget(self.w_tuner)
         if self.w_wifi is not None:
             return
         self.w_wifi = ImageWidget(box=Box.xywh(210, 0, 20, 20), image_path=os.path.join(self.imagedir,
