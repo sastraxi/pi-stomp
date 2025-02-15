@@ -28,6 +28,7 @@ import pistomp.generichost as Generichost
 import pistomp.testhost as Testhost
 import pistomp.handlerfactory as Handlerfactory
 import pistomp.hardwarefactory as Hardwarefactory
+import pistomp.tuner_gui as tuner_gui
 
 
 def main():
@@ -93,6 +94,7 @@ def main():
         factory = Hardwarefactory.Hardwarefactory()
         hw = factory.create(cfg, handler, midiout)
         handler.add_hardware(hw)
+        tuner_gui.hw = hw
 
         # Load all pedalboard info from the lilv ttl file
         handler.load_banks()

@@ -258,11 +258,8 @@ class Lcd(abstract_lcd.Lcd):
         d.refresh()
 
     def draw_tuner(self, event, arg):
-        if event == InputEvent.CLICK:
-            Tuner.tuner_on()
-            TGUI.run_ui()
-        elif event == InputEvent.LONG_CLICK:
-            Tuner.tuner_off()
+        Tuner.tuner_on()
+        TGUI.run_ui(self)
 
     #
     # Title (Pedalboard and Preset)

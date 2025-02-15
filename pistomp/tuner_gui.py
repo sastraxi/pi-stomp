@@ -1,30 +1,25 @@
 #!/usr/bin/env python3
 # This file is part of pi-stomp.
 #
-# pi-stomp is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# pi-stomp is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with pi-stomp.  If not, see <https://www.gnu.org/licenses/>.
+# pi-stomp is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
+# pi-stomp is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+# FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more details.
+# You should have received a copy of the GNU General Public License along with pi-stomp.  If not, see <https://www.gnu.org/licenses/>.
 
 import time
 import math
 import board
 import digitalio
 import busio
-import os
+import subprocess
 from adafruit_rgb_display import ili9341
 from PIL import Image, ImageDraw, ImageFont
 import numpy as np
-import pistomp.tuner as tuner # Your tuner module
+import pistomp.tuner as tuner  # Your tuner module
 import common.token as Token
+import logging
+import pistomp.lcd320x240 as lcd
 
 # ---------------------------
 # Global Display Initialization
@@ -45,7 +40,7 @@ def clear_display():
 # ---------------------------
 # Create a smooth gradient background with dithering.
 # ---------------------------
-def create_smooth_gradient_background(width, height, top_color=(20,20,40), bottom_color=(0,0,0), scale=4, noise_amount=8):
+def create_smooth_gradient_background(width, height, top_color=(5,5,10), bottom_color=(0,0,0), scale=4, noise_amount=8):
     high_res_height = height * scale
     high_res = Image.new("RGB", (width, high_res_height), top_color)
     draw = ImageDraw.Draw(high_res)
@@ -96,12 +91,23 @@ def create_static_layer(background, cx, cy, R, arc_start, arc_end, tick_length, 
         draw.text((label_x - lw/2, label_y - lh/2), label, font=small_font, fill="white")
     return static_img
 
+# Global flag to indicate that an encoder longpress has been detected.
+encoder_exit_requested = False
+
+def exit_ui_on_encoder_longpress(*args, **kwargs):
+    global encoder_exit_requested
+    logging.debug("exit_ui_on_encoder_longpress called with args: %s, kwargs: %s", args, kwargs)
+    encoder_exit_requested = True
+
 # ---------------------------
 # Main UI Loop
 # ---------------------------
-def run_ui():
+def run_ui(self):
+    global encoder_exit_requested
+
     # Create smooth gradient background.
-    background = create_smooth_gradient_background(width, height, top_color=(20,20,40), bottom_color=(0,0,0), scale=4, noise_amount=8)
+    background = create_smooth_gradient_background(width, height, top_color=(5,5,10),
+                                                   bottom_color=(0,0,0), scale=4, noise_amount=8)
     
     # Load fonts.
     try:
@@ -113,7 +119,7 @@ def run_ui():
 
     # Gauge parameters.
     cx, cy = 160, 160           # Center of gauge.
-    R = 140                     # Radius (so bounding box is (20,20,300,300))
+    R = 140                     # Radius (bounding box: (20,20,300,300))
     arc_start, arc_end = 210, 330 # Arc spans from 210° to 330°.
     needle_length = R - 16      # Approximately 120 pixels.
     tolerance = 5.0             # ±5 Hz maps to ±60° deviation (ideal = 270°).
@@ -123,7 +129,7 @@ def run_ui():
     static_layer = create_static_layer(background, cx, cy, R, arc_start, arc_end, tick_length, small_font)
 
     # Clearing Logic.
-    clear_timeout = 4      # seconds.
+    clear_timeout = 4       # seconds.
     change_threshold = 0.1  # Hz.
     last_note = None
     last_freq = None
@@ -155,8 +161,35 @@ def run_ui():
     smoothed_freq = None
     smoothed_ideal = None
 
+    # --- Obtain the hardware instance from a global variable ---
+    # NOTE: The hardware instance is created in modalapistomp.py.
+    # Make sure modalapistomp.py assigns it by doing, for example:
+    #   import tuner_gui
+    #   tuner_gui.hw = hw
+    try:
+        hw = globals().get("hw", None)
+        if hw is None:
+            raise ImportError("Global hw not set")
+        logging.debug("Overriding encoder switch longpress callbacks using global hw.")
+        # Force the encoder switch id to 1 and override its longpress_callback for the one with id==1.
+        for enc_sw in hw.encoder_switches:
+            enc_sw.id = 1
+            logging.debug("Setting encoder switch id to %d", enc_sw.id)
+            if enc_sw.id == 1:
+                enc_sw.longpress_callback = exit_ui_on_encoder_longpress
+                logging.debug("Longpress callback for encoder id 1 overridden.")
+    except Exception as e:
+        hw = None
+        logging.error("Hardware instance 'hw' not available; encoder longpress exit not enabled: %s", e)
+
     while True:
         # Start with a copy of the precomputed static layer.
+        cmd = "amixer -c %d -q -- sset '%s' '%s'" % (0, 'DAC Soft Mute', 'on')
+        try:
+            subprocess.check_output(cmd, shell=True)
+        except subprocess.CalledProcessError:
+            logging.error("Failed trying to set audio card parameter")
+            return False
         image = static_layer.copy()
         draw = ImageDraw.Draw(image)
 
@@ -180,11 +213,10 @@ def run_ui():
 
         # Compute Needle Angle and Color.
         if display_note == "":
-            # Force needle to center exactly.
             angle = 270
             needle_color = "white"
             nx = cx
-            ny = cy - needle_length  # Perfectly vertical.
+            ny = cy - needle_length
         else:
             diff_val = freq - ideal_freq
             diff_val = max(-tolerance, min(tolerance, diff_val))
@@ -200,8 +232,8 @@ def run_ui():
         base_bbox = (cx - base_radius, cy - base_radius, cx + base_radius, cy + base_radius)
         draw.ellipse(base_bbox, fill="white")
 
-        # Draw Note Text (with Drop Shadow) as before.
-        note_center = (cx, cy + 24)  # (160,192)
+        # Draw Note Text (with Drop Shadow).
+        note_center = (cx, cy + 24)
         if display_note:
             text_color = "green" if abs(freq - ideal_freq) < 0.2 else "red"
             bbox_text = draw.textbbox((0, 0), display_note, font=large_font)
@@ -224,13 +256,34 @@ def run_ui():
             freq_y = fixed_freq_text_y
             draw.text((freq_x, freq_y), freq_text, font=small_font, fill="white")
 
+        # --- Poll hardware controls to update encoder switch events ---
+        if hw is not None:
+            hw.poll_controls()  # Process encoder events which may trigger the longpress callback.
+
+        if encoder_exit_requested:
+            logging.debug("Encoder exit flag detected; exiting run_ui loop.")
+            tuner.tuner_off()
+            cmd = "amixer -c %d -q -- sset '%s' '%s'" % (0, 'DAC Soft Mute', 'off')
+            try:
+                subprocess.check_output(cmd, shell=True)
+            except subprocess.CalledProcessError:
+                logging.error("Failed trying to set audio card parameter")
+                return False
+            self.main_panel.refresh()
+            self.footswitch_panel.refresh()
+            encoder_exit_requested = False
+            break
+
         display.image(image)
+        time.sleep(0.01)  # Small delay for responsiveness
 
 if __name__ == "__main__":
-    clear_display()          # Clear display at startup.
-    tuner.tuner_on()         # Start the tuner.
+    clear_display()
+    tuner.tuner_on()
     try:
         run_ui()
     except KeyboardInterrupt:
-        tuner.tuner_off()    # Turn off tuner.
-        clear_display()      # Clear display after tuner is turned off.
+        pass
+    finally:
+        tuner.tuner_off()
+        clear_display()
