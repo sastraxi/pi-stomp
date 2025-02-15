@@ -28,6 +28,8 @@ from uilib import *
 from uilib.lcd_ili9341 import *
 
 from pistomp.footswitch import Footswitch  # TODO would like to avoid this module knowing such details
+import pistomp.tuner as Tuner
+import pistomp.tuner_gui as TGUI
 
 #import traceback
 
@@ -171,6 +173,8 @@ class Lcd(abstract_lcd.Lcd):
     # Toolbar
     #
     def draw_tools(self, wifi_type=None, eq_type=None, bypass_type=None, system_type=None):
+        self.w_power = ImageWidget(box=Box.xywh(190, 0, 20, 20), image_path=os.path.join(self.imagedir,
+                                   'tuner.png'), parent=self.main_panel, action=self.draw_tuner)
         if self.w_wifi is not None:
             return
         self.w_wifi = ImageWidget(box=Box.xywh(210, 0, 20, 20), image_path=os.path.join(self.imagedir,
@@ -250,6 +254,13 @@ class Lcd(abstract_lcd.Lcd):
 
         self.pstack.push_panel(d)
         d.refresh()
+
+    def draw_tuner(self, event):
+        if event == InputEvent.CLICK:
+            Tuner.tuner_on()
+            TGUI.run_ui()
+        elif event == InputEvent.LONG_CLICK:
+            Tuner.tuner_off()
 
     #
     # Title (Pedalboard and Preset)

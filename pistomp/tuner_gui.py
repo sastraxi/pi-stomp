@@ -99,7 +99,7 @@ def create_static_layer(background, cx, cy, R, arc_start, arc_end, tick_length, 
 # ---------------------------
 # Main UI Loop
 # ---------------------------
-def run_ui():
+def run_ui(self, arg):
     # Create smooth gradient background.
     background = create_smooth_gradient_background(width, height, top_color=(20,20,40), bottom_color=(0,0,0), scale=4, noise_amount=8)
     

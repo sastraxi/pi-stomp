@@ -224,7 +224,7 @@ def processing_thread():
 # =============================================================================
 # Tuner Control Functions
 # =============================================================================
-def tuner_on():
+def tuner_on(self, arg):
 
     global client, running, proc_thread, processing_buffer, freqBuffer
     global latest_closest_note, latest_freq, latest_ideal_freq
@@ -254,7 +254,7 @@ def tuner_on():
     proc_thread = threading.Thread(target=processing_thread)
     proc_thread.start()
 
-def tuner_off():
+def tuner_off(self, arg):
 
     global running, proc_thread, client
     running = False
