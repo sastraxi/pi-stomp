@@ -257,7 +257,7 @@ class Lcd(abstract_lcd.Lcd):
         self.pstack.push_panel(d)
         d.refresh()
 
-    def draw_tuner(self, event):
+    def draw_tuner(self, event, arg):
         if event == InputEvent.CLICK:
             Tuner.tuner_on()
             TGUI.run_ui()
