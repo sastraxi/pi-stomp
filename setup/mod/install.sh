@@ -18,7 +18,7 @@
 set -x
 
 #Install Dependancies
-sudo apt-get -y install virtualenv python3-pip python3-dev python3-zeroconf build-essential libasound2-dev libjack-jackd2-dev \
+sudo apt-get -y install virtualenv python3-pip python3-dev python3-zeroconf python3-numpy build-essential libasound2-dev libjack-jackd2-dev \
                         zlib1g-dev cmake gperf intltool ladspa-sdk libarmadillo-dev libavahi-gobject-dev liblilv-dev libjpeg-dev \
                         libavcodec-dev libavutil-dev libbluetooth-dev libboost-dev libeigen3-dev libfftw3-dev libglib2.0-dev libglibmm-2.4-dev \
                         libgtk2.0-dev libgtkmm-2.4-dev liblrdf0-dev libsamplerate0-dev libsigc++-2.0-dev libsndfile1-dev libzita-convolver-dev \
@@ -33,10 +33,8 @@ sudo pip3 install pycrypto
 sudo pip3 install tornado==4.3
 sudo pip3 install Pillow==9.4.0
 sudo pip3 install cython
-#pip3 install tornado_xstatic xstatic
-# The next command prints an error that i don't know how to avoid, so i send the error to /dev/null for avoid breaking nightly builds
-#pip3 install XStatic_term.js 2>/dev/null
-#pip3 install terminado==0.13.3
+sudo pip3 install pyfftw
+sudo pip3 install JACK-Client
 
 #Install Mod Software
 mkdir -p /home/pistomp/data/.pedalboards
@@ -61,13 +59,13 @@ mkdir -p "Captures"
 
 #Hylia
 export NOOPT=true
-pushd $(mktemp -d) && git clone --recursive https://github.com/falkTX/Hylia.git
+pushd $(mktemp -d) && git clone --recursive https://github.com/micahvdm/Hylia.git
 pushd Hylia
 make
 make install
 
 #Jack2
-pushd $(mktemp -d) && git clone https://github.com/micahvdm/jack2.git
+pushd $(mktemp -d) && git clone -b mod-upstream https://github.com/micahvdm/jack2.git
 pushd jack2
 ./waf configure
 ./waf build
@@ -79,13 +77,13 @@ pushd browsepy
 sudo pip3 install ./
 
 #Mod-host
-pushd $(mktemp -d) && git clone https://github.com/micahvdm/mod-host.git
+pushd $(mktemp -d) && git clone -b master https://github.com/micahvdm/mod-host.git
 pushd mod-host
 make
 sudo make install
 
 #Mod-ui
-pushd $(mktemp -d) && git clone https://github.com/micahvdm/mod-ui.git
+pushd $(mktemp -d) && git clone -b tuner https://github.com/micahvdm/mod-ui.git
 pushd mod-ui
 chmod +x setup.py
 cd utils
@@ -96,7 +94,7 @@ cp -r default.pedalboard /home/pistomp/data/.pedalboards
 sudo sed -i -e 's/collections.MutableMapping/collections.abc.MutableMapping/' /usr/local/lib/python3.11/dist-packages/tornado/httputil.py
 
 #Touchosc2midi
-pushd $(mktemp -d) && git clone https://github.com/BlokasLabs/amidithru.git
+pushd $(mktemp -d) && git clone https://github.com/micahvdm/amidithru.git
 pushd amidithru
 sed -i 's/CXX=g++.*/CXX=g++/' Makefile
 sudo make install
