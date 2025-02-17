@@ -28,6 +28,7 @@ import common.util as util
 import modalapi.pedalboard as Pedalboard
 import modalapi.wifi as Wifi
 import pistomp.settings as Settings
+import pistomp.tuner as tuner
 
 from pistomp.analogmidicontrol import AnalogMidiControl
 from pistomp.encodermidicontrol import EncoderMidiControl
@@ -94,7 +95,8 @@ class Modhandler(Handler):
                           "next_snapshot": self.preset_incr_and_change,
                           "previous_snapshot": self.preset_decr_and_change,
                           "toggle_bypass": self.system_toggle_bypass,
-                          "toggle_tap_tempo_enable": self.toggle_tap_tempo_enable
+                          "toggle_tap_tempo_enable": self.toggle_tap_tempo_enable,
+                          "toggle_tuner_enable": self.toggle_tuner_enable
         }
 
     def __del__(self):
@@ -786,3 +788,6 @@ class Modhandler(Handler):
     def toggle_tap_tempo_enable(self, *argv):
         self.hardware.toggle_tap_tempo_enable(self.get_bpm())
         self.lcd.update_footswitches()
+
+    def toggle_tuner_enable(self):
+        self.hardware.toggle_tuner_enable()

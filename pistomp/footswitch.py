@@ -46,7 +46,8 @@ class Footswitch(controller.Controller):
                                     "previous_snapshot":LongpressInfo(),
                                     "toggle_bypass":LongpressInfo(),
                                     "set_mod_tap_tempo":LongpressInfo(),
-                                    "toggle_tap_tempo_enable":LongpressInfo()}
+                                    "toggle_tap_tempo_enable":LongpressInfo(),
+                                    "toggle_tuner_enable":LongpressInfo()}
 
         # Static list of possible callbacks from the handler
         if len(cls.callbacks) == 0:
@@ -85,7 +86,7 @@ class Footswitch(controller.Controller):
             info.timestamps.clear()
 
     def __init__(self, id, led_pin, pixel, midi_CC, midi_channel, midiout, refresh_callback,
-                 gpio_input=None, adc_input=None, spi=None, taptempo=None):
+                 gpio_input=None, adc_input=None, spi=None, taptempo=None, tuner=None):
         super(Footswitch, self).__init__(midi_channel, midi_CC)
         self.id = id
         self.display_label = None
@@ -101,6 +102,7 @@ class Footswitch(controller.Controller):
         self.pixel = pixel
         self.longpress_groups = []
         self.taptempo = taptempo
+        self.tuner = tuner
 
         if adc_input and gpio_input:
             logging.error("Switch cannot be specified with both %s and %s", (Token.ADC_INPUT, Token.GPIO_INPUT))
@@ -224,6 +226,9 @@ class Footswitch(controller.Controller):
 
         if self.taptempo and self.taptempo.is_enabled():
             pass  # Don't process other events when in taptempo mode
+
+        # if self.tuner and self.tuner.is_enabled():
+        #     pass # Don't process other events when in tuner mode
 
         # If mapped to preset change
         elif self.preset_callback is not None:

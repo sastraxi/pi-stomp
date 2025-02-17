@@ -23,6 +23,7 @@ import common.util as Util
 import pistomp.analogmidicontrol as AnalogMidiControl
 import pistomp.footswitch as Footswitch
 import pistomp.taptempo as taptempo
+import pistomp.tuner as tuner
 
 from abc import abstractmethod
 
@@ -55,6 +56,7 @@ class Hardware:
         self.debounce_map = None
         self.ledstrip = None
         self.taptempo = taptempo.TapTempo(None)
+        self.tuner = tuner.Tuner(None)
 
     def toggle_tap_tempo_enable(self, bpm=0):
         if self.taptempo:
@@ -62,6 +64,13 @@ class Hardware:
             if self.taptempo.is_enabled() and bpm > 0:
                 self.taptempo.set_bpm(bpm)
                 logging.debug("tap tempo mode enabled: %d", bpm)
+            
+    def toggle_tuner_enable(self):
+        if self.tuner:
+            self.tuner.toggle_enable()
+            if self.tuner.is_enabled():
+                self.tuner.tuner_on(self.tuner.run_ui())
+                logging.debug("Tuner enabled")
 
     def init_spi(self):
         self.spi = spidev.SpiDev()
@@ -189,6 +198,7 @@ class Hardware:
             midi_cc = Util.DICT_GET(f, Token.MIDI_CC)
             id = Util.DICT_GET(f, Token.ID)
             led_position = Util.DICT_GET(f, Token.LEDSTRIP_POSITION)
+            tuner_callback = Util.DICT_GET(f, Token.TUNER)
 
             pixel = None
             if self.ledstrip and led_position is not None:
@@ -204,18 +214,22 @@ class Hardware:
             if taptempo:
                 taptempo.set_callback(self.handler.get_callback(tap_tempo_callback))
 
+            tuner = (self.tuner if tuner_callback else None)
+            if tuner:
+                tuner.set_callback(self.handler.get_callback(tuner_callback))
+
             if adc_input is not None:
                 fs = Footswitch.Footswitch(id if id else idx, gpio_output, pixel, midi_cc, midi_channel,
                                            self.midiout, refresh_callback=self.refresh_callback,
                                            adc_input=adc_input, spi=self.spi,
-                                           taptempo = taptempo)
+                                           taptempo = taptempo, tuner = tuner)
                 logging.debug("Created Footswitch on ADC input: %d, Midi Chan: %d, CC: %s" %
                               (adc_input, midi_channel, midi_cc))
             elif gpio_input is not None:
                 fs = Footswitch.Footswitch(id if id else idx, gpio_output, pixel, midi_cc, midi_channel,
                                            self.midiout, refresh_callback=self.refresh_callback,
                                            gpio_input=gpio_input,
-                                           taptempo = taptempo)
+                                           taptempo = taptempo, tuner = tuner)
                 logging.debug("Created Footswitch on GPIO input: %d, Midi Chan: %d, CC: %s" %
                               (gpio_input, midi_channel, midi_cc))
 
