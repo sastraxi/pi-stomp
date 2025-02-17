@@ -14,6 +14,10 @@
 # You should have received a copy of the GNU General Public License
 # along with pi-stomp.  If not, see <https://www.gnu.org/licenses/>.
 
+# =============================================================================
+# sudo pip3 install pyfftw JACK-Client
+# =============================================================================
+
 import os
 import numpy as np
 import jack
