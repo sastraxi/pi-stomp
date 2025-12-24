@@ -21,6 +21,9 @@ import subprocess
 import sys
 import yaml
 
+from enum import Enum
+from rtmidi.midiconstants import CONTROL_CHANGE
+
 import common.token as Token
 import common.util as util
 import pistomp.switchstate as switchstate
@@ -32,7 +35,6 @@ import modalapi.external_midi as ExternalMidi
 from pistomp.analogmidicontrol import AnalogMidiControl
 from pistomp.footswitch import Footswitch
 from pistomp.handler import Handler
-from enum import Enum
 from pathlib import Path
 
 #sys.path.append('/usr/lib/python3.5/site-packages')  # TODO possibly /usr/local/modep/mod-ui
@@ -137,7 +139,8 @@ class Mod(Handler):
         self.current_menu = MenuType.MENU_NONE
 
         # This file is modified when the pedalboard is changed via MOD UI
-        self.pedalboard_modification_file = "/home/pistomp/data/last.json"
+        self.data_dir = "/home/pistomp/data"
+        self.pedalboard_modification_file = os.path.join(self.data_dir, "last.json")
         self.pedalboard_change_timestamp = os.path.getmtime(self.pedalboard_modification_file)\
             if Path(self.pedalboard_modification_file).exists() else 0
 
@@ -547,6 +550,14 @@ class Mod(Handler):
         self.bind_current_pedalboard()
         self.load_current_presets()
         self.update_lcd()
+
+        # Send external MIDI messages for this pedalboard
+        # Config was already updated by hardware.reinit(cfg) above
+        if self.external_midi is not None:
+            try:
+                self.external_midi.send_messages_for_pedalboard()
+            except Exception as e:
+                logging.warning(f"Failed to send external MIDI messages: {e}")
 
         # Selection info
         self.selectable_items.clear()
