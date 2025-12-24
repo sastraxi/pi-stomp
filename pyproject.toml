@@ -5,9 +5,7 @@ description = "DIY high definition, multi-effects stompbox platform for guitar, 
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "GPL-3.0-or-later" }
-authors = [
-    { name = "Trevor Willig" }
-]
+authors = [{ name = "Randall Reichenbach" }, { name = "Micah van de Merwe" }]
 keywords = ["guitar", "effects", "pedal", "raspberry-pi", "audio", "lv2"]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -38,16 +36,11 @@ hardware = [
 ]
 
 # Development dependencies
-dev = [
-    "pytest>=7.0",
-    "pytest-cov>=4.0",
-    "black>=23.0",
-    "ruff>=0.1.0",
-]
+dev = ["pytest>=7.0", "pytest-cov>=4.0", "black>=23.0", "ruff>=0.1.0"]
 
 [project.urls]
 Homepage = "https://treefallsound.com"
-Documentation = "https://www.treefallsound.com/wiki/doku.php?id=software_installation_3.x"
+Documentation = "https://www.treefallsound.com/wiki/doku.php"
 Repository = "https://github.com/TreeFallSound/pi-stomp"
 Issues = "https://github.com/TreeFallSound/pi-stomp/issues"
 
