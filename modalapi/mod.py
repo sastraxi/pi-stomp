@@ -36,7 +36,6 @@ from pistomp.analogmidicontrol import AnalogMidiControl
 from pistomp.footswitch import Footswitch
 from pistomp.handler import Handler
 from pathlib import Path
-from rtmidi.midiconstants import CONTROL_CHANGE
 
 #sys.path.append('/usr/lib/python3.5/site-packages')  # TODO possibly /usr/local/modep/mod-ui
 #from mod.development import FakeHost as Host
