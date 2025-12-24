@@ -27,6 +27,7 @@ import pistomp.switchstate as switchstate
 import modalapi.pedalboard as Pedalboard
 import modalapi.parameter as Parameter
 import modalapi.wifi as Wifi
+import modalapi.external_midi as ExternalMidi
 
 from pistomp.analogmidicontrol import AnalogMidiControl
 from pistomp.footswitch import Footswitch
@@ -142,6 +143,13 @@ class Mod(Handler):
 
         self.wifi_manager = Wifi.WifiManager()
 
+        # External MIDI device synchronization
+        self.external_midi = None
+        try:
+            self.external_midi = ExternalMidi.ExternalMidiManager()
+        except Exception as e:
+            logging.warning(f"Failed to initialize external MIDI manager: {e}")
+
         # Callback function map.  Key is the user specified name, value is function from this handler
         # Used for calling handler callbacks pointed to by names which may be user set in the config file
         self.callbacks = {"set_mod_tap_tempo": self.set_mod_tap_tempo,
@@ -153,10 +161,14 @@ class Mod(Handler):
         logging.info("Handler cleanup")
         if self.wifi_manager:
             del self.wifi_manager
+        if self.external_midi is not None:
+            self.external_midi.close()
 
     def cleanup(self):
         if self.lcd is not None:
             self.lcd.cleanup()
+        if self.external_midi is not None:
+            self.external_midi.close()
 
     # Container for dynamic data which is unique to the "current" pedalboard
     # The self.current pointed above will point to this object which gets
@@ -183,6 +195,8 @@ class Mod(Handler):
 
     def add_hardware(self, hardware):
         self.hardware = hardware
+        # Pass external MIDI manager to hardware for config updates
+        hardware.external_midi = self.external_midi
 
     def add_lcd(self, lcd):
         self.lcd = lcd
