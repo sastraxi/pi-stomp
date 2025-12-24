@@ -227,6 +227,10 @@ class Modhandler(Handler):
         if self.lcd is not None:
             self.lcd.enc_step(direction)
 
+    def universal_encoder_sw(self, value, obj=None):
+        if self.lcd is not None:
+            self.lcd.enc_sw(value)
+
     def send_midi_cc(self, state, cc):
         """
         Send MIDI CC message from encoder button press.
@@ -244,10 +248,6 @@ class Modhandler(Handler):
         cc_msg = [midi_channel | CONTROL_CHANGE, cc & 0x7F, 127]
         logging.debug("send_midi_cc: sending %s" % cc_msg)
         self.hardware.midiout.send_message(cc_msg)
-
-    def universal_encoder_sw(self, value, obj=None):
-        if self.lcd is not None:
-            self.lcd.enc_sw(value)
 
     def poll_modui_changes(self):
         # This poll looks for changes made via the MOD UI and tries to sync the pi-Stomp hardware
