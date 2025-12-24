@@ -1,4 +1,4 @@
-# Claude Code Guide for piStomp Development
+# Guide for piStomp Development
 
 ## Remote Development
 
