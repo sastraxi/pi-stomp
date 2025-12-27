@@ -25,17 +25,11 @@ from modalapi.parameter import Type as ParameterType
 class CollageConfig(TypedDict):
     """Complete collage mode configuration from YAML."""
     enabled: bool
-    mode: NotRequired[Literal['segment', 'parameter']]
     expression_pedal_id: NotRequired[int]
-    snapshot_stops: dict[str, int | str]  # "position" -> snapshot (index or name)
-    throttle_ms: NotRequired[int]
-
-    # Segment mode options
-    easing: NotRequired[str]
-
-    # Parameter mode options
     interpolation: NotRequired[str]
-    virtual_midi_channel: NotRequired[int]
+    snapshot_stops: dict[str, int | str]  # "position" -> snapshot (index or name)
+    create_snapshot: NotRequired[bool]
+    snapshot_name: NotRequired[str]
 
 
 # Snapshots.json TypedDicts

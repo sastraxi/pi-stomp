@@ -100,7 +100,6 @@ hardware:
 #     "0.0": 0                       # Snapshot by index (0-based)
 #     "0.5": "Crunch"                # Or by name (case-insensitive prefix match)
 #     "1.0": "Heavy"                 # Min separation: 1/127 (0.0079)
-#   throttle_ms: 50                  # Min time between updates (default: 50ms)
 #   create_snapshot: true            # Auto-create "Collage Mode" snapshot (default: true)
 #   snapshot_name: "Collage Mode"    # Name for auto-created snapshot (default: "Collage Mode")
 #
