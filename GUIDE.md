@@ -409,3 +409,38 @@ poll_controls()
 - `pistomp/lcd320x240.py` - Color LCD (v2/v3)
 - `pistomp/lcdgfx.py` - Mono LCD (v1)
 - `uilib/*` - Widget library (v3)
+
+## Collage Mode
+
+Expression pedal-driven snapshot interpolation.
+
+### Modes
+
+**Segment** - Piecewise interpolation with easing. MIDI mapped per-segment.
+- Config: `mode: segment`, `easing: linear|ease_in_quad|ease_out_quad|...`
+
+**Parameter** - Full interpolation across all stops. Virtual MIDI CCs.
+- Config: `mode: parameter`, `interpolation: linear|hermite|catmull_rom`
+
+### Config
+
+```yaml
+collage_mode:
+  enabled: true
+  mode: segment
+  expression_pedal_id: 0
+  snapshot_stops:
+    "0.0": "Clean"
+    "0.5": "Crunch"
+    "1.0": "Lead"
+```
+
+Position keys: stringified floats [0.0-1.0], min separation 1/127.
+Snapshot values: index (int) or name (str, prefix match, case-insensitive).
+
+### Implementation
+
+- `modalapi/collagestop.py` - Easing/interpolation functions, stop logic
+- `modalapi/collagemode.py` - Mode manager, expression pedal hijacking
+- Segment mode: transforms pedal CC via easing before mod-host receives it
+- Parameter mode: computes full state, sends virtual CCs on channel 15
