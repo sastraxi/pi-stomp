@@ -429,6 +429,8 @@ poll_controls()
 
 Expression pedal-driven snapshot interpolation.
 
+**Snapshot Activation**: Auto-switches to "Collage Mode" snapshot on pedalboard load. Switching to other snapshots deactivates; switching back reactivates.
+
 ### Modes
 
 **Segment** - Piecewise interpolation with easing. MIDI mapped per-segment.

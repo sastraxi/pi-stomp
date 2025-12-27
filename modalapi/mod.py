@@ -626,16 +626,27 @@ class Mod(Handler):
                     # Ensure "Collage Mode" snapshot exists (creates if missing)
                     self.collage_mode.ensure_collage_snapshot()
 
-                    # Check if current snapshot is "Collage Mode"
+                    # Auto-switch to "Collage Mode" snapshot
                     snapshot_name = collage_cfg.get('snapshot_name', 'Collage Mode')
-                    current_snapshot_name = self.current.presets.get(self.current.preset_index)
 
-                    if current_snapshot_name == snapshot_name:
-                        # Initialize collage mode (snapshot-based activation)
+                    # Find the snapshot index by name
+                    collage_snapshot_index = None
+                    for idx, name in self.current.presets.items():
+                        if name == snapshot_name:
+                            collage_snapshot_index = idx
+                            break
+
+                    if collage_snapshot_index is not None:
+                        # Switch to collage mode snapshot if not already on it
+                        if self.current.preset_index != collage_snapshot_index:
+                            logging.info(f"Auto-switching to '{snapshot_name}' snapshot (index {collage_snapshot_index})")
+                            self.preset_change(collage_snapshot_index)
+
+                        # Initialize collage mode
                         self.collage_mode.initialize()
-                        logging.info(f"Loaded pedalboard with '{snapshot_name}' active - collage mode enabled")
+                        logging.info(f"Collage mode enabled on '{snapshot_name}' snapshot")
                     else:
-                        logging.debug(f"Collage mode configured but not active (current snapshot: {current_snapshot_name})")
+                        logging.warning(f"Collage mode configured but '{snapshot_name}' snapshot not found")
 
                 except Exception as e:
                     logging.error(f"Failed to prepare collage mode: {e}")
