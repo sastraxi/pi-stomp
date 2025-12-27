@@ -114,6 +114,9 @@ class Modhandler(Handler):
                           "toggle_tap_tempo_enable": self.toggle_tap_tempo_enable
         }
 
+        # Collage mode manager (initialized per pedalboard if enabled)
+        self.collage_mode = None
+
     def __del__(self):
         logging.info("Handler cleanup")
         if self.wifi_manager:
@@ -388,6 +391,11 @@ class Modhandler(Handler):
         return self.pedalboard_monitor.get_current_pedalboard_bundle()
 
     def set_current_pedalboard(self, pedalboard):
+        # Cleanup previous collage mode if active
+        if self.collage_mode:
+            self.collage_mode.cleanup()
+            self.collage_mode = None
+
         # Delete previous "current"
         del self.current
 
@@ -411,6 +419,32 @@ class Modhandler(Handler):
         self.load_current_presets()
         self.lcd.link_data(self.pedalboard_list, self.current, self.hardware.footswitches)
         self.lcd.draw_main_panel()
+
+        # Prepare collage mode if enabled in config (snapshot-based activation)
+        if cfg and 'collage_mode' in cfg:
+            collage_cfg = cfg['collage_mode']
+            if collage_cfg.get('enabled', False):
+                try:
+                    from modalapi.collagemode import CollageMode
+                    self.collage_mode = CollageMode(self, collage_cfg)
+
+                    # Ensure "Collage Mode" snapshot exists (creates if missing)
+                    self.collage_mode.ensure_collage_snapshot()
+
+                    # Check if current snapshot is "Collage Mode"
+                    snapshot_name = collage_cfg.get('snapshot_name', 'Collage Mode')
+                    current_snapshot_name = self.current.presets.get(self.current.preset_index)
+
+                    if current_snapshot_name == snapshot_name:
+                        # Initialize collage mode (snapshot-based activation)
+                        self.collage_mode.initialize()
+                        logging.info(f"Loaded pedalboard with '{snapshot_name}' active - collage mode enabled")
+                    else:
+                        logging.debug(f"Collage mode configured but not active (current snapshot: {current_snapshot_name})")
+
+                except Exception as e:
+                    logging.error(f"Failed to prepare collage mode: {e}")
+                    self.collage_mode = None
 
     def bind_current_pedalboard(self):
         # "current" being the pedalboard mod-host says is current
@@ -534,9 +568,29 @@ class Modhandler(Handler):
 
     def preset_change(self, index):
         logging.info("preset change: %d" % index)
+
         if index < 0 or index >= len(self.current.presets):
             self.lcd.draw_message_dialog("Snapshot id %d does not exist for this pedalboard" % index)
             return
+
+        # Handle collage mode snapshot-based activation
+        new_snapshot_name = self.current.presets.get(index)
+        if self.collage_mode:
+            collage_snapshot_name = self.collage_mode.config.get('snapshot_name', 'Collage Mode')
+
+            if new_snapshot_name == collage_snapshot_name:
+                # Switching TO "Collage Mode" snapshot
+                if not self.collage_mode.enabled:
+                    logging.info(f"Activating collage mode (switched to '{collage_snapshot_name}' snapshot)")
+                    try:
+                        self.collage_mode.initialize()
+                    except Exception as e:
+                        logging.error(f"Failed to activate collage mode: {e}")
+            else:
+                # Switching AWAY from "Collage Mode" snapshot
+                if self.collage_mode.enabled:
+                    logging.info(f"Deactivating collage mode (switched to '{new_snapshot_name}' snapshot)")
+                    self.collage_mode.cleanup()
 
         self.lcd.draw_info_message("Loading...")
         url = (self.root_uri + "snapshot/load?id=%d" % index)
