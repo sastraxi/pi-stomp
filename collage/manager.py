@@ -310,7 +310,7 @@ class CollageMode:
         logging.info(f"Parameter mode initialized with {len(virtual_cc_mappings)} virtual CCs")
 
     def _initialize_pedal_controller(self) -> None:
-        """Initialize and hijack pedal controller."""
+        """Initialize pedal controller and attach to expression pedal."""
         assert self.mode_handler is not None
 
         exp_pedal_id = self.config.get('expression_pedal_id', 0)
@@ -319,8 +319,8 @@ class CollageMode:
         # Create pedal controller
         self.pedal_controller = PedalController(self.mode, self.mode_handler, midiout)
 
-        # Hijack expression pedal
-        self.pedal_controller.hijack_pedal(self.handler.hardware.analog_controls, exp_pedal_id)
+        # Attach to expression pedal
+        self.pedal_controller.attach_to_pedal(self.handler.hardware.analog_controls, exp_pedal_id)
 
     def _get_expression_pedal_config(self, pedal_id: int) -> tuple[int, int]:
         """
@@ -453,7 +453,7 @@ class CollageMode:
     def cleanup(self) -> None:
         """
         Clean up collage mode:
-        - Restore hijacked expression pedal
+        - Detach from expression pedal
         - Unmap all MIDI mappings
         - Reset state
         """
@@ -462,9 +462,9 @@ class CollageMode:
 
         logging.info("Cleaning up collage mode...")
 
-        # Restore hijacked expression pedal
+        # Detach from expression pedal
         if self.pedal_controller:
-            self.pedal_controller.restore_pedal()
+            self.pedal_controller.detach_from_pedal()
 
         # Unmap MIDI mappings
         if self.midi_mapper:

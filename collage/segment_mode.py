@@ -91,13 +91,19 @@ class SegmentMode:
         eased_cc_value = int(eased_global_pct * 127)
         eased_cc_value = max(0, min(127, eased_cc_value))  # Clamp
 
+        logging.debug(
+            f"Segment {new_segment}: pct={percentage:.3f}, local={local_pct:.3f}, "
+            f"eased={eased_pct:.3f}, CC={eased_cc_value}"
+        )
+
         # Send the eased CC value on the expression pedal's channel/CC
         midi_msg = [exp_channel | CONTROL_CHANGE, exp_cc, eased_cc_value]
         midiout.send_message(midi_msg)
+        logging.debug(f"Sent MIDI: ch={exp_channel}, cc={exp_cc}, val={eased_cc_value}")
 
         # If segment changed, update MIDI mappings
         if new_segment != self.current_segment:
-            logging.debug(f"Segment change: {self.current_segment} -> {new_segment}")
+            logging.info(f"Segment change: {self.current_segment} -> {new_segment}")
             self.current_segment = new_segment
             self.apply_mappings_callback(new_segment)
 
