@@ -22,11 +22,11 @@ from pathlib import Path
 from typing import Any
 
 from collage.interpolation import (
-    # Complex interpolation
-    linear_interpolation,
+    # Spline interpolation
     hermite_interpolation,
     catmull_rom_interpolation,
     # Easing-based interpolation
+    linear_interpolation,
     ease_in_quad_interpolation,
     ease_out_quad_interpolation,
     ease_in_out_quad_interpolation,
@@ -44,8 +44,28 @@ from collage.types import (
     CollageConfig,
     EnrichedDiffMap,
     InterpolationFunc,
+    StopData,
 )
 from modalapi.parameter import Type as ParameterType
+
+
+# Mapping of all interpolation function names
+INTERPOLATION_FUNCTIONS: dict[str, InterpolationFunc] = {
+    # Spline interpolation (uses neighbor context)
+    'hermite': hermite_interpolation,
+    'catmull_rom': catmull_rom_interpolation,
+
+    # Easing-based interpolation (segment-local only)
+    'linear': linear_interpolation,
+    'ease_in_quad': ease_in_quad_interpolation,
+    'ease_out_quad': ease_out_quad_interpolation,
+    'ease_in_out_quad': ease_in_out_quad_interpolation,
+    'ease_in_cubic': ease_in_cubic_interpolation,
+    'ease_out_cubic': ease_out_cubic_interpolation,
+    'ease_in_out_cubic': ease_in_out_cubic_interpolation,
+    'exponential': exponential_easing_interpolation,
+    'sine': sine_easing_interpolation,
+}
 
 
 class CollageMode:
@@ -157,8 +177,8 @@ class CollageMode:
         """
         Validate config and resolve interpolation function.
 
-        Supports both complex interpolation (linear, hermite, catmull_rom)
-        and easing-based interpolation (ease_in_quad, etc.).
+        Supports spline interpolation (hermite, catmull_rom) and
+        easing-based interpolation (linear, ease_in_quad, etc.).
 
         Returns:
             Per-parameter interpolation function
@@ -166,24 +186,6 @@ class CollageMode:
         Raises:
             ValueError: If config is invalid
         """
-        # Single mapping of all interpolation function names
-        INTERPOLATION_FUNCTIONS: dict[str, InterpolationFunc] = {
-            # Complex interpolation
-            'linear': linear_interpolation,
-            'hermite': hermite_interpolation,
-            'catmull_rom': catmull_rom_interpolation,
-
-            # Easing-based interpolation
-            'ease_in_quad': ease_in_quad_interpolation,
-            'ease_out_quad': ease_out_quad_interpolation,
-            'ease_in_out_quad': ease_in_out_quad_interpolation,
-            'ease_in_cubic': ease_in_cubic_interpolation,
-            'ease_out_cubic': ease_out_cubic_interpolation,
-            'ease_in_out_cubic': ease_in_out_cubic_interpolation,
-            'exponential': exponential_easing_interpolation,
-            'sine': sine_easing_interpolation,
-        }
-
         # Parse interpolation function name
         interp_name = self.config.get('interpolation', 'linear')
         interpolation_func = INTERPOLATION_FUNCTIONS.get(interp_name)
@@ -217,7 +219,7 @@ class CollageMode:
         snapshots_data = SnapshotManager.read_snapshots_file(bundle_path)
 
         # Parse and validate snapshot_stops entries
-        stops_data: list[tuple[float, int]] = []  # [(position, snapshot_index), ...]
+        stops_data: list[StopData] = []
 
         for position_str, snapshot_identifier in snapshot_stops.items():
             # Validate position is a stringified float
@@ -235,16 +237,16 @@ class CollageMode:
             # Resolve snapshot identifier (index or name) to index
             snapshot_index = SnapshotManager.resolve_snapshot_identifier(snapshots_data, snapshot_identifier)
 
-            stops_data.append((position, snapshot_index))
+            stops_data.append(StopData(position, snapshot_index))
 
         # Sort by position
-        stops_data.sort(key=lambda x: x[0])
+        stops_data.sort(key=lambda x: x.position)
 
         # Create CollageStop objects
         stops = []
-        for position, snapshot_index in stops_data:
-            state = SnapshotManager.parse_snapshot_data(snapshots_data, snapshot_index)
-            stop = CollageStop(position, snapshot_index, state)
+        for stop_data in stops_data:
+            state = SnapshotManager.parse_snapshot_data(snapshots_data, stop_data.snapshot_index)
+            stop = CollageStop(stop_data.position, stop_data.snapshot_index, state)
             stops.append(stop)
             logging.debug(f"Created {stop}")
 

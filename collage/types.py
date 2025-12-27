@@ -16,7 +16,7 @@
 """Type definitions for collage mode."""
 
 from dataclasses import dataclass
-from typing import Any, Callable, Literal, NotRequired, TypedDict
+from typing import Any, Callable, NamedTuple, NotRequired, Protocol, TypedDict
 
 from modalapi.parameter import Type as ParameterType
 
@@ -69,6 +69,33 @@ class SnapshotState(TypedDict):
 class DiffMapEntry(TypedDict):
     """Single parameter diff entry: (val_a, val_b, param_type)"""
     pass  # Tuple[float, float, ParameterType] - but TypedDict doesn't support tuples
+
+
+# NamedTuple for intermediate data structures
+class StopData(NamedTuple):
+    """Intermediate representation of a stop during parsing."""
+    position: float
+    snapshot_index: int
+
+
+class ParameterKey(NamedTuple):
+    """Key for identifying a unique parameter in MIDI de-duplication tracking."""
+    instance_id: str
+    symbol: str
+
+
+# Protocol types for external dependencies
+class AnalogControlProtocol(Protocol):
+    """Protocol for expression pedal / analog control objects."""
+    id: int
+    value_change_callback: Callable[[int, Any], None] | None
+
+
+class WebSocketBridgeProtocol(Protocol):
+    """Protocol for WebSocket bridge interface."""
+    def send_parameter(self, instance_id: str, symbol: str, value: float) -> bool: ...
+    def get_stats(self) -> dict: ...
+    def clear_queue(self) -> int: ...
 
 
 # Type aliases for complex nested structures

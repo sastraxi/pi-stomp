@@ -17,7 +17,7 @@
 
 import logging
 
-from modalapi.websocket_bridge import AsyncWebSocketBridge
+from collage.types import ParameterKey, WebSocketBridgeProtocol
 
 
 class ParameterSetter:
@@ -29,17 +29,17 @@ class ParameterSetter:
     This dramatically reduces WebSocket traffic during expression pedal movement.
     """
 
-    def __init__(self, bridge: AsyncWebSocketBridge) -> None:
+    def __init__(self, bridge: WebSocketBridgeProtocol) -> None:
         """
         Initialize parameter setter with shared WebSocket bridge.
 
         Args:
-            bridge: Shared AsyncWebSocketBridge instance from handler
+            bridge: Shared WebSocket bridge instance from handler
         """
         self.bridge = bridge
 
-        # MIDI-level change tracking: {(instance_id, symbol): midi_value}
-        self.last_sent_midi_values: dict[tuple[str, str], int] = {}
+        # MIDI-level change tracking
+        self.last_sent_midi_values: dict[ParameterKey, int] = {}
 
         logging.info("ParameterSetter initialized")
 
@@ -63,7 +63,7 @@ class ParameterSetter:
         midi_value = int(round(value * 127))
 
         # Check if changed from last sent value
-        key = (instance_id, symbol)
+        key = ParameterKey(instance_id, symbol)
         if self.last_sent_midi_values.get(key) == midi_value:
             return False  # Skip - same MIDI value as last send
 
