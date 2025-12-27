@@ -31,7 +31,7 @@ def as_midi_value(adc_value: int):
 
 
 class AnalogMidiControl(analogcontrol.AnalogControl):
-    def __init__(self, spi, adc_channel, tolerance, midi_CC, midi_channel, midiout, type, id=None, cfg={}):
+    def __init__(self, spi, adc_channel, tolerance, midi_CC, midi_channel, midiout, type, id=None, cfg={}, value_change_callback=None):
         super(AnalogMidiControl, self).__init__(spi, adc_channel, tolerance)
         self.midi_CC = midi_CC
         self.midiout = midiout
@@ -43,6 +43,7 @@ class AnalogMidiControl(analogcontrol.AnalogControl):
         self.last_read = 0  # this keeps track of the last potentiometer value
         self.value = None
         self.cfg = cfg
+        self.value_change_callback = value_change_callback
 
     def set_midi_channel(self, midi_channel):
         self.midi_channel = midi_channel
@@ -76,11 +77,16 @@ class AnalogMidiControl(analogcontrol.AnalogControl):
         value_changed = pot_adjust > self.tolerance
 
         if value_changed:
-            set_volume = as_midi_value(value)
+            # If a callback is registered, delegate to it instead of sending MIDI directly
+            if self.value_change_callback:
+                self.value_change_callback(value, self)
+            else:
+                # Default behavior: convert to MIDI and send
+                set_volume = as_midi_value(value)
 
-            cc = [self.midi_channel | CONTROL_CHANGE, self.midi_CC, set_volume]
-            logging.debug("AnalogControl Sending CC event %s" % cc)
-            self.midiout.send_message(cc)
+                cc = [self.midi_channel | CONTROL_CHANGE, self.midi_CC, set_volume]
+                logging.debug("AnalogControl Sending CC event %s" % cc)
+                self.midiout.send_message(cc)
 
             # save the potentiometer reading for the next loop
             self.last_read = value

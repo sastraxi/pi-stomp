@@ -20,7 +20,7 @@ from typing import Any, Literal
 
 
 class PedalController:
-    """Manages expression pedal hijacking and refresh handling."""
+    """Manages expression pedal callback registration for collage mode."""
 
     def __init__(
         self,
@@ -39,18 +39,18 @@ class PedalController:
         self.mode = mode
         self.mode_handler = mode_handler
         self.midiout = midiout
-        self.hijacked_control: Any = None  # AnalogMidiControl
-        self.original_refresh: Any = None  # Original refresh method
+        self.controlled_pedal: Any = None  # AnalogMidiControl
 
-    def hijack_pedal(self, analog_controls: list[Any], pedal_id: int) -> None:
+    def attach_to_pedal(self, analog_controls: list[Any], pedal_id: int) -> None:
         """
-        Hijack expression pedal refresh() method.
+        Attach collage mode callback to expression pedal.
 
-        Stores original refresh method and replaces it with hijacked_refresh.
+        Sets the value_change_callback on the AnalogMidiControl to intercept
+        value changes and route them through collage mode handlers.
 
         Args:
             analog_controls: List of analog controls from hardware
-            pedal_id: Expression pedal ID to hijack
+            pedal_id: Expression pedal ID to control
 
         Raises:
             ValueError: If pedal not found
@@ -58,47 +58,43 @@ class PedalController:
         # Find expression pedal control
         for control in analog_controls:
             if hasattr(control, 'id') and control.id == pedal_id:
-                self.hijacked_control = control
-                self.original_refresh = control.refresh
-                control.refresh = self.hijacked_refresh
-                logging.info(f"Hijacked expression pedal {pedal_id} for {self.mode} mode")
+                self.controlled_pedal = control
+                control.value_change_callback = self.handle_value_change
+                logging.info(f"Attached collage mode to expression pedal {pedal_id} ({self.mode} mode)")
                 return
 
-        raise ValueError(f"Expression pedal {pedal_id} not found for hijacking")
+        raise ValueError(f"Expression pedal {pedal_id} not found")
 
-    def restore_pedal(self) -> None:
-        """Restore original refresh method to hijacked control."""
-        if hasattr(self, 'hijacked_control') and hasattr(self, 'original_refresh'):
-            if self.hijacked_control and self.original_refresh:
-                self.hijacked_control.refresh = self.original_refresh
-                logging.debug("Restored expression pedal refresh method")
+    def detach_from_pedal(self) -> None:
+        """Remove collage mode callback from expression pedal."""
+        if self.controlled_pedal:
+            self.controlled_pedal.value_change_callback = None
+            logging.debug("Detached collage mode from expression pedal")
+            self.controlled_pedal = None
 
-    def hijacked_refresh(self) -> None:
+    def handle_value_change(self, raw_value: int, control: Any) -> None:
         """
-        Replacement for AnalogMidiControl.refresh().
+        Callback for AnalogMidiControl value changes.
 
-        Reads ADC value, checks for changes, and delegates to mode handler.
-        Does NOT call original refresh - we send transformed MIDI ourselves.
+        Called by AnalogMidiControl.refresh() when the pedal value changes.
+        Routes the change through the appropriate mode handler.
+
+        Args:
+            raw_value: Raw ADC value (0-1023)
+            control: The AnalogMidiControl instance
         """
-        # Read raw ADC value (but don't send MIDI yet)
-        raw_value = self.hijacked_control.readChannel()
-        value_changed = abs(raw_value - self.hijacked_control.last_read) > self.hijacked_control.tolerance
-
-        if not value_changed:
-            return
-
         # Convert ADC value to percentage (0.0-1.0)
         percentage = raw_value / 1023.0  # ADC is 10-bit (0-1023)
+
+        logging.debug(f"Pedal moved: raw={raw_value}, pct={percentage:.3f}")
 
         # Delegate to mode handler
         if self.mode == 'segment':
             # Segment mode needs exp_channel and exp_cc
-            exp_channel = self.hijacked_control.midi_channel
-            exp_cc = self.hijacked_control.midi_CC
+            exp_channel = control.midi_channel
+            exp_cc = control.midi_CC
+            logging.debug(f"Calling segment mode handler: ch={exp_channel}, cc={exp_cc}")
             self.mode_handler.handle_pedal_change(percentage, exp_channel, exp_cc, self.midiout)
         elif self.mode == 'parameter':
             # Parameter mode only needs percentage
             self.mode_handler.handle_pedal_change(percentage, self.midiout)
-
-        # Update last_read to prevent duplicate sends
-        self.hijacked_control.last_read = raw_value
