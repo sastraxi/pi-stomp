@@ -32,12 +32,16 @@ from collage.types import EasingFunc, InterpolationFunc, ParamData
 # ==================================
 # Per-parameter interpolation functions transform a single parameter value.
 # They operate on pre-computed ParamData which includes neighbor values for
-# hermite/catmull-rom interpolation.
+# spline interpolation (hermite/catmull-rom).
 #
 # Type signature: (local_pct, param_data) -> interpolated_value
 # - local_pct: 0.0-1.0, position within current segment
 # - param_data: ParamData with val_a, val_b, neighbors, segment_range
 # - Returns: float, interpolated value [0.0-1.0]
+#
+# Two categories:
+# 1. Spline interpolation - uses neighbor context (prev_val, next_val)
+# 2. Easing-based interpolation - segment-local only (val_a, val_b)
 
 
 def linear_interpolation(local_pct: float, param_data: ParamData) -> float:
@@ -198,11 +202,11 @@ sine_easing_interpolation = create_easing_interpolation(sine_easing)
 
 # Export all interpolation functions for easy import
 __all__ = [
-    # Complex interpolation
-    'linear_interpolation',
+    # Spline interpolation
     'hermite_interpolation',
     'catmull_rom_interpolation',
     # Easing-based interpolation
+    'linear_interpolation',
     'ease_in_quad_interpolation',
     'ease_out_quad_interpolation',
     'ease_in_out_quad_interpolation',

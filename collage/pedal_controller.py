@@ -19,7 +19,7 @@ import logging
 from typing import Any
 
 from collage.stop import CollageStop
-from collage.types import EnrichedDiffMap, InterpolationFunc
+from collage.types import AnalogControlProtocol, EnrichedDiffMap, InterpolationFunc
 
 
 class PedalController:
@@ -54,12 +54,12 @@ class PedalController:
         self.stops = stops
         self.segment_diff_maps = segment_diff_maps
         self.parameter_setter = parameter_setter
-        self.controlled_pedal: Any = None  # AnalogMidiControl
+        self.controlled_pedal: AnalogControlProtocol | None = None
 
         # Segment caching (optimization for sequential movements)
         self.current_segment_idx: int = 0
 
-    def attach_to_pedal(self, analog_controls: list[Any], pedal_id: int) -> None:
+    def attach_to_pedal(self, analog_controls: list[AnalogControlProtocol], pedal_id: int) -> None:
         """
         Attach collage mode callback to expression pedal.
 
@@ -91,7 +91,7 @@ class PedalController:
         """Reset state tracking (call on re-initialization)."""
         self.current_segment_idx = 0
 
-    def handle_value_change(self, raw_value: int, control: Any) -> None:
+    def handle_value_change(self, raw_value: int, control: AnalogControlProtocol) -> None:
         """
         Handle expression pedal movement (CRITICAL PATH - optimized for 10ms polling).
 

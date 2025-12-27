@@ -39,11 +39,15 @@ from collage.easing import (
     sine_easing,
 )
 
-# Interpolation functions
+# Spline interpolation functions
 from collage.interpolation import (
-    linear_interpolation,
     hermite_interpolation,
     catmull_rom_interpolation,
+)
+
+# Easing-based interpolation functions
+from collage.interpolation import (
+    linear_interpolation,
 )
 
 __all__ = [
@@ -52,7 +56,7 @@ __all__ = [
     'CollageStop',
     'CollageConfig',
 
-    # Easing functions
+    # Easing functions (for standalone use)
     'linear_easing',
     'ease_in_quad',
     'ease_out_quad',
@@ -63,8 +67,10 @@ __all__ = [
     'exponential_easing',
     'sine_easing',
 
-    # Interpolation functions
-    'linear_interpolation',
+    # Spline interpolation functions
     'hermite_interpolation',
     'catmull_rom_interpolation',
+
+    # Easing-based interpolation functions
+    'linear_interpolation',
 ]
