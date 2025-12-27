@@ -123,13 +123,17 @@ class PedalController:
         diff_map = self.segment_diff_maps[segment_idx]
 
         # Interpolate and send (ParameterSetter handles de-dupe)
-        for instance_id, params in diff_map.items():
-            for symbol, param_data in params.items():
-                # Apply interpolation function
-                float_value = self.interpolation_func(local_pct, param_data)
+        try:
+            for instance_id, params in diff_map.items():
+                for symbol, param_data in params.items():
+                    # Apply interpolation function
+                    float_value = self.interpolation_func(local_pct, param_data)
 
-                # Send parameter (ParameterSetter handles MIDI de-dupe and backpressure)
-                self.parameter_setter.send_parameter(instance_id, symbol, float_value)
+                    # Send parameter (ParameterSetter handles MIDI de-dupe and backpressure)
+                    self.parameter_setter.send_parameter(instance_id, symbol, float_value)
+        except Exception as e:
+            logging.error(f"Error in collage interpolation: {e}", exc_info=True)
+            # Continue operation - don't crash the polling loop
 
         # Log if segment changed
         if segment_idx != self.current_segment_idx:

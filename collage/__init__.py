@@ -17,8 +17,8 @@
 Collage mode package - Expression pedal-driven snapshot interpolation.
 
 This package provides functionality for smoothly interpolating between snapshots
-based on expression pedal position, with support for both segment-based easing
-and full parameter interpolation.
+based on expression pedal position, with per-parameter interpolation and
+pre-computed diff maps for optimized performance.
 """
 
 # Main public API
@@ -26,7 +26,7 @@ from collage.manager import CollageMode
 from collage.stop import CollageStop
 from collage.types import CollageConfig
 
-# Easing functions (segment mode)
+# Easing functions
 from collage.easing import (
     linear_easing,
     ease_in_quad,
@@ -39,7 +39,7 @@ from collage.easing import (
     sine_easing,
 )
 
-# Interpolation functions (parameter mode)
+# Interpolation functions
 from collage.interpolation import (
     linear_interpolation,
     hermite_interpolation,
