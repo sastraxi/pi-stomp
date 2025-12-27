@@ -98,11 +98,9 @@ hardware:
 #   easing: linear                   # Easing function: linear, ease_in_quad, ease_out_quad,
 #                                    # ease_in_out_quad, ease_in_cubic, ease_out_cubic,
 #                                    # ease_in_out_cubic, exponential, sine
-#   stops:
-#     - snapshot: 0                  # First snapshot
-#       position: 0.0                # Optional: explicit position (0.0-1.0)
-#     - snapshot: 1                  # Second snapshot
-#       position: 1.0
+#   snapshot_stops:                  # Position (stringified float) -> snapshot (index or name)
+#     "0.0": 0                       # Snapshot by index (0-based)
+#     "1.0": "Heavy"                 # Or by name (case-insensitive prefix match)
 #   throttle_ms: 50                  # Optional: minimum time between updates (default: 50ms)
 #
 # PARAMETER MODE - Full interpolation across all stops
@@ -116,11 +114,8 @@ hardware:
 #   expression_pedal_id: 0
 #   interpolation: hermite           # Interpolation: linear, hermite, catmull_rom
 #   virtual_midi_channel: 15         # Dedicated channel for virtual CCs (default: 15)
-#   stops:
-#     - snapshot: 0
-#       position: 0.0
-#     - snapshot: 1
-#       position: 0.5
-#     - snapshot: 2
-#       position: 1.0
+#   snapshot_stops:
+#     "0.0": "Clean"                 # Snapshots can be specified by name or index
+#     "0.5": "Crunch"
+#     "1.0": "Lead"
 #   throttle_ms: 50
