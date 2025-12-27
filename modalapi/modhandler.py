@@ -414,7 +414,7 @@ class Modhandler(Handler):
             collage_cfg = cfg['collage_mode']
             if collage_cfg.get('enabled', False):
                 try:
-                    from modalapi.collagemode import CollageMode
+                    from collage import CollageMode
                     self.collage_mode = CollageMode(self, collage_cfg)
 
                     # Ensure "Collage Mode" snapshot exists (creates if missing)
