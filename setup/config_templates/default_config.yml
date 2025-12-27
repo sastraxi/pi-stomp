@@ -84,13 +84,43 @@ hardware:
 # IMPORTANT: This should be configured per-pedalboard in <pedalboard>.pedalboard/config.yml
 # Requires an expression pedal to be configured in analog_controllers above.
 #
+# Two interpolation modes available:
+#
+# SEGMENT MODE (default) - Segment-based interpolation with easing
+# - Simple, efficient, no extra MIDI traffic
+# - Easing functions shape the curve within each segment
+# - Perfect for 2-stop morphing or stepped multi-stop transitions
+#
 # collage_mode:
-#   enabled: true                    # Enable collage mode for this pedalboard
-#   expression_pedal_id: 0           # Which expression pedal to use (matches id from analog_controllers)
-#                                    # Uses same MIDI channel as other hardware (channel: 14 above)
-#   stops:                           # Gradient stops defining the interpolation
-#     - snapshot: 0                  # First snapshot (at 0% pedal position)
-#       position: 0.0                # Optional: position in 0.0-1.0 range (defaults to evenly spaced)
-#     - snapshot: 1                  # Second snapshot (at 100% pedal position)
+#   enabled: true
+#   mode: segment                    # 'segment' (default) or 'parameter'
+#   expression_pedal_id: 0           # Which expression pedal to use
+#   easing: linear                   # Easing function: linear, ease_in_quad, ease_out_quad,
+#                                    # ease_in_out_quad, ease_in_cubic, ease_out_cubic,
+#                                    # ease_in_out_cubic, exponential, sine
+#   stops:
+#     - snapshot: 0                  # First snapshot
+#       position: 0.0                # Optional: explicit position (0.0-1.0)
+#     - snapshot: 1                  # Second snapshot
 #       position: 1.0
-#   throttle_ms: 50                  # Optional: minimum time between parameter updates (default: 50ms)
+#   throttle_ms: 50                  # Optional: minimum time between updates (default: 50ms)
+#
+# PARAMETER MODE - Full interpolation across all stops
+# - Smooth curves through all stops (Hermite, Catmull-Rom)
+# - Virtual MIDI CCs for per-parameter control
+# - Requires dedicated MIDI channel (default: 15)
+#
+# collage_mode:
+#   enabled: true
+#   mode: parameter
+#   expression_pedal_id: 0
+#   interpolation: hermite           # Interpolation: linear, hermite, catmull_rom
+#   virtual_midi_channel: 15         # Dedicated channel for virtual CCs (default: 15)
+#   stops:
+#     - snapshot: 0
+#       position: 0.0
+#     - snapshot: 1
+#       position: 0.5
+#     - snapshot: 2
+#       position: 1.0
+#   throttle_ms: 50

@@ -18,8 +18,28 @@ import logging
 import requests as req
 import socket
 from pathlib import Path
-from typing import Any, NotRequired, TypedDict
-from modalapi.collagestop import CollageStop, SnapshotStateDict, DiffMapDict
+from typing import Any, Literal, NotRequired, TypedDict
+from rtmidi.midiconstants import CONTROL_CHANGE
+
+from modalapi.collagestop import (
+    CollageStop,
+    SnapshotStateDict,
+    DiffMapDict,
+    EasingFunc,
+    InterpolationFunc,
+    linear_easing,
+    ease_in_quad,
+    ease_out_quad,
+    ease_in_out_quad,
+    ease_in_cubic,
+    ease_out_cubic,
+    ease_in_out_cubic,
+    exponential_easing,
+    sine_easing,
+    linear_interpolation,
+    hermite_interpolation,
+    catmull_rom_interpolation,
+)
 from modalapi.parameter import Type as ParameterType
 
 
@@ -33,9 +53,17 @@ class StopConfig(TypedDict):
 class CollageConfig(TypedDict):
     """Complete collage mode configuration from YAML."""
     enabled: bool
+    mode: NotRequired[Literal['segment', 'parameter']]
     expression_pedal_id: NotRequired[int]
     stops: list[StopConfig]
     throttle_ms: NotRequired[int]
+
+    # Segment mode options
+    easing: NotRequired[str]
+
+    # Parameter mode options
+    interpolation: NotRequired[str]
+    virtual_midi_channel: NotRequired[int]
 
 
 # Snapshots.json TypedDicts
@@ -177,25 +205,116 @@ class CollageMode:
         self.enabled: bool = False
         self.stops: list[CollageStop] = []
         self.mapped_parameters: list[tuple[int, str]] = []  # Track what we've mapped for cleanup
-        self.current_segment: int = 0  # Current segment index (multi-stop mode)
+        self.current_segment: int = 0  # Current segment index
 
-        # Expression pedal hijacking (multi-stop mode only)
+        # Mode selection
+        self.mode: Literal['segment', 'parameter'] = 'segment'  # Default to segment mode
+
+        # Segment mode: easing function
+        self.easing_func: EasingFunc = linear_easing  # Default to linear
+
+        # Parameter mode: interpolation function and virtual CCs
+        self.interpolation_func: InterpolationFunc = linear_interpolation  # Default to linear
+        self.virtual_cc_mappings: dict[str, int] = {}  # Maps "instance_id:symbol" -> CC number
+        self.virtual_midi_channel: int = 15  # Default to channel 15
+
+        # Expression pedal hijacking (always hijacked now)
         self.hijacked_control: Any = None  # AnalogMidiControl
         self.original_refresh: Any = None  # Original refresh method
 
+    def validate_config(self) -> None:
+        """
+        Validate config and set mode-specific attributes.
+
+        Parses mode, easing, interpolation, and virtual_midi_channel from config.
+        Sets self.mode, self.easing_func, self.interpolation_func, and self.virtual_midi_channel.
+
+        Raises:
+            ValueError: If config is invalid
+        """
+        # Easing function name -> function mapping
+        easing_funcs: dict[str, EasingFunc] = {
+            'linear': linear_easing,
+            'ease_in_quad': ease_in_quad,
+            'ease_out_quad': ease_out_quad,
+            'ease_in_out_quad': ease_in_out_quad,
+            'ease_in_cubic': ease_in_cubic,
+            'ease_out_cubic': ease_out_cubic,
+            'ease_in_out_cubic': ease_in_out_cubic,
+            'exponential': exponential_easing,
+            'sine': sine_easing,
+        }
+
+        # Interpolation function name -> function mapping
+        interp_funcs: dict[str, InterpolationFunc] = {
+            'linear': linear_interpolation,
+            'hermite': hermite_interpolation,
+            'catmull_rom': catmull_rom_interpolation,
+        }
+
+        # Parse mode (defaults to 'segment')
+        mode_str = self.config.get('mode', 'segment')
+        if mode_str not in ('segment', 'parameter'):
+            raise ValueError(f"Invalid mode '{mode_str}', must be 'segment' or 'parameter'")
+        self.mode = mode_str  # type: ignore
+
+        # Segment mode: parse easing function
+        if self.mode == 'segment':
+            easing_name = self.config.get('easing', 'linear')
+            if easing_name not in easing_funcs:
+                raise ValueError(
+                    f"Invalid easing function '{easing_name}', "
+                    f"must be one of: {', '.join(easing_funcs.keys())}"
+                )
+            self.easing_func = easing_funcs[easing_name]
+            logging.debug(f"Segment mode: using {easing_name} easing")
+
+        # Parameter mode: parse interpolation function and virtual channel
+        elif self.mode == 'parameter':
+            # Parse interpolation function
+            interp_name = self.config.get('interpolation', 'linear')
+            if interp_name not in interp_funcs:
+                raise ValueError(
+                    f"Invalid interpolation function '{interp_name}', "
+                    f"must be one of: {', '.join(interp_funcs.keys())}"
+                )
+            self.interpolation_func = interp_funcs[interp_name]
+
+            # Parse virtual MIDI channel (required for parameter mode)
+            virtual_channel = self.config.get('virtual_midi_channel', 15)
+            if not isinstance(virtual_channel, int) or virtual_channel < 0 or virtual_channel > 15:
+                raise ValueError(
+                    f"Invalid virtual_midi_channel {virtual_channel}, must be integer 0-15"
+                )
+            self.virtual_midi_channel = virtual_channel
+
+            logging.debug(
+                f"Parameter mode: using {interp_name} interpolation on MIDI channel {virtual_channel}"
+            )
+
     def initialize(self) -> None:
         """
-        Initialize collage mode:
-        1. Read snapshots.json
-        2. Parse snapshot states
-        3. Calculate parameter diffs
-        4. Apply binary "on wins" logic
-        5. Send midi_map commands to mod-host
+        Initialize collage mode.
+
+        Segment mode:
+            1. Validate config and parse easing function
+            2. Parse stops and snapshots
+            3. Apply MIDI mappings for initial segment
+            4. Hijack expression pedal
+
+        Parameter mode:
+            1. Validate config and parse interpolation function
+            2. Parse stops and snapshots
+            3. Build virtual CC mappings
+            4. Hijack expression pedal
         """
         logging.info("Initializing collage mode...")
 
         try:
-            # Get configuration
+            # Validate configuration and set mode-specific attributes
+            self.validate_config()
+
+            # Get stop configurations
             stop_configs = self.config.get('stops', [])
             if len(stop_configs) < 2:
                 raise ValueError(f"Collage mode requires at least 2 stops, got {len(stop_configs)}")
@@ -231,24 +350,45 @@ class CollageMode:
             # Sort stops by position
             self.stops.sort(key=lambda s: s.position)
 
-            # Validate stops are monotonic and non-equal
+            # Validate stops are monotonic and distinguishable at MIDI CC resolution
             for i in range(len(self.stops) - 1):
-                if self.stops[i].position >= self.stops[i + 1].position:
+                pos_a = self.stops[i].position
+                pos_b = self.stops[i + 1].position
+
+                # Check positions are strictly increasing
+                if pos_a >= pos_b:
                     raise ValueError(
                         f"Stop positions must be strictly increasing: "
-                        f"stop {i} at {self.stops[i].position}, stop {i+1} at {self.stops[i+1].position}"
+                        f"stop {i} at {pos_a}, stop {i+1} at {pos_b}"
                     )
 
-            # Calculate parameter differences and apply initial MIDI mapping (first segment)
-            self.current_segment = 0
-            self.apply_midi_mappings()
+                # Check positions map to different CC values (MIDI resolution check)
+                cc_a = int(pos_a * 127)
+                cc_b = int(pos_b * 127)
+                if cc_a == cc_b:
+                    raise ValueError(
+                        f"Stop positions too close - both map to CC {cc_a}: "
+                        f"stop {i} at {pos_a}, stop {i+1} at {pos_b}. "
+                        f"Minimum separation is {1.0/127:.6f}"
+                    )
 
-            # Hijack expression pedal for segment monitoring (multi-stop only)
-            if len(self.stops) > 2:
-                self.hijack_expression_pedal()
+            # Mode-specific initialization
+            if self.mode == 'segment':
+                # Segment mode: apply MIDI mappings for initial segment
+                self.current_segment = 0
+                self.apply_midi_mappings()
+                logging.info("Segment mode: applied mappings for initial segment")
+
+            elif self.mode == 'parameter':
+                # Parameter mode: build virtual CC mappings
+                self.build_virtual_cc_mappings()
+                logging.info(f"Parameter mode: created {len(self.virtual_cc_mappings)} virtual CC mappings")
+
+            # Always hijack expression pedal (both modes, all stop counts)
+            self.hijack_expression_pedal()
 
             self.enabled = True
-            logging.info(f"Collage mode initialized with {len(self.stops)} stops")
+            logging.info(f"Collage mode initialized with {len(self.stops)} stops in {self.mode} mode")
 
         except Exception as e:
             logging.error(f"Failed to initialize collage mode: {e}")
@@ -373,7 +513,7 @@ class CollageMode:
                     logging.warning(f"Plugin {instance_id} not found in pedalboard, skipping")
                     continue
 
-                for symbol, (val_a, val_b, param_type) in params.items():
+                for symbol, (val_a, val_b, _param_type) in params.items():
                     try:
                         sock.midi_map(instance_num, symbol, exp_channel, exp_cc, val_a, val_b)
 
@@ -468,11 +608,67 @@ class CollageMode:
         # At or beyond last stop - use last segment
         return len(self.stops) - 2
 
+    def build_virtual_cc_mappings(self) -> None:
+        """
+        Build virtual CC mappings for parameter mode.
+
+        Assigns a unique CC number to each parameter that varies across stops,
+        then sends midi_map commands to mod-host to map those virtual CCs to parameters.
+
+        Virtual CCs start at 70 and increment for each parameter.
+        Populates self.virtual_cc_mappings dict: "instance_id:symbol" -> CC number
+        """
+        # Collect all unique parameters across all stops
+        all_params: set[str] = set()
+
+        for stop in self.stops:
+            for instance_id, params in stop.snapshot_state.items():
+                for symbol in params.keys():
+                    param_key = f"{instance_id}:{symbol}"
+                    all_params.add(param_key)
+
+        # Assign virtual CC numbers starting at 70
+        # (Avoids common controller CCs like 1-31, leaves room for expansion)
+        next_cc = 70
+        for param_key in sorted(all_params):  # Sort for deterministic ordering
+            self.virtual_cc_mappings[param_key] = next_cc
+            next_cc += 1
+
+            if next_cc > 127:
+                raise ValueError(
+                    f"Too many parameters for virtual CC mapping (max 58, need {len(all_params)})"
+                )
+
+        logging.debug(f"Assigned virtual CCs 70-{next_cc-1} to {len(self.virtual_cc_mappings)} parameters")
+
+        # Send midi_map commands to mod-host for all virtual CCs
+        # Maps: virtual CC (on virtual channel) -> parameter (full range 0.0-1.0)
+        with ModHostSocket() as sock:
+            for param_key, cc_num in self.virtual_cc_mappings.items():
+                # Parse param_key: "instance_id:symbol"
+                instance_id, symbol = param_key.split(':', 1)
+
+                # Get instance number
+                instance_num = self.get_instance_number(instance_id)
+                if instance_num is None:
+                    logging.warning(f"Plugin {instance_id} not found, skipping virtual CC mapping")
+                    continue
+
+                # Map virtual CC to parameter (full range 0.0-1.0)
+                try:
+                    sock.midi_map(instance_num, symbol, self.virtual_midi_channel, cc_num, 0.0, 1.0)
+                    # Track for cleanup
+                    self.mapped_parameters.append((instance_num, symbol))
+                    logging.debug(f"Mapped virtual CC {cc_num} to {instance_id}/{symbol}")
+                except Exception as e:
+                    logging.warning(f"Failed to map virtual CC for {param_key}: {e}")
+
     def hijack_expression_pedal(self) -> None:
         """
-        Hijack expression pedal refresh() for segment monitoring (multi-stop mode).
+        Hijack expression pedal refresh() for monitoring and transforming CC values.
 
         Stores original refresh method and replaces it with hijacked_refresh.
+        Used in both segment mode (easing + segment switching) and parameter mode (interpolation).
         """
         exp_pedal_id = self.config.get('expression_pedal_id', 0)
 
@@ -482,42 +678,137 @@ class CollageMode:
                 self.hijacked_control = control
                 self.original_refresh = control.refresh
                 control.refresh = self.hijacked_refresh
-                logging.info(f"Hijacked expression pedal {exp_pedal_id} for multi-stop segment monitoring")
+                logging.info(f"Hijacked expression pedal {exp_pedal_id} for {self.mode} mode")
                 return
 
         raise ValueError(f"Expression pedal {exp_pedal_id} not found for hijacking")
 
-    def hijacked_refresh(self) -> None:
+    def send_virtual_midi_cc(self, cc_num: int, value: int) -> None:
         """
-        Replacement for AnalogMidiControl.refresh() - monitors segment changes.
+        Send virtual MIDI CC message on the virtual channel.
 
-        Calls original refresh (sends MIDI CC normally), then checks if segment
-        changed and updates MIDI mappings if needed.
+        Used in parameter mode to send interpolated parameter values as MIDI CCs
+        that mod-host will receive and apply to mapped parameters.
+
+        Args:
+            cc_num: MIDI CC number (70-127)
+            value: MIDI CC value (0-127)
         """
-        # Call original refresh - this sends MIDI CC normally
-        self.original_refresh()
-
-        # Get current CC value from the control
-        cc_value = self.hijacked_control.last_read
-        if cc_value is None:
+        if not self.handler.hardware or not self.handler.hardware.midiout:
+            logging.warning("send_virtual_midi_cc: midiout not available")
             return
 
-        # Determine which segment we're in
-        new_segment = self.get_segment_from_cc(cc_value)
+        # Build MIDI CC message: [channel | CONTROL_CHANGE, cc_number, value]
+        midi_msg = [self.virtual_midi_channel | CONTROL_CHANGE, cc_num, value]
+        self.handler.hardware.midiout.send_message(midi_msg)
+        logging.debug(f"Sent virtual MIDI CC: channel={self.virtual_midi_channel}, cc={cc_num}, value={value}")
+
+    def hijacked_refresh(self) -> None:
+        """
+        Replacement for AnalogMidiControl.refresh().
+
+        Handles both segment mode (easing + segment switching) and parameter mode
+        (full interpolation with virtual CCs).
+
+        Does NOT call original refresh - we send transformed MIDI ourselves.
+        """
+        # Read raw ADC value (but don't send MIDI yet)
+        raw_value = self.hijacked_control.readChannel()
+        value_changed = abs(raw_value - self.hijacked_control.last_read) > self.hijacked_control.tolerance
+
+        if not value_changed:
+            return
+
+        # Convert ADC value to percentage (0.0-1.0)
+        percentage = raw_value / 1023.0  # ADC is 10-bit (0-1023)
+
+        if self.mode == 'segment':
+            self._handle_segment_mode(percentage, raw_value)
+        elif self.mode == 'parameter':
+            self._handle_parameter_mode(percentage)
+
+        # Update last_read to prevent duplicate sends
+        self.hijacked_control.last_read = raw_value
+
+    def _handle_segment_mode(self, percentage: float, raw_value: int) -> None:
+        """
+        Handle segment mode with easing.
+
+        Applies easing function to transform the expression pedal value,
+        then sends the eased CC. Also handles segment switching for multi-stop mode.
+
+        Args:
+            percentage: Global position (0.0-1.0)
+            raw_value: Raw ADC value (0-1023)
+        """
+        # Determine current segment
+        new_segment = self.get_segment_from_cc(int(percentage * 127))
+
+        # Get segment boundaries
+        lower_stop = self.stops[new_segment]
+        upper_stop = self.stops[new_segment + 1]
+
+        # Calculate local percentage within current segment
+        segment_range = upper_stop.position - lower_stop.position
+        if segment_range > 0:
+            local_pct = (percentage - lower_stop.position) / segment_range
+            # Clamp to [0, 1]
+            local_pct = max(0.0, min(1.0, local_pct))
+        else:
+            local_pct = 0.0
+
+        # Apply easing to local percentage
+        eased_pct = self.easing_func(local_pct)
+
+        # Convert eased percentage back to global percentage within segment
+        eased_global_pct = lower_stop.position + (eased_pct * segment_range)
+
+        # Convert to CC value (0-127)
+        eased_cc_value = int(eased_global_pct * 127)
+        eased_cc_value = max(0, min(127, eased_cc_value))  # Clamp
+
+        # Send the eased CC value on the expression pedal's channel/CC
+        exp_channel = self.hijacked_control.midi_channel
+        exp_cc = self.hijacked_control.midi_CC
+        midi_msg = [exp_channel | CONTROL_CHANGE, exp_cc, eased_cc_value]
+        self.handler.hardware.midiout.send_message(midi_msg)
 
         # If segment changed, update MIDI mappings
         if new_segment != self.current_segment:
-            logging.debug(f"Segment change: {self.current_segment} -> {new_segment} (CC={cc_value})")
+            logging.debug(f"Segment change: {self.current_segment} -> {new_segment}")
             self.current_segment = new_segment
             self.apply_midi_mappings(new_segment)
 
-            # FUTURE: For smooth interpolation across ALL stops (not just current segment),
-            # consider using a weighted blend approach similar to Catmull-Rom splines or
-            # cubic Hermite interpolation. These guarantee passing through each stop point
-            # exactly while providing smooth transitions. The key insight is to use the
-            # global percentage across all stops, but weight the influence of each stop
-            # based on distance. This would replace the instant snap behavior with gradual
-            # crossfades between segments while maintaining exact stop positions.
+    def _handle_parameter_mode(self, percentage: float) -> None:
+        """
+        Handle parameter mode with full interpolation.
+
+        Computes interpolated state across all stops and sends virtual MIDI CCs
+        for each parameter.
+
+        Args:
+            percentage: Global position (0.0-1.0)
+        """
+        # Call interpolation function to get complete interpolated state
+        interpolated_state = self.interpolation_func(percentage, self.stops)
+
+        # Send virtual MIDI CC for each parameter
+        for instance_id, params in interpolated_state.items():
+            for symbol, value in params.items():
+                param_key = f"{instance_id}:{symbol}"
+
+                # Get virtual CC number for this parameter
+                cc_num = self.virtual_cc_mappings.get(param_key)
+                if cc_num is None:
+                    logging.warning(f"No virtual CC mapping for {param_key}, skipping")
+                    continue
+
+                # Scale parameter value (0.0-1.0) to MIDI CC value (0-127)
+                cc_value = int(value * 127)
+                cc_value = max(0, min(127, cc_value))  # Clamp
+
+                # Send virtual MIDI CC
+                self.send_virtual_midi_cc(cc_num, cc_value)
 
     def create_collage_snapshot(self, snapshots_data: SnapshotsJson) -> SnapshotData:
         """
