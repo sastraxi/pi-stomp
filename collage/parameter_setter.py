@@ -26,17 +26,15 @@ from modalapi.websocket_bridge import AsyncWebSocketBridge
 class ParameterSetter:
     """Sets plugin parameters via WebSocket (async, fire-and-forget)."""
 
-    def __init__(self, ws_url: str = 'ws://localhost:80/websocket') -> None:
+    def __init__(self, bridge: AsyncWebSocketBridge) -> None:
         """
-        Initialize parameter setter.
+        Initialize parameter setter with shared WebSocket bridge.
 
         Args:
-            ws_url: WebSocket URL for MOD API
+            bridge: Shared AsyncWebSocketBridge instance from handler
         """
-        self.ws_url = ws_url
-        self.bridge = AsyncWebSocketBridge(ws_url=ws_url, max_queue_size=100)
-        self.bridge.start()
-        logging.info(f"ParameterSetter initialized with WebSocket: {ws_url}")
+        self.bridge = bridge
+        logging.info("ParameterSetter initialized")
 
     def apply_segment_parameters(
         self,
@@ -150,7 +148,5 @@ class ParameterSetter:
         return self.bridge.get_stats()
 
     def cleanup(self) -> None:
-        """Clean up resources."""
-        logging.info("Cleaning up ParameterSetter...")
-        self.bridge.stop()
-        logging.info("ParameterSetter cleaned up")
+        """Clean up resources, if necessary."""
+        logging.info("ParameterSetter cleaned up (bridge remains active)")
