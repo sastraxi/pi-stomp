@@ -44,18 +44,12 @@ from modalapi.parameter import Type as ParameterType
 
 
 # Config TypedDicts
-class StopConfig(TypedDict):
-    """Configuration for a single collage stop."""
-    snapshot: int
-    position: NotRequired[float]
-
-
 class CollageConfig(TypedDict):
     """Complete collage mode configuration from YAML."""
     enabled: bool
     mode: NotRequired[Literal['segment', 'parameter']]
     expression_pedal_id: NotRequired[int]
-    stops: list[StopConfig]
+    snapshot_stops: dict[str, int | str]  # "position" -> snapshot (index or name)
     throttle_ms: NotRequired[int]
 
     # Segment mode options
@@ -314,25 +308,41 @@ class CollageMode:
             # Validate configuration and set mode-specific attributes
             self.validate_config()
 
-            # Get stop configurations
-            stop_configs = self.config.get('stops', [])
-            if len(stop_configs) < 2:
-                raise ValueError(f"Collage mode requires at least 2 stops, got {len(stop_configs)}")
+            # Get snapshot_stops configuration
+            snapshot_stops = self.config.get('snapshot_stops', {})
+            if len(snapshot_stops) < 2:
+                raise ValueError(f"Collage mode requires at least 2 stops, got {len(snapshot_stops)}")
 
             # Read snapshots file
             bundle_path = Path(self.handler.current.pedalboard.bundle)
             snapshots_data = self.read_snapshots_file(bundle_path)
 
-            # Parse snapshot states for each stop
-            for stop_config in stop_configs:
-                snapshot_index = stop_config.get('snapshot')
-                position = stop_config.get('position', None)
+            # Parse and validate snapshot_stops entries
+            stops_data: list[tuple[float, int]] = []  # [(position, snapshot_index), ...]
 
-                # Auto-calculate position if not specified (evenly distributed)
-                if position is None:
-                    position = stop_configs.index(stop_config) / (len(stop_configs) - 1)
+            for position_str, snapshot_identifier in snapshot_stops.items():
+                # Validate position is a stringified float
+                try:
+                    position = float(position_str)
+                except ValueError:
+                    raise ValueError(
+                        f"Invalid position key '{position_str}': must be a stringified float (e.g., '0.0', '0.5')"
+                    )
 
-                # Parse snapshot state
+                # Validate position is in range [0.0, 1.0]
+                if position < 0.0 or position > 1.0:
+                    raise ValueError(f"Position {position} out of range: must be between 0.0 and 1.0")
+
+                # Resolve snapshot identifier (index or name) to index
+                snapshot_index = self.resolve_snapshot_identifier(snapshots_data, snapshot_identifier)
+
+                stops_data.append((position, snapshot_index))
+
+            # Sort by position
+            stops_data.sort(key=lambda x: x[0])
+
+            # Create CollageStop objects
+            for position, snapshot_index in stops_data:
                 state = self.parse_snapshot_data(snapshots_data, snapshot_index)
                 stop = CollageStop(position, snapshot_index, state)
                 self.stops.append(stop)
@@ -421,6 +431,62 @@ class CollageMode:
             return data
         except json.JSONDecodeError as e:
             raise ValueError(f"Invalid JSON in snapshots.json: {e}")
+
+    def resolve_snapshot_identifier(self, snapshots_json: SnapshotsJson, identifier: int | str) -> int:
+        """
+        Resolve snapshot identifier (index or name) to index.
+
+        Supports:
+        - Integer index (0-based)
+        - String name with case-insensitive prefix matching
+
+        Args:
+            snapshots_json: Parsed snapshots.json dict
+            identifier: Snapshot index or name (or prefix)
+
+        Returns:
+            Snapshot index (0-based)
+
+        Raises:
+            ValueError: If identifier cannot be resolved
+        """
+        snapshots = snapshots_json.get('snapshots', [])
+
+        # If integer, validate and return
+        if isinstance(identifier, int):
+            if identifier < 0 or identifier >= len(snapshots):
+                raise ValueError(f"Snapshot index {identifier} out of range (0-{len(snapshots)-1})")
+            return identifier
+
+        # If string, do case-insensitive prefix match
+        identifier_lower = identifier.lower()
+        matches = []
+
+        for i, snapshot in enumerate(snapshots):
+            name = snapshot.get('name', '')
+            if name.lower().startswith(identifier_lower):
+                matches.append((i, name))
+
+        if len(matches) == 0:
+            # Show available snapshots for helpful error message
+            available = [f"{i}: {s.get('name', '')}" for i, s in enumerate(snapshots)]
+            raise ValueError(
+                f"No snapshot found matching '{identifier}'. "
+                f"Available: {', '.join(available)}"
+            )
+
+        if len(matches) > 1:
+            # Multiple matches - show them for disambiguation
+            match_list = [f"{i}: {name}" for i, name in matches]
+            raise ValueError(
+                f"Ambiguous snapshot name '{identifier}' matches multiple snapshots: "
+                f"{', '.join(match_list)}"
+            )
+
+        # Exactly one match
+        index, name = matches[0]
+        logging.debug(f"Resolved snapshot '{identifier}' to index {index} ('{name}')")
+        return index
 
     def parse_snapshot_data(self, snapshots_json: SnapshotsJson, snapshot_index: int) -> SnapshotStateDict:
         """
@@ -723,14 +789,14 @@ class CollageMode:
         percentage = raw_value / 1023.0  # ADC is 10-bit (0-1023)
 
         if self.mode == 'segment':
-            self._handle_segment_mode(percentage, raw_value)
+            self._handle_segment_mode(percentage)
         elif self.mode == 'parameter':
             self._handle_parameter_mode(percentage)
 
         # Update last_read to prevent duplicate sends
         self.hijacked_control.last_read = raw_value
 
-    def _handle_segment_mode(self, percentage: float, raw_value: int) -> None:
+    def _handle_segment_mode(self, percentage: float) -> None:
         """
         Handle segment mode with easing.
 
@@ -739,7 +805,6 @@ class CollageMode:
 
         Args:
             percentage: Global position (0.0-1.0)
-            raw_value: Raw ADC value (0-1023)
         """
         # Determine current segment
         new_segment = self.get_segment_from_cc(int(percentage * 127))
@@ -828,13 +893,22 @@ class CollageMode:
         Raises:
             ValueError: If < 2 stops configured
         """
-        stop_configs = self.config.get('stops', [])
-        if len(stop_configs) < 2:
-            raise ValueError(f"Need at least 2 stops, got {len(stop_configs)}")
+        snapshot_stops = self.config.get('snapshot_stops', {})
+        if len(snapshot_stops) < 2:
+            raise ValueError(f"Need at least 2 stops, got {len(snapshot_stops)}")
 
-        # Parse the two stop snapshots
-        first_stop_index = stop_configs[0]['snapshot']
-        second_stop_index = stop_configs[1]['snapshot']
+        # Get first two snapshot identifiers (sorted by position)
+        sorted_stops = sorted(snapshot_stops.items(), key=lambda x: float(x[0]))
+        first_identifier = sorted_stops[0][1]
+        second_identifier = sorted_stops[1][1]
+
+        # Read snapshots to resolve identifiers
+        bundle_path = Path(self.handler.current.pedalboard.bundle)
+        snapshots_data = self.read_snapshots_file(bundle_path)
+
+        # Resolve snapshot identifiers to indices
+        first_stop_index = self.resolve_snapshot_identifier(snapshots_data, first_identifier)
+        second_stop_index = self.resolve_snapshot_identifier(snapshots_data, second_identifier)
 
         state_a = self.parse_snapshot_data(snapshots_data, first_stop_index)
         state_b = self.parse_snapshot_data(snapshots_data, second_stop_index)
