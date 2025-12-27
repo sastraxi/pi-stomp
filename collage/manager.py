@@ -96,8 +96,8 @@ class CollageMode:
             # Load snapshots and create stops
             self.stops = self._create_stops()
 
-            # Initialize parameter setter (WebSocket-based, async)
-            self.parameter_setter = ParameterSetter()
+            # Initialize parameter setter (uses shared WebSocket bridge from handler)
+            self.parameter_setter = ParameterSetter(self.handler.ws_bridge)
 
             # Initialize mode-specific handler
             if self.mode == 'segment':
@@ -449,6 +449,12 @@ class CollageMode:
             return
 
         logging.info("Cleaning up collage mode...")
+
+        # Clear any pending parameter updates to prevent stale messages
+        if self.handler.ws_bridge:
+            cleared = self.handler.ws_bridge.clear_queue()
+            if cleared > 0:
+                logging.info(f"Cleared {cleared} pending websocket messages")
 
         # Detach from expression pedal
         if self.pedal_controller:

@@ -32,6 +32,7 @@ import modalapi.pedalboard as Pedalboard
 import modalapi.wifi as Wifi
 import modalapi.external_midi as ExternalMidi
 import pistomp.settings as Settings
+from modalapi.websocket_bridge import AsyncWebSocketBridge
 
 from pistomp.analogmidicontrol import AnalogMidiControl
 from pistomp.encodermidicontrol import EncoderMidiControl
@@ -100,6 +101,19 @@ class Modhandler(Handler):
         except Exception as e:
             logging.warning(f"Failed to initialize external MIDI manager: {e}")
 
+        # WebSocket bridge for MOD-UI communication
+        self.ws_bridge = None
+        try:
+            self.ws_bridge = AsyncWebSocketBridge(
+                ws_url='ws://localhost:80/websocket',
+                max_queue_size=100,
+                backpressure_threshold=8192  # 8 KB
+            )
+            self.ws_bridge.start()
+            logging.info("WebSocket bridge started")
+        except Exception as e:
+            logging.warning(f"Failed to initialize WebSocket bridge: {e}")
+
         # Callback function map.  Key is the user specified name, value is function from this handler
         # Used for calling handler callbacks pointed to by names which may be user set in the config file
         self.callbacks = {"set_mod_tap_tempo": self.set_mod_tap_tempo,
@@ -120,6 +134,8 @@ class Modhandler(Handler):
             del self.wifi_manager
         if self.external_midi is not None:
             self.external_midi.close()
+        if self.ws_bridge is not None:
+            self.ws_bridge.stop()
 
     def cleanup(self):
         if self.lcd is not None:
@@ -128,6 +144,9 @@ class Modhandler(Handler):
             self.hardware.cleanup()
         if self.external_midi is not None:
             self.external_midi.close()
+        if self.ws_bridge is not None:
+            self.ws_bridge.stop()
+            logging.info("WebSocket bridge stopped")
 
     # Container for dynamic data which is unique to the "current" pedalboard
     # The self.current pointed above will point to this object which gets

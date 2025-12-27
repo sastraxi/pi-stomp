@@ -42,15 +42,17 @@ class AsyncWebSocketBridge:
     no functional changes to timing).
     """
 
-    def __init__(self, ws_url: str = 'ws://localhost:80/websocket', max_queue_size: int = 100):
+    def __init__(self, ws_url: str = 'ws://localhost:80/websocket', max_queue_size: int = 100, backpressure_threshold: int = 8192):
         """
         Initialize WebSocket bridge.
 
         Args:
             ws_url: WebSocket URL to connect to
             max_queue_size: Maximum number of messages to queue (backpressure threshold)
+            backpressure_threshold: TCP write buffer size (bytes) to trigger backpressure warning (default: 8KB)
         """
         self.ws_url = ws_url
+        self.backpressure_threshold = backpressure_threshold
         self.command_queue: queue.Queue = queue.Queue(maxsize=max_queue_size)
         self.loop: Optional[asyncio.AbstractEventLoop] = None
         self.ws: Optional[websockets.WebSocketClientProtocol] = None
@@ -135,6 +137,30 @@ class AsyncWebSocketBridge:
 
         return stats
 
+    def clear_queue(self) -> int:
+        """
+        Clear all pending messages from the queue.
+
+        Useful when switching contexts (e.g., pedalboard changes) to prevent
+        stale parameter updates from being sent.
+
+        Returns:
+            Number of messages that were cleared
+        """
+        cleared_count = 0
+        try:
+            while True:
+                self.command_queue.get_nowait()
+                self.command_queue.task_done()
+                cleared_count += 1
+        except queue.Empty:
+            pass
+
+        if cleared_count > 0:
+            logging.debug(f"Cleared {cleared_count} pending messages from WebSocket queue")
+
+        return cleared_count
+
     # --- Background thread methods ---
 
     def _run_loop(self):
@@ -204,15 +230,15 @@ class AsyncWebSocketBridge:
                 buffer_size = self._get_write_buffer_size(ws)
 
                 # Log when crossing threshold in either direction
-                if buffer_size > 128 and not self.backpressure_active:
+                if buffer_size > self.backpressure_threshold and not self.backpressure_active:
                     # Rising edge - entering backpressure
                     self.backpressure_active = True
                     self.backpressure_events += 1
                     logging.warning(
                         f"WebSocket backpressure START: {buffer_size} bytes buffered, "
-                        f"queue={self.get_queue_depth()}"
+                        f"queue={self.get_queue_depth()}, threshold={self.backpressure_threshold}"
                     )
-                elif buffer_size <= 128 and self.backpressure_active:
+                elif buffer_size <= self.backpressure_threshold and self.backpressure_active:
                     # Falling edge - exiting backpressure
                     self.backpressure_active = False
                     logging.info(
