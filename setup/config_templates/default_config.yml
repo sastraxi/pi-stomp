@@ -79,3 +79,18 @@ hardware:
     - id: 3
       type: VOLUME
 
+# Collage Mode Configuration (Pedalboard-specific)
+# This feature interpolates between snapshots based on expression pedal position.
+# IMPORTANT: This should be configured per-pedalboard in <pedalboard>.pedalboard/config.yml
+# Requires an expression pedal to be configured in analog_controllers above.
+#
+# collage_mode:
+#   enabled: true                    # Enable collage mode for this pedalboard
+#   expression_pedal_id: 0           # Which expression pedal to use (matches id from analog_controllers)
+#                                    # Uses same MIDI channel as other hardware (channel: 14 above)
+#   stops:                           # Gradient stops defining the interpolation
+#     - snapshot: 0                  # First snapshot (at 0% pedal position)
+#       position: 0.0                # Optional: position in 0.0-1.0 range (defaults to evenly spaced)
+#     - snapshot: 1                  # Second snapshot (at 100% pedal position)
+#       position: 1.0
+#   throttle_ms: 50                  # Optional: minimum time between parameter updates (default: 50ms)
