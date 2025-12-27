@@ -177,6 +177,11 @@ class CollageMode:
         self.enabled: bool = False
         self.stops: list[CollageStop] = []
         self.mapped_parameters: list[tuple[int, str]] = []  # Track what we've mapped for cleanup
+        self.current_segment: int = 0  # Current segment index (multi-stop mode)
+
+        # Expression pedal hijacking (multi-stop mode only)
+        self.hijacked_control: Any = None  # AnalogMidiControl
+        self.original_refresh: Any = None  # Original refresh method
 
     def initialize(self) -> None:
         """
@@ -214,13 +219,33 @@ class CollageMode:
                 self.stops.append(stop)
                 logging.debug(f"Created {stop}")
 
-            # Validate we have 2 stops for initial implementation
-            if len(self.stops) != 2:
-                logging.warning(f"Multi-stop support not yet implemented, using first 2 stops only")
-                self.stops = self.stops[:2]
+            # Validate we have at least 2 stops
+            if len(self.stops) < 2:
+                raise ValueError(f"Need at least 2 stops, got {len(self.stops)}")
 
-            # Calculate parameter differences and apply MIDI mapping
+            # Limit to 4 stops for practical reasons
+            if len(self.stops) > 4:
+                logging.warning(f"Limiting to 4 stops (got {len(self.stops)})")
+                self.stops = self.stops[:4]
+
+            # Sort stops by position
+            self.stops.sort(key=lambda s: s.position)
+
+            # Validate stops are monotonic and non-equal
+            for i in range(len(self.stops) - 1):
+                if self.stops[i].position >= self.stops[i + 1].position:
+                    raise ValueError(
+                        f"Stop positions must be strictly increasing: "
+                        f"stop {i} at {self.stops[i].position}, stop {i+1} at {self.stops[i+1].position}"
+                    )
+
+            # Calculate parameter differences and apply initial MIDI mapping (first segment)
+            self.current_segment = 0
             self.apply_midi_mappings()
+
+            # Hijack expression pedal for segment monitoring (multi-stop only)
+            if len(self.stops) > 2:
+                self.hijack_expression_pedal()
 
             self.enabled = True
             logging.info(f"Collage mode initialized with {len(self.stops)} stops")
@@ -308,23 +333,28 @@ class CollageMode:
         """Convert snapshot key to instance_id by adding leading '/'."""
         return f"/{key}"
 
-    def apply_midi_mappings(self) -> None:
+    def apply_midi_mappings(self, segment_index: int | None = None) -> None:
         """
         Calculate parameter diffs and send midi_map commands to mod-host.
 
-        For 2-stop mode, maps all differing parameters to the expression pedal's
-        MIDI CC with min/max values from the two snapshots.
-        """
-        if len(self.stops) != 2:
-            raise NotImplementedError("Only 2-stop mode currently supported")
+        Maps parameters to expression pedal CC with min/max from current segment.
+        For multi-stop mode, this is called initially and whenever segment changes.
 
-        stop_a, stop_b = self.stops[0], self.stops[1]
+        Args:
+            segment_index: Segment to map (defaults to self.current_segment)
+        """
+        if segment_index is None:
+            segment_index = self.current_segment
+
+        # Get stops for this segment
+        stop_a = self.stops[segment_index]
+        stop_b = self.stops[segment_index + 1]
 
         # Get expression pedal config from hardware
         exp_pedal_id = self.config.get('expression_pedal_id', 0)
         exp_channel, exp_cc = self.get_expression_pedal_config(exp_pedal_id)
 
-        # Calculate parameter diffs
+        # Calculate parameter diffs for this segment
         diff_map = CollageStop.build_diff_map(
             stop_a.snapshot_state,
             stop_b.snapshot_state,
@@ -346,12 +376,16 @@ class CollageMode:
                 for symbol, (val_a, val_b, param_type) in params.items():
                     try:
                         sock.midi_map(instance_num, symbol, exp_channel, exp_cc, val_a, val_b)
-                        self.mapped_parameters.append((instance_num, symbol))
-                        logging.debug(f"Mapped {instance_id}/{symbol}: {val_a} -> {val_b}")
+
+                        # Only track on initial mapping (segment 0)
+                        if segment_index == 0 and (instance_num, symbol) not in self.mapped_parameters:
+                            self.mapped_parameters.append((instance_num, symbol))
+
+                        logging.debug(f"Mapped {instance_id}/{symbol}: {val_a} -> {val_b} (segment {segment_index})")
                     except Exception as e:
                         logging.warning(f"Failed to map {instance_id}/{symbol}: {e}")
 
-        logging.info(f"Applied {len(self.mapped_parameters)} MIDI mappings")
+        logging.info(f"Applied MIDI mappings for segment {segment_index} ({len(diff_map)} plugins)")
 
     def get_instance_number(self, instance_id: str) -> int | None:
         """
@@ -410,6 +444,80 @@ class CollageMode:
 
         # Default to DEFAULT type
         return ParameterType.DEFAULT
+
+    def get_segment_from_cc(self, cc_value: int) -> int:
+        """
+        Determine which segment the CC value falls into.
+
+        Segments change at exact stop positions. CC range is 0-127.
+
+        Args:
+            cc_value: MIDI CC value (0-127)
+
+        Returns:
+            Segment index (0 to len(stops)-2)
+        """
+        # Convert CC (0-127) to percentage (0.0-1.0)
+        percentage = cc_value / 127.0
+
+        # Find which segment this percentage falls into
+        for i in range(len(self.stops) - 1):
+            if percentage < self.stops[i + 1].position:
+                return i
+
+        # At or beyond last stop - use last segment
+        return len(self.stops) - 2
+
+    def hijack_expression_pedal(self) -> None:
+        """
+        Hijack expression pedal refresh() for segment monitoring (multi-stop mode).
+
+        Stores original refresh method and replaces it with hijacked_refresh.
+        """
+        exp_pedal_id = self.config.get('expression_pedal_id', 0)
+
+        # Find expression pedal control
+        for control in self.handler.hardware.analog_controls:
+            if hasattr(control, 'id') and control.id == exp_pedal_id:
+                self.hijacked_control = control
+                self.original_refresh = control.refresh
+                control.refresh = self.hijacked_refresh
+                logging.info(f"Hijacked expression pedal {exp_pedal_id} for multi-stop segment monitoring")
+                return
+
+        raise ValueError(f"Expression pedal {exp_pedal_id} not found for hijacking")
+
+    def hijacked_refresh(self) -> None:
+        """
+        Replacement for AnalogMidiControl.refresh() - monitors segment changes.
+
+        Calls original refresh (sends MIDI CC normally), then checks if segment
+        changed and updates MIDI mappings if needed.
+        """
+        # Call original refresh - this sends MIDI CC normally
+        self.original_refresh()
+
+        # Get current CC value from the control
+        cc_value = self.hijacked_control.last_read
+        if cc_value is None:
+            return
+
+        # Determine which segment we're in
+        new_segment = self.get_segment_from_cc(cc_value)
+
+        # If segment changed, update MIDI mappings
+        if new_segment != self.current_segment:
+            logging.debug(f"Segment change: {self.current_segment} -> {new_segment} (CC={cc_value})")
+            self.current_segment = new_segment
+            self.apply_midi_mappings(new_segment)
+
+            # FUTURE: For smooth interpolation across ALL stops (not just current segment),
+            # consider using a weighted blend approach similar to Catmull-Rom splines or
+            # cubic Hermite interpolation. These guarantee passing through each stop point
+            # exactly while providing smooth transitions. The key insight is to use the
+            # global percentage across all stops, but weight the influence of each stop
+            # based on distance. This would replace the instant snap behavior with gradual
+            # crossfades between segments while maintaining exact stop positions.
 
     def create_collage_snapshot(self, snapshots_data: SnapshotsJson) -> SnapshotData:
         """
@@ -548,6 +656,7 @@ class CollageMode:
     def cleanup(self) -> None:
         """
         Clean up collage mode:
+        - Restore hijacked expression pedal
         - Unmap all MIDI mappings
         - Reset state
         """
@@ -556,6 +665,12 @@ class CollageMode:
 
         logging.info("Cleaning up collage mode...")
 
+        # Restore hijacked expression pedal (multi-stop mode)
+        if hasattr(self, 'hijacked_control') and hasattr(self, 'original_refresh'):
+            self.hijacked_control.refresh = self.original_refresh
+            logging.debug("Restored expression pedal refresh method")
+
+        # Unmap MIDI mappings
         try:
             with ModHostSocket() as sock:
                 for instance_num, symbol in self.mapped_parameters:
