@@ -13,46 +13,48 @@
 # You should have received a copy of the GNU General Public License
 # along with pi-stomp.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Main CollageMode coordinator class."""
+"""Main CollageMode coordinator class with pre-computation optimization."""
 
 import json
 import logging
 import requests as req
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
-from collage.easing import (
-    linear_easing,
-    ease_in_quad,
-    ease_out_quad,
-    ease_in_out_quad,
-    ease_in_cubic,
-    ease_out_cubic,
-    ease_in_out_cubic,
-    exponential_easing,
-    sine_easing,
-)
 from collage.interpolation import (
+    # Complex interpolation
     linear_interpolation,
     hermite_interpolation,
     catmull_rom_interpolation,
+    # Easing-based interpolation
+    ease_in_quad_interpolation,
+    ease_out_quad_interpolation,
+    ease_in_out_quad_interpolation,
+    ease_in_cubic_interpolation,
+    ease_out_cubic_interpolation,
+    ease_in_out_cubic_interpolation,
+    exponential_easing_interpolation,
+    sine_easing_interpolation,
 )
-from collage.parameter_mode import ParameterMode
 from collage.parameter_setter import ParameterSetter
 from collage.pedal_controller import PedalController
-from collage.segment_mode import SegmentMode
 from collage.snapshot import SnapshotManager
 from collage.stop import CollageStop
 from collage.types import (
     CollageConfig,
-    EasingFunc,
+    EnrichedDiffMap,
     InterpolationFunc,
 )
 from modalapi.parameter import Type as ParameterType
 
 
 class CollageMode:
-    """Coordinates collage mode components and manages lifecycle."""
+    """
+    Coordinates collage mode components with pre-computation optimization.
+
+    Pre-computes enriched diff maps for each segment at initialization to
+    minimize work in the critical path (10ms polling loop).
+    """
 
     def __init__(self, handler: Any, config: CollageConfig) -> None:
         """
@@ -66,119 +68,134 @@ class CollageMode:
         self.config: CollageConfig = config
         self.enabled: bool = False
         self.stops: list[CollageStop] = []
-
-        # Mode selection
-        self.mode: Literal['segment', 'parameter'] = 'segment'  # Default to segment mode
+        self.segment_diff_maps: list[EnrichedDiffMap] = []
 
         # Components (initialized in initialize())
         self.parameter_setter: ParameterSetter | None = None
-        self.mode_handler: SegmentMode | ParameterMode | None = None
         self.pedal_controller: PedalController | None = None
 
     def initialize(self) -> None:
         """
-        Initialize collage mode.
+        Initialize collage mode with pre-computation optimization.
 
-        Orchestrates initialization of all components:
-        1. Validate config and parse mode-specific settings
+        Pre-computes enriched diff maps for each segment at initialization
+        to minimize work in the critical path (pedal movement).
+
+        Orchestrates initialization:
+        1. Validate config and resolve interpolation function
         2. Load and parse snapshots
         3. Create stops
-        4. Initialize MIDI mapper
-        5. Initialize mode handler (segment or parameter)
-        6. Initialize and hijack pedal controller
+        4. PRE-COMPUTE: Build enriched diff maps for each segment
+        5. Initialize parameter setter
+        6. Initialize and attach pedal controller
         """
         logging.info("Initializing collage mode...")
 
         try:
-            # Validate configuration
-            self.mode, easing_func, interp_func, virtual_channel = self._validate_config()
+            # Validate configuration and resolve interpolation function
+            interpolation_func = self._validate_config()
 
             # Load snapshots and create stops
             self.stops = self._create_stops()
 
+            # PRE-COMPUTE: Build enriched diff maps for each segment
+            logging.info(f"Pre-computing diff maps for {len(self.stops) - 1} segments...")
+            self.segment_diff_maps = []
+
+            for segment_idx in range(len(self.stops) - 1):
+                lower = self.stops[segment_idx]
+                upper = self.stops[segment_idx + 1]
+
+                # Build enriched diff map with neighbor data
+                diff_map = CollageStop.build_enriched_diff_map(
+                    lower,
+                    upper,
+                    self.stops,
+                    segment_idx,
+                    self._get_parameter_type,
+                )
+
+                self.segment_diff_maps.append(diff_map)
+
+                # Log summary
+                param_count = sum(len(params) for params in diff_map.values())
+                logging.debug(
+                    f"  Segment {segment_idx} ({lower.position:.2f} -> {upper.position:.2f}): "
+                    f"{param_count} differing parameters"
+                )
+
+            logging.info("Diff map pre-computation complete")
+
             # Initialize parameter setter (uses shared WebSocket bridge from handler)
             self.parameter_setter = ParameterSetter(self.handler.ws_bridge)
 
-            # Initialize mode-specific handler
-            if self.mode == 'segment':
-                self._initialize_segment_mode(easing_func)
-            elif self.mode == 'parameter':
-                self._initialize_parameter_mode(interp_func, virtual_channel)
+            # Initialize and attach pedal controller
+            exp_pedal_id = self.config.get('expression_pedal_id', 0)
 
-            # Initialize and hijack pedal controller
-            self._initialize_pedal_controller()
+            self.pedal_controller = PedalController(
+                interpolation_func,
+                self.stops,
+                self.segment_diff_maps,  # Pre-computed!
+                self.parameter_setter,
+            )
+
+            # Attach to expression pedal
+            self.pedal_controller.attach_to_pedal(
+                self.handler.hardware.analog_controls,
+                exp_pedal_id
+            )
 
             self.enabled = True
-            logging.info(f"Collage mode initialized with {len(self.stops)} stops in {self.mode} mode")
+            logging.info(f"Collage mode initialized with {len(self.stops)} stops")
 
         except Exception as e:
             logging.error(f"Failed to initialize collage mode: {e}")
             self.enabled = False
             raise
 
-    def _validate_config(self) -> tuple[Literal['segment', 'parameter'], EasingFunc, InterpolationFunc, int]:
+    def _validate_config(self) -> InterpolationFunc:
         """
-        Validate config and extract mode-specific settings.
+        Validate config and resolve interpolation function.
+
+        Supports both complex interpolation (linear, hermite, catmull_rom)
+        and easing-based interpolation (ease_in_quad, etc.).
 
         Returns:
-            Tuple of (mode, easing_func, interp_func, virtual_channel)
+            Per-parameter interpolation function
 
         Raises:
             ValueError: If config is invalid
         """
-        # Easing function name -> function mapping
-        easing_funcs: dict[str, EasingFunc] = {
-            'linear': linear_easing,
-            'ease_in_quad': ease_in_quad,
-            'ease_out_quad': ease_out_quad,
-            'ease_in_out_quad': ease_in_out_quad,
-            'ease_in_cubic': ease_in_cubic,
-            'ease_out_cubic': ease_out_cubic,
-            'ease_in_out_cubic': ease_in_out_cubic,
-            'exponential': exponential_easing,
-            'sine': sine_easing,
-        }
-
-        # Interpolation function name -> function mapping
-        interp_funcs: dict[str, InterpolationFunc] = {
+        # Single mapping of all interpolation function names
+        INTERPOLATION_FUNCTIONS: dict[str, InterpolationFunc] = {
+            # Complex interpolation
             'linear': linear_interpolation,
             'hermite': hermite_interpolation,
             'catmull_rom': catmull_rom_interpolation,
+
+            # Easing-based interpolation
+            'ease_in_quad': ease_in_quad_interpolation,
+            'ease_out_quad': ease_out_quad_interpolation,
+            'ease_in_out_quad': ease_in_out_quad_interpolation,
+            'ease_in_cubic': ease_in_cubic_interpolation,
+            'ease_out_cubic': ease_out_cubic_interpolation,
+            'ease_in_out_cubic': ease_in_out_cubic_interpolation,
+            'exponential': exponential_easing_interpolation,
+            'sine': sine_easing_interpolation,
         }
 
-        # Parse mode (defaults to 'segment')
-        mode_str = self.config.get('mode', 'segment')
-        if mode_str not in ('segment', 'parameter'):
-            raise ValueError(f"Invalid mode '{mode_str}', must be 'segment' or 'parameter'")
-        mode = mode_str  # type: ignore
-
-        # Parse easing function (segment mode)
-        easing_name = self.config.get('easing', 'linear')
-        if easing_name not in easing_funcs:
-            raise ValueError(
-                f"Invalid easing function '{easing_name}', "
-                f"must be one of: {', '.join(easing_funcs.keys())}"
-            )
-        easing_func = easing_funcs[easing_name]
-
-        # Parse interpolation function (parameter mode)
+        # Parse interpolation function name
         interp_name = self.config.get('interpolation', 'linear')
-        if interp_name not in interp_funcs:
-            raise ValueError(
-                f"Invalid interpolation function '{interp_name}', "
-                f"must be one of: {', '.join(interp_funcs.keys())}"
-            )
-        interp_func = interp_funcs[interp_name]
+        interpolation_func = INTERPOLATION_FUNCTIONS.get(interp_name)
 
-        # Parse virtual MIDI channel (parameter mode)
-        virtual_channel = self.config.get('virtual_midi_channel', 15)
-        if not isinstance(virtual_channel, int) or virtual_channel < 0 or virtual_channel > 15:
+        if not interpolation_func:
             raise ValueError(
-                f"Invalid virtual_midi_channel {virtual_channel}, must be integer 0-15"
+                f"Invalid interpolation '{interp_name}', "
+                f"must be one of: {', '.join(INTERPOLATION_FUNCTIONS.keys())}"
             )
 
-        logging.debug(f"Config validated: mode={mode}, easing={easing_name}, interp={interp_name}")
-        return mode, easing_func, interp_func, virtual_channel
+        logging.debug(f"Config validated: interpolation={interp_name}")
+        return interpolation_func
 
     def _create_stops(self) -> list[CollageStop]:
         """
@@ -236,6 +253,7 @@ class CollageMode:
             raise ValueError(f"Need at least 2 stops, got {len(stops)}")
 
         # Limit to 4 stops for practical reasons
+        # (hermite/catmull-rom look 2 stops back/forward for context)
         if len(stops) > 4:
             logging.warning(f"Limiting to 4 stops (got {len(stops)})")
             stops = stops[:4]
@@ -266,86 +284,6 @@ class CollageMode:
                 )
 
         return stops
-
-    def _initialize_segment_mode(self, easing_func: EasingFunc) -> None:
-        """Initialize segment mode with direct parameter setting."""
-        assert self.parameter_setter is not None
-
-        # Create segment mode handler (no MIDI mapping needed)
-        self.mode_handler = SegmentMode(
-            self.stops,
-            easing_func,
-            self.parameter_setter,
-            self._get_parameter_type,
-            self._get_instance_number
-        )
-
-        logging.info("Segment mode initialized with direct parameter setting")
-
-    def _initialize_parameter_mode(self, interp_func: InterpolationFunc, virtual_channel: int) -> None:
-        """Initialize parameter mode with interpolation."""
-        assert self.parameter_setter is not None
-
-        # Create parameter mode handler (uses direct parameter setting)
-        self.mode_handler = ParameterMode(
-            self.stops,
-            interp_func,
-            self.parameter_setter,
-            self._get_parameter_type,
-            self._get_instance_number
-        )
-
-        logging.info("Parameter mode initialized with direct parameter setting")
-
-    def _initialize_pedal_controller(self) -> None:
-        """Initialize pedal controller and attach to expression pedal."""
-        assert self.mode_handler is not None
-
-        exp_pedal_id = self.config.get('expression_pedal_id', 0)
-        midiout = self.handler.hardware.midiout
-
-        # Create pedal controller
-        self.pedal_controller = PedalController(self.mode, self.mode_handler, midiout)
-
-        # Attach to expression pedal
-        self.pedal_controller.attach_to_pedal(self.handler.hardware.analog_controls, exp_pedal_id)
-
-    def _get_expression_pedal_config(self, pedal_id: int) -> tuple[int, int]:
-        """
-        Get MIDI channel and CC number for an expression pedal.
-
-        Args:
-            pedal_id: Expression pedal ID from config
-
-        Returns:
-            Tuple of (midi_channel, midi_cc)
-
-        Raises:
-            ValueError: If expression pedal not found
-        """
-        # Search analog controls for matching ID
-        for control in self.handler.hardware.analog_controls:
-            if hasattr(control, 'id') and control.id == pedal_id:
-                return (control.midi_channel, control.midi_CC)
-
-        raise ValueError(f"Expression pedal with ID {pedal_id} not found in hardware config")
-
-    def _get_instance_number(self, instance_id: str) -> int | None:
-        """
-        Get mod-host instance number for a plugin.
-
-        The instance number is the index in the pedalboard's plugins list.
-
-        Args:
-            instance_id: Plugin instance ID (e.g., "/BigMuffPi")
-
-        Returns:
-            Instance number (0-based index) or None if not found
-        """
-        for index, plugin in enumerate(self.handler.current.pedalboard.plugins):
-            if plugin.instance_id == instance_id:
-                return index
-        return None
 
     def _get_parameter_type(self, instance_id: str, symbol: str) -> ParameterType:
         """
@@ -442,6 +380,7 @@ class CollageMode:
         """
         Clean up collage mode:
         - Detach from expression pedal
+        - Reset tracking state
         - Close parameter setter
         - Reset state
         """
@@ -456,15 +395,18 @@ class CollageMode:
             if cleared > 0:
                 logging.info(f"Cleared {cleared} pending websocket messages")
 
-        # Detach from expression pedal
+        # Detach from expression pedal and reset tracking
         if self.pedal_controller:
             self.pedal_controller.detach_from_pedal()
+            self.pedal_controller.reset_tracking()  # Reset segment cache
 
-        # Clean up parameter setter
+        # Clean up parameter setter and reset MIDI tracking
         if self.parameter_setter:
+            self.parameter_setter.reset_tracking()  # Clear MIDI de-dupe tracking
             self.parameter_setter.cleanup()
 
         # Reset state
         self.stops = []
+        self.segment_diff_maps = []
         self.enabled = False
         logging.info("Collage mode cleaned up")

@@ -13,171 +13,113 @@
 # You should have received a copy of the GNU General Public License
 # along with pi-stomp.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Interpolation functions for collage mode parameter interpolation."""
+"""Per-parameter interpolation functions for collage mode."""
 
-from typing import TYPE_CHECKING
-
-from collage.types import SnapshotStateDict
-
-if TYPE_CHECKING:
-    from collage.stop import CollageStop
+from collage.easing import (
+    ease_in_cubic,
+    ease_in_out_cubic,
+    ease_in_out_quad,
+    ease_in_quad,
+    ease_out_cubic,
+    ease_out_quad,
+    exponential_easing,
+    sine_easing,
+)
+from collage.types import EasingFunc, InterpolationFunc, ParamData
 
 
 # Interpolation Function Framework
 # ==================================
-# Interpolation functions compute parameter values across ALL stops simultaneously,
-# providing smooth transitions while guaranteeing exact values at stop positions.
+# Per-parameter interpolation functions transform a single parameter value.
+# They operate on pre-computed ParamData which includes neighbor values for
+# hermite/catmull-rom interpolation.
 #
-# Type signature: (percentage, stops) -> interpolated_state
-# - percentage: 0.0-1.0, global position across all stops
-# - stops: List[CollageStop], sorted by position
-# - Returns: SnapshotStateDict with interpolated parameter values
+# Type signature: (local_pct, param_data) -> interpolated_value
+# - local_pct: 0.0-1.0, position within current segment
+# - param_data: ParamData with val_a, val_b, neighbors, segment_range
+# - Returns: float, interpolated value [0.0-1.0]
 
 
-def linear_interpolation(percentage: float, stops: list['CollageStop']) -> SnapshotStateDict:
+def linear_interpolation(local_pct: float, param_data: ParamData) -> float:
     """
-    Piecewise linear interpolation between stops.
+    Simple linear interpolation between two values.
 
-    Finds bracketing stops and linearly interpolates within the segment.
-    Simple and predictable - parameters change at constant rate between stops.
+    Parameters change at constant rate between stops.
+    No neighbor values needed.
 
     Args:
-        percentage: Global position (0.0-1.0)
-        stops: List of CollageStop, sorted by position
+        local_pct: Position within segment [0.0, 1.0]
+        param_data: Pre-computed parameter data
 
     Returns:
-        Interpolated parameter state
+        Interpolated value [0.0, 1.0]
     """
-    # Handle edge cases
-    if percentage <= stops[0].position:
-        return stops[0].snapshot_state
-    if percentage >= stops[-1].position:
-        return stops[-1].snapshot_state
-
-    # Find bracketing stops
-    for i in range(len(stops) - 1):
-        if stops[i].position <= percentage < stops[i + 1].position:
-            lower, upper = stops[i], stops[i + 1]
-
-            # Calculate local percentage within this segment
-            segment_range = upper.position - lower.position
-            local_pct = (percentage - lower.position) / segment_range
-
-            # Interpolate all parameters
-            result: SnapshotStateDict = {}
-            for instance_id in set(lower.snapshot_state.keys()) | set(upper.snapshot_state.keys()):
-                result[instance_id] = {}
-                lower_params = lower.snapshot_state.get(instance_id, {})
-                upper_params = upper.snapshot_state.get(instance_id, {})
-
-                for symbol in set(lower_params.keys()) | set(upper_params.keys()):
-                    val_lower = lower_params.get(symbol, 0.0)
-                    val_upper = upper_params.get(symbol, 0.0)
-
-                    # Linear interpolation
-                    result[instance_id][symbol] = val_lower + (val_upper - val_lower) * local_pct
-
-            return result
-
-    # Fallback (should never reach)
-    return stops[-1].snapshot_state
+    return param_data.val_a + (param_data.val_b - param_data.val_a) * local_pct
 
 
-def hermite_interpolation(percentage: float, stops: list['CollageStop']) -> SnapshotStateDict:
+def hermite_interpolation(local_pct: float, param_data: ParamData) -> float:
     """
     Cubic Hermite interpolation with automatic tangent calculation.
 
-    Uses finite differences to estimate tangents at each stop, providing smooth
-    C1-continuous curves (continuous first derivative). Guarantees passing through
-    each stop point exactly while smoothing transitions between segments.
+    Uses pre-computed neighbor values for smooth C1-continuous curves
+    (continuous first derivative). Guarantees passing through each
+    stop point exactly while smoothing transitions between segments.
 
-    Tangents are calculated using centered differences (Catmull-Rom style):
-    - tangent[i] = (stops[i+1].value - stops[i-1].value) / (stops[i+1].pos - stops[i-1].pos)
-    - At endpoints, use one-sided differences
+    Tangents calculated using centered differences:
+    - m0 = (val_b - prev_val) / (2 * segment_range)
+    - m1 = (next_val - val_a) / (2 * segment_range)
+    At endpoints, uses one-sided differences.
 
     Args:
-        percentage: Global position (0.0-1.0)
-        stops: List of CollageStop, sorted by position
+        local_pct: Position within segment [0.0, 1.0]
+        param_data: Pre-computed parameter data with neighbor values
 
     Returns:
-        Interpolated parameter state
+        Interpolated value [0.0, 1.0]
 
-    Math: H(t) = (2t³ - 3t² + 1)p₀ + (t³ - 2t² + t)m₀ + (-2t³ + 3t²)p₁ + (t³ - t²)m₁
-    where t ∈ [0,1], p = position values, m = tangent values
+    Math: H(t) = h00*p0 + h10*m0*range + h01*p1 + h11*m1*range
+    where h = Hermite basis functions, p = positions, m = tangents
     """
-    # Handle edge cases
-    if percentage <= stops[0].position:
-        return stops[0].snapshot_state
-    if percentage >= stops[-1].position:
-        return stops[-1].snapshot_state
+    t = local_pct
+    p0, p1 = param_data.val_a, param_data.val_b
 
-    # Find bracketing stops
-    for i in range(len(stops) - 1):
-        if stops[i].position <= percentage < stops[i + 1].position:
-            lower, upper = stops[i], stops[i + 1]
+    # Calculate tangents using neighbor values
+    if param_data.prev_val is not None:
+        # Centered difference: tangent considers both neighbors
+        m0 = (p1 - param_data.prev_val) / (2 * param_data.segment_range)
+    else:
+        # First segment: forward difference
+        m0 = (p1 - p0) / param_data.segment_range
 
-            # Calculate normalized t in [0, 1] for this segment
-            segment_range = upper.position - lower.position
-            t = (percentage - lower.position) / segment_range
+    if param_data.next_val is not None:
+        # Centered difference
+        m1 = (param_data.next_val - p0) / (2 * param_data.segment_range)
+    else:
+        # Last segment: backward difference
+        m1 = (p1 - p0) / param_data.segment_range
 
-            # Hermite basis functions
-            h00 = 2*t**3 - 3*t**2 + 1  # p0 coefficient
-            h10 = t**3 - 2*t**2 + t     # m0 coefficient
-            h01 = -2*t**3 + 3*t**2      # p1 coefficient
-            h11 = t**3 - t**2           # m1 coefficient
+    # Hermite basis functions
+    h00 = 2*t**3 - 3*t**2 + 1  # p0 coefficient
+    h10 = t**3 - 2*t**2 + t     # m0 coefficient
+    h01 = -2*t**3 + 3*t**2      # p1 coefficient
+    h11 = t**3 - t**2           # m1 coefficient
 
-            # Interpolate all parameters
-            result: SnapshotStateDict = {}
-            for instance_id in set(lower.snapshot_state.keys()) | set(upper.snapshot_state.keys()):
-                result[instance_id] = {}
-                lower_params = lower.snapshot_state.get(instance_id, {})
-                upper_params = upper.snapshot_state.get(instance_id, {})
+    # Apply Hermite formula
+    value = h00 * p0 + h10 * m0 * param_data.segment_range + h01 * p1 + h11 * m1 * param_data.segment_range
 
-                for symbol in set(lower_params.keys()) | set(upper_params.keys()):
-                    p0 = lower_params.get(symbol, 0.0)
-                    p1 = upper_params.get(symbol, 0.0)
-
-                    # Calculate tangents using finite differences
-                    # m0: tangent at lower stop
-                    if i == 0:
-                        # First stop: forward difference
-                        m0 = (p1 - p0) / segment_range
-                    else:
-                        # Centered difference
-                        prev_val = stops[i-1].snapshot_state.get(instance_id, {}).get(symbol, 0.0)
-                        prev_pos = stops[i-1].position
-                        m0 = (p1 - prev_val) / (upper.position - prev_pos)
-
-                    # m1: tangent at upper stop
-                    if i + 1 == len(stops) - 1:
-                        # Last stop: backward difference
-                        m1 = (p1 - p0) / segment_range
-                    else:
-                        # Centered difference
-                        next_val = stops[i+2].snapshot_state.get(instance_id, {}).get(symbol, 0.0)
-                        next_pos = stops[i+2].position
-                        m1 = (next_val - p0) / (next_pos - lower.position)
-
-                    # Apply Hermite interpolation
-                    value = h00 * p0 + h10 * m0 * segment_range + h01 * p1 + h11 * m1 * segment_range
-                    result[instance_id][symbol] = value
-
-            return result
-
-    # Fallback
-    return stops[-1].snapshot_state
+    return value
 
 
-def catmull_rom_interpolation(percentage: float, stops: list['CollageStop']) -> SnapshotStateDict:
+def catmull_rom_interpolation(local_pct: float, param_data: ParamData) -> float:
     """
-    Catmull-Rom spline interpolation for smooth curves through all stops.
+    Catmull-Rom spline interpolation using pre-computed neighbors.
 
-    A special case of cubic Hermite where tangents are automatically calculated
-    as: m[i] = (p[i+1] - p[i-1]) / 2
+    A special case of cubic Hermite with automatic tangent calculation:
+    m[i] = (p[i+1] - p[i-1]) / 2
 
-    Provides C1-continuous curves with local control - each segment only depends
-    on 4 points (2 bracketing + 2 neighbors). Guarantees passing through each
-    stop exactly while providing smoother transitions than linear.
+    Provides C1-continuous curves with local control. Each segment only
+    depends on 4 points (2 bracketing + 2 neighbors). Guarantees passing
+    through each stop exactly.
 
     Characteristics:
     - Passes through all control points exactly
@@ -186,66 +128,89 @@ def catmull_rom_interpolation(percentage: float, stops: list['CollageStop']) -> 
     - Tension = 0.5 (standard Catmull-Rom)
 
     Args:
-        percentage: Global position (0.0-1.0)
-        stops: List of CollageStop, sorted by position
+        local_pct: Position within segment [0.0, 1.0]
+        param_data: Pre-computed parameter data with neighbor values
 
     Returns:
-        Interpolated parameter state
+        Interpolated value [0.0, 1.0]
 
     Math: CR(t) = 0.5 * [(2p₁) + (-p₀+p₂)t + (2p₀-5p₁+4p₂-p₃)t² + (-p₀+3p₁-3p₂+p₃)t³]
-    where t ∈ [0,1], p₀...p₃ are the 4 control points
+    where p₀...p₃ are the 4 control points
     """
-    # Handle edge cases
-    if percentage <= stops[0].position:
-        return stops[0].snapshot_state
-    if percentage >= stops[-1].position:
-        return stops[-1].snapshot_state
+    t = local_pct
+    t2, t3 = t * t, t * t * t
 
-    # Find bracketing stops
-    for i in range(len(stops) - 1):
-        if stops[i].position <= percentage < stops[i + 1].position:
-            lower, upper = stops[i], stops[i + 1]
+    p1, p2 = param_data.val_a, param_data.val_b
 
-            # Calculate normalized t in [0, 1] for this segment
-            segment_range = upper.position - lower.position
-            t = (percentage - lower.position) / segment_range
-            t2 = t * t
-            t3 = t2 * t
+    # Use neighbors or extrapolate at boundaries
+    p0 = param_data.prev_val if param_data.prev_val is not None else 2*p1 - p2
+    p3 = param_data.next_val if param_data.next_val is not None else 2*p2 - p1
 
-            # Interpolate all parameters
-            result: SnapshotStateDict = {}
-            for instance_id in set(lower.snapshot_state.keys()) | set(upper.snapshot_state.keys()):
-                result[instance_id] = {}
-                lower_params = lower.snapshot_state.get(instance_id, {})
-                upper_params = upper.snapshot_state.get(instance_id, {})
+    # Catmull-Rom formula
+    value = 0.5 * (
+        (2 * p1) +
+        (-p0 + p2) * t +
+        (2*p0 - 5*p1 + 4*p2 - p3) * t2 +
+        (-p0 + 3*p1 - 3*p2 + p3) * t3
+    )
 
-                for symbol in set(lower_params.keys()) | set(upper_params.keys()):
-                    # Get 4 control points (p0, p1, p2, p3)
-                    p1 = lower_params.get(symbol, 0.0)  # Current lower stop
-                    p2 = upper_params.get(symbol, 0.0)  # Current upper stop
+    return value
 
-                    # p0: previous stop (or extrapolate if at start)
-                    if i == 0:
-                        p0 = 2*p1 - p2  # Extrapolate backward
-                    else:
-                        p0 = stops[i-1].snapshot_state.get(instance_id, {}).get(symbol, 0.0)
 
-                    # p3: next stop (or extrapolate if at end)
-                    if i + 1 == len(stops) - 1:
-                        p3 = 2*p2 - p1  # Extrapolate forward
-                    else:
-                        p3 = stops[i+2].snapshot_state.get(instance_id, {}).get(symbol, 0.0)
+# Easing-Based Interpolation Functions
+# ======================================
+# Easing functions transform the local percentage before linear interpolation.
+# They only use val_a and val_b from param_data (no neighbor values needed).
 
-                    # Catmull-Rom formula
-                    value = 0.5 * (
-                        (2 * p1) +
-                        (-p0 + p2) * t +
-                        (2*p0 - 5*p1 + 4*p2 - p3) * t2 +
-                        (-p0 + 3*p1 - 3*p2 + p3) * t3
-                    )
-                    result[instance_id][symbol] = value
 
-            return result
+def create_easing_interpolation(easing_func: EasingFunc) -> InterpolationFunc:
+    """
+    Convert an easing function to an interpolation function.
 
-    # Fallback
-    return stops[-1].snapshot_state
+    Applies easing transform to local percentage, then does linear interpolation.
+    Easing functions only look at the two bracketing stops (no neighbors).
+
+    Args:
+        easing_func: Easing function (t: float) -> float
+
+    Returns:
+        Interpolation function (local_pct, param_data) -> float
+    """
+    def interpolation(local_pct: float, param_data: ParamData) -> float:
+        # Apply easing transform
+        eased = easing_func(local_pct)
+        # Linear interpolation with eased percentage
+        return param_data.val_a + (param_data.val_b - param_data.val_a) * eased
+
+    return interpolation
+
+
+# Create easing-based interpolation functions programmatically
+ease_in_quad_interpolation = create_easing_interpolation(ease_in_quad)
+ease_out_quad_interpolation = create_easing_interpolation(ease_out_quad)
+ease_in_out_quad_interpolation = create_easing_interpolation(ease_in_out_quad)
+ease_in_cubic_interpolation = create_easing_interpolation(ease_in_cubic)
+ease_out_cubic_interpolation = create_easing_interpolation(ease_out_cubic)
+ease_in_out_cubic_interpolation = create_easing_interpolation(ease_in_out_cubic)
+exponential_easing_interpolation = create_easing_interpolation(exponential_easing)
+sine_easing_interpolation = create_easing_interpolation(sine_easing)
+
+
+# Export all interpolation functions for easy import
+__all__ = [
+    # Complex interpolation
+    'linear_interpolation',
+    'hermite_interpolation',
+    'catmull_rom_interpolation',
+    # Easing-based interpolation
+    'ease_in_quad_interpolation',
+    'ease_out_quad_interpolation',
+    'ease_in_out_quad_interpolation',
+    'ease_in_cubic_interpolation',
+    'ease_out_cubic_interpolation',
+    'ease_in_out_cubic_interpolation',
+    'exponential_easing_interpolation',
+    'sine_easing_interpolation',
+    # Helper
+    'create_easing_interpolation',
+]

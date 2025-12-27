@@ -431,20 +431,12 @@ Expression pedal-driven snapshot interpolation.
 
 **Snapshot Activation**: Auto-switches to "Collage Mode" snapshot on pedalboard load. Switching to other snapshots deactivates; switching back reactivates.
 
-### Modes
-
-**Segment** - Piecewise interpolation with easing. MIDI mapped per-segment.
-- Config: `mode: segment`, `easing: linear|ease_in_quad|ease_out_quad|...`
-
-**Parameter** - Full interpolation across all stops. Virtual MIDI CCs.
-- Config: `mode: parameter`, `interpolation: linear|hermite|catmull_rom`
-
 ### Config
 
 ```yaml
 collage_mode:
   enabled: true
-  mode: segment
+  interpolation: linear  # linear, hermite, catmull_rom, ease_in_quad, ease_out_quad, etc.
   expression_pedal_id: 0
   snapshot_stops:
     "0.0": "Clean"
@@ -452,12 +444,14 @@ collage_mode:
     "1.0": "Lead"
 ```
 
-Position keys: stringified floats [0.0-1.0], min separation 1/127.
-Snapshot values: index (int) or name (str, prefix match, case-insensitive).
+**Position keys**: stringified floats [0.0-1.0], min separation 1/127.
+**Snapshot values**: index (int) or name (str, prefix match, case-insensitive).
+**Interpolation**: Easing (ease_in_quad, etc.) or spline (hermite, catmull_rom).
+**Context limit**: hermite/catmull_rom look 2 stops back/forward for smoothness.
 
 ### Implementation
 
-- `modalapi/collagestop.py` - Easing/interpolation functions, stop logic
-- `modalapi/collagemode.py` - Mode manager, expression pedal hijacking
-- Segment mode: transforms pedal CC via easing before mod-host receives it
-- Parameter mode: computes full state, sends virtual CCs on channel 15
+- Pre-computes diff maps per segment at load (optimized 10ms critical path)
+- MIDI-level de-duplication skips redundant WebSocket sends
+- Per-parameter interpolation with neighbor context for splines
+- `collage/` - interpolation.py, stop.py, manager.py, pedal_controller.py
