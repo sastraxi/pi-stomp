@@ -18,10 +18,8 @@
 import logging
 from typing import Any
 
-from rtmidi.midiconstants import CONTROL_CHANGE
-
 from collage.stop import CollageStop
-from collage.types import EasingFunc
+from collage.types import EasingFunc, ParameterTypeGetter
 
 
 class SegmentMode:
@@ -31,7 +29,9 @@ class SegmentMode:
         self,
         stops: list[CollageStop],
         easing_func: EasingFunc,
-        apply_mappings_callback: Any  # Callable[[int], None]
+        parameter_setter: Any,  # ParameterSetter
+        param_type_getter: ParameterTypeGetter,
+        instance_number_getter: Any  # Callable[[str], int | None]
     ) -> None:
         """
         Initialize segment mode handler.
@@ -39,31 +39,35 @@ class SegmentMode:
         Args:
             stops: List of CollageStop objects (sorted by position)
             easing_func: Easing function to apply
-            apply_mappings_callback: Callback to apply MIDI mappings for a segment
+            parameter_setter: ParameterSetter instance for setting parameters
+            param_type_getter: Function to get parameter type
+            instance_number_getter: Function to get instance number from instance_id
         """
         self.stops = stops
         self.easing_func = easing_func
-        self.apply_mappings_callback = apply_mappings_callback
+        self.parameter_setter = parameter_setter
+        self.param_type_getter = param_type_getter
+        self.instance_number_getter = instance_number_getter
         self.current_segment: int = 0
 
     def handle_pedal_change(
         self,
         percentage: float,
-        exp_channel: int,
-        exp_cc: int,
-        midiout: Any
+        exp_channel: int,  # Unused, kept for API compatibility
+        exp_cc: int,       # Unused, kept for API compatibility
+        midiout: Any       # Unused, kept for API compatibility
     ) -> None:
         """
         Handle expression pedal movement in segment mode.
 
         Applies easing function to transform the expression pedal value,
-        then sends the eased CC. Also handles segment switching for multi-stop mode.
+        then queues parameters via WebSocket (non-blocking).
 
         Args:
             percentage: Global position (0.0-1.0)
-            exp_channel: MIDI channel of expression pedal
-            exp_cc: MIDI CC number of expression pedal
-            midiout: MIDI output object
+            exp_channel: Unused (kept for compatibility)
+            exp_cc: Unused (kept for compatibility)
+            midiout: Unused (kept for compatibility)
         """
         # Determine current segment
         new_segment = self._get_segment_from_percentage(percentage)
@@ -84,28 +88,24 @@ class SegmentMode:
         # Apply easing to local percentage
         eased_pct = self.easing_func(local_pct)
 
-        # Convert eased percentage back to global percentage within segment
-        eased_global_pct = lower_stop.position + (eased_pct * segment_range)
-
-        # Convert to CC value (0-127)
-        eased_cc_value = int(eased_global_pct * 127)
-        eased_cc_value = max(0, min(127, eased_cc_value))  # Clamp
-
         logging.debug(
             f"Segment {new_segment}: pct={percentage:.3f}, local={local_pct:.3f}, "
-            f"eased={eased_pct:.3f}, CC={eased_cc_value}"
+            f"eased={eased_pct:.3f}"
         )
 
-        # Send the eased CC value on the expression pedal's channel/CC
-        midi_msg = [exp_channel | CONTROL_CHANGE, exp_cc, eased_cc_value]
-        midiout.send_message(midi_msg)
-        logging.debug(f"Sent MIDI: ch={exp_channel}, cc={exp_cc}, val={eased_cc_value}")
+        # Queue parameters via WebSocket (non-blocking)
+        self.parameter_setter.apply_segment_parameters(
+            lower_stop,
+            upper_stop,
+            eased_pct,
+            self.param_type_getter,
+            self.instance_number_getter
+        )
 
-        # If segment changed, update MIDI mappings
+        # If segment changed, log it
         if new_segment != self.current_segment:
             logging.info(f"Segment change: {self.current_segment} -> {new_segment}")
             self.current_segment = new_segment
-            self.apply_mappings_callback(new_segment)
 
     def _get_segment_from_percentage(self, percentage: float) -> int:
         """

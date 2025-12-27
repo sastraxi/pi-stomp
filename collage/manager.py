@@ -37,8 +37,8 @@ from collage.interpolation import (
     hermite_interpolation,
     catmull_rom_interpolation,
 )
-from collage.midi_mapper import MidiMapper
 from collage.parameter_mode import ParameterMode
+from collage.parameter_setter import ParameterSetter
 from collage.pedal_controller import PedalController
 from collage.segment_mode import SegmentMode
 from collage.snapshot import SnapshotManager
@@ -71,7 +71,7 @@ class CollageMode:
         self.mode: Literal['segment', 'parameter'] = 'segment'  # Default to segment mode
 
         # Components (initialized in initialize())
-        self.midi_mapper: MidiMapper | None = None
+        self.parameter_setter: ParameterSetter | None = None
         self.mode_handler: SegmentMode | ParameterMode | None = None
         self.pedal_controller: PedalController | None = None
 
@@ -96,8 +96,8 @@ class CollageMode:
             # Load snapshots and create stops
             self.stops = self._create_stops()
 
-            # Initialize MIDI mapper
-            self.midi_mapper = MidiMapper()
+            # Initialize parameter setter (WebSocket-based, async)
+            self.parameter_setter = ParameterSetter()
 
             # Initialize mode-specific handler
             if self.mode == 'segment':
@@ -268,46 +268,34 @@ class CollageMode:
         return stops
 
     def _initialize_segment_mode(self, easing_func: EasingFunc) -> None:
-        """Initialize segment mode with easing."""
-        assert self.midi_mapper is not None
+        """Initialize segment mode with direct parameter setting."""
+        assert self.parameter_setter is not None
 
-        # Apply MIDI mappings for initial segment
-        exp_pedal_id = self.config.get('expression_pedal_id', 0)
-        exp_channel, exp_cc = self._get_expression_pedal_config(exp_pedal_id)
+        # Create segment mode handler (no MIDI mapping needed)
+        self.mode_handler = SegmentMode(
+            self.stops,
+            easing_func,
+            self.parameter_setter,
+            self._get_parameter_type,
+            self._get_instance_number
+        )
 
-        # Callback for applying mappings when segment changes
-        def apply_mappings_callback(segment_index: int) -> None:
-            stop_a = self.stops[segment_index]
-            stop_b = self.stops[segment_index + 1]
-            self.midi_mapper.apply_segment_mappings(
-                stop_a, stop_b, exp_channel, exp_cc,
-                self._get_parameter_type,
-                self._get_instance_number
-            )
-
-        # Apply initial mappings
-        apply_mappings_callback(0)
-
-        # Create segment mode handler
-        self.mode_handler = SegmentMode(self.stops, easing_func, apply_mappings_callback)
-
-        logging.info("Segment mode initialized with easing")
+        logging.info("Segment mode initialized with direct parameter setting")
 
     def _initialize_parameter_mode(self, interp_func: InterpolationFunc, virtual_channel: int) -> None:
         """Initialize parameter mode with interpolation."""
-        assert self.midi_mapper is not None
+        assert self.parameter_setter is not None
 
-        # Build virtual CC mappings
-        virtual_cc_mappings = self.midi_mapper.build_virtual_mappings(
-            self.stops, virtual_channel, self._get_instance_number
-        )
-
-        # Create parameter mode handler
+        # Create parameter mode handler (uses direct parameter setting)
         self.mode_handler = ParameterMode(
-            self.stops, interp_func, virtual_cc_mappings, virtual_channel
+            self.stops,
+            interp_func,
+            self.parameter_setter,
+            self._get_parameter_type,
+            self._get_instance_number
         )
 
-        logging.info(f"Parameter mode initialized with {len(virtual_cc_mappings)} virtual CCs")
+        logging.info("Parameter mode initialized with direct parameter setting")
 
     def _initialize_pedal_controller(self) -> None:
         """Initialize pedal controller and attach to expression pedal."""
@@ -454,7 +442,7 @@ class CollageMode:
         """
         Clean up collage mode:
         - Detach from expression pedal
-        - Unmap all MIDI mappings
+        - Close parameter setter
         - Reset state
         """
         if not self.enabled:
@@ -466,9 +454,9 @@ class CollageMode:
         if self.pedal_controller:
             self.pedal_controller.detach_from_pedal()
 
-        # Unmap MIDI mappings
-        if self.midi_mapper:
-            self.midi_mapper.cleanup()
+        # Clean up parameter setter
+        if self.parameter_setter:
+            self.parameter_setter.cleanup()
 
         # Reset state
         self.stops = []

@@ -18,21 +18,20 @@
 import logging
 from typing import Any
 
-from rtmidi.midiconstants import CONTROL_CHANGE
-
 from collage.stop import CollageStop
-from collage.types import InterpolationFunc
+from collage.types import InterpolationFunc, ParameterTypeGetter
 
 
 class ParameterMode:
-    """Handles full parameter interpolation with virtual CCs."""
+    """Handles full parameter interpolation with WebSocket parameter setting."""
 
     def __init__(
         self,
         stops: list[CollageStop],
         interpolation_func: InterpolationFunc,
-        virtual_cc_mappings: dict[str, int],
-        virtual_midi_channel: int
+        parameter_setter: Any,  # ParameterSetter
+        param_type_getter: ParameterTypeGetter,
+        instance_number_getter: Any  # Callable[[str], int | None]
     ) -> None:
         """
         Initialize parameter mode handler.
@@ -40,60 +39,34 @@ class ParameterMode:
         Args:
             stops: List of CollageStop objects (sorted by position)
             interpolation_func: Interpolation function to use
-            virtual_cc_mappings: Dict mapping "instance_id:symbol" -> CC number
-            virtual_midi_channel: MIDI channel for virtual CCs
+            parameter_setter: ParameterSetter instance for setting parameters
+            param_type_getter: Function to get parameter type
+            instance_number_getter: Function to get instance number from instance_id
         """
         self.stops = stops
         self.interpolation_func = interpolation_func
-        self.virtual_cc_mappings = virtual_cc_mappings
-        self.virtual_midi_channel = virtual_midi_channel
+        self.parameter_setter = parameter_setter
+        self.param_type_getter = param_type_getter
+        self.instance_number_getter = instance_number_getter
 
     def handle_pedal_change(self, percentage: float, midiout: Any) -> None:
         """
         Handle expression pedal movement in parameter mode.
 
-        Computes interpolated state across all stops and sends virtual MIDI CCs
-        for each parameter.
+        Computes interpolated state across all stops and sets parameters
+        via WebSocket (non-blocking).
 
         Args:
             percentage: Global position (0.0-1.0)
-            midiout: MIDI output object
+            midiout: Unused (kept for compatibility)
         """
         # Call interpolation function to get complete interpolated state
         interpolated_state = self.interpolation_func(percentage, self.stops)
 
-        # Send virtual MIDI CC for each parameter
-        for instance_id, params in interpolated_state.items():
-            for symbol, value in params.items():
-                param_key = f"{instance_id}:{symbol}"
+        # Set all parameters via WebSocket batch (non-blocking)
+        self.parameter_setter.apply_parameter_mode_batch(
+            interpolated_state,
+            self.instance_number_getter
+        )
 
-                # Get virtual CC number for this parameter
-                cc_num = self.virtual_cc_mappings.get(param_key)
-                if cc_num is None:
-                    logging.warning(f"No virtual CC mapping for {param_key}, skipping")
-                    continue
-
-                # Scale parameter value (0.0-1.0) to MIDI CC value (0-127)
-                cc_value = int(value * 127)
-                cc_value = max(0, min(127, cc_value))  # Clamp
-
-                # Send virtual MIDI CC
-                self._send_virtual_midi_cc(cc_num, cc_value, midiout)
-
-    def _send_virtual_midi_cc(self, cc_num: int, value: int, midiout: Any) -> None:
-        """
-        Send virtual MIDI CC message on the virtual channel.
-
-        Args:
-            cc_num: MIDI CC number (70-127)
-            value: MIDI CC value (0-127)
-            midiout: MIDI output object
-        """
-        if not midiout:
-            logging.warning("send_virtual_midi_cc: midiout not available")
-            return
-
-        # Build MIDI CC message: [channel | CONTROL_CHANGE, cc_number, value]
-        midi_msg = [self.virtual_midi_channel | CONTROL_CHANGE, cc_num, value]
-        midiout.send_message(midi_msg)
-        logging.debug(f"Sent virtual MIDI CC: channel={self.virtual_midi_channel}, cc={cc_num}, value={value}")
+        logging.debug(f"Queued interpolated state for {len(interpolated_state)} plugins at position {percentage:.3f}")
