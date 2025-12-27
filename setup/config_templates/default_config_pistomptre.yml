@@ -79,3 +79,29 @@ hardware:
     - id: 3
       type: VOLUME
 
+# Collage Mode Configuration (Pedalboard-specific)
+# This feature interpolates between snapshots based on expression pedal position.
+# IMPORTANT: This should be configured per-pedalboard in <pedalboard>.pedalboard/config.yml
+# Requires an expression pedal to be configured in analog_controllers above.
+#
+# Expression pedal-driven snapshot interpolation with per-parameter control.
+# Pre-computes diff maps at load for optimized 10ms critical path.
+# MIDI-level de-duplication prevents redundant WebSocket traffic.
+#
+# collage_mode:
+#   enabled: true
+#   expression_pedal_id: 0           # Which expression pedal to use (default: 0)
+#   interpolation: linear            # Interpolation function (default: linear)
+#                                    # Splines: linear, hermite, catmull_rom
+#                                    # Easing: ease_in_quad, ease_out_quad, ease_in_out_quad,
+#                                    #         ease_in_cubic, ease_out_cubic, ease_in_out_cubic,
+#                                    #         exponential, sine
+#   snapshot_stops:                  # Position (stringified float) -> snapshot (index or name)
+#     "0.0": 0                       # Snapshot by index (0-based)
+#     "0.5": "Crunch"                # Or by name (case-insensitive prefix match)
+#     "1.0": "Heavy"                 # Min separation: 1/127 (0.0079)
+#   throttle_ms: 50                  # Min time between updates (default: 50ms)
+#   create_snapshot: true            # Auto-create "Collage Mode" snapshot (default: true)
+#   snapshot_name: "Collage Mode"    # Name for auto-created snapshot (default: "Collage Mode")
+#
+# Note: hermite/catmull_rom use up to 2 stops back/forward for context (smooth curves)

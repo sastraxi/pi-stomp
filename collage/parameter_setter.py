@@ -13,18 +13,21 @@
 # You should have received a copy of the GNU General Public License
 # along with pi-stomp.  If not, see <https://www.gnu.org/licenses/>.
 
-"""WebSocket-based parameter setting for collage mode."""
+"""WebSocket-based parameter setting for collage mode with MIDI de-duplication."""
 
 import logging
-from typing import Any
 
-from collage.stop import CollageStop
-from collage.types import ParameterTypeGetter
 from modalapi.websocket_bridge import AsyncWebSocketBridge
 
 
 class ParameterSetter:
-    """Sets plugin parameters via WebSocket (async, fire-and-forget)."""
+    """
+    Sets plugin parameters via WebSocket with MIDI-level de-duplication.
+
+    Tracks last-sent MIDI values per parameter to avoid redundant sends
+    when smooth pedal movement produces consecutive identical MIDI values.
+    This dramatically reduces WebSocket traffic during expression pedal movement.
+    """
 
     def __init__(self, bridge: AsyncWebSocketBridge) -> None:
         """
@@ -34,109 +37,53 @@ class ParameterSetter:
             bridge: Shared AsyncWebSocketBridge instance from handler
         """
         self.bridge = bridge
+
+        # MIDI-level change tracking: {(instance_id, symbol): midi_value}
+        self.last_sent_midi_values: dict[tuple[str, str], int] = {}
+
         logging.info("ParameterSetter initialized")
 
-    def apply_segment_parameters(
-        self,
-        stop_a: CollageStop,
-        stop_b: CollageStop,
-        percentage: float,
-        param_type_getter: ParameterTypeGetter,
-        instance_number_getter: Any  # Callable[[str], int | None]
-    ) -> None:
+    def send_parameter(self, instance_id: str, symbol: str, value: float) -> bool:
         """
-        Set parameters for current position between two stops.
+        Send single parameter via WebSocket with de-duplication (non-blocking).
 
-        Calculates interpolated values and sends them via WebSocket.
-        Non-blocking - queues messages and returns immediately.
+        Converts value to MIDI resolution (0-127) and skips send if same as
+        last sent MIDI value for this parameter. This prevents flooding the
+        WebSocket with redundant messages during smooth pedal movements.
 
         Args:
-            stop_a: Lower stop of segment
-            stop_b: Upper stop of segment
-            percentage: Position within segment (0.0-1.0)
-            param_type_getter: Function to get parameter type
-            instance_number_getter: Function to get instance number from instance_id
+            instance_id: Plugin instance ID (e.g., "xfade", "CollisionDrive")
+            symbol: Parameter symbol (e.g., "Gain", ":bypass")
+            value: Normalized value [0.0, 1.0]
+
+        Returns:
+            True if sent, False if skipped (duplicate) or dropped (backpressure)
         """
-        # Calculate parameter diffs for this segment
-        diff_map = CollageStop.build_diff_map(
-            stop_a.snapshot_state,
-            stop_b.snapshot_state,
-            param_type_getter
-        )
+        # Convert to MIDI resolution (0-127) for change detection
+        midi_value = int(round(value * 127))
 
-        # Apply binary "on wins" logic
-        diff_map = CollageStop.adjust_binary_params(diff_map)
+        # Check if changed from last sent value
+        key = (instance_id, symbol)
+        if self.last_sent_midi_values.get(key) == midi_value:
+            return False  # Skip - same MIDI value as last send
 
-        # Send parameters via WebSocket (non-blocking)
-        params_sent = 0
-        params_dropped = 0
+        # Send via WebSocket
+        if self.bridge.send_parameter(instance_id, symbol, value):
+            # Update tracking on successful queue
+            self.last_sent_midi_values[key] = midi_value
+            return True
 
-        for instance_id, params in diff_map.items():
-            for symbol, (val_a, val_b, _param_type) in params.items():
-                # Interpolate value
-                value = val_a + (val_b - val_a) * percentage
+        # Dropped due to backpressure
+        return False
 
-                # Queue parameter (non-blocking)
-                # Use instance_id directly (e.g., "xfade"), not instance number
-                if self.bridge.send_parameter(instance_id, symbol, value):
-                    params_sent += 1
-                    logging.debug(f"Queued {instance_id}/{symbol} = {value:.3f}")
-                else:
-                    params_dropped += 1
-
-        # Log summary
-        logging.debug(
-            f"Segment parameters: {params_sent} queued, {params_dropped} dropped "
-            f"at position {percentage:.3f}"
-        )
-
-        # Warn if significant backpressure
-        if params_dropped > 0:
-            stats = self.bridge.get_stats()
-            logging.warning(
-                f"Dropped {params_dropped} parameters due to backpressure! "
-                f"Queue depth: {stats['queue_depth']}"
-            )
-
-    def apply_parameter_mode_batch(
-        self,
-        interpolated_state: dict,
-        instance_number_getter: Any  # Callable[[str], int | None] - UNUSED, kept for compatibility
-    ) -> None:
+    def reset_tracking(self) -> None:
         """
-        Set all parameters for parameter mode (full state interpolation).
+        Reset MIDI change tracking (call on re-initialization).
 
-        Non-blocking - queues all messages and returns immediately.
-
-        Args:
-            interpolated_state: Dict of {instance_id: {symbol: value}}
-            instance_number_getter: Unused (kept for compatibility)
+        Clears all tracked values so next pedal movement will send all parameters.
         """
-        params_sent = 0
-        params_dropped = 0
-
-        for instance_id, params in interpolated_state.items():
-            for symbol, value in params.items():
-                # Queue parameter (non-blocking)
-                # Use instance_id directly (e.g., "CollisionDrive"), not instance number
-                if self.bridge.send_parameter(instance_id, symbol, value):
-                    params_sent += 1
-                    logging.debug(f"Queued {instance_id}/{symbol} = {value:.3f}")
-                else:
-                    params_dropped += 1
-
-        # Log summary
-        logging.debug(
-            f"Parameter mode: {params_sent} queued, {params_dropped} dropped"
-        )
-
-        # Warn if significant backpressure
-        if params_dropped > 0:
-            stats = self.bridge.get_stats()
-            logging.warning(
-                f"Dropped {params_dropped} parameters due to backpressure! "
-                f"Queue depth: {stats['queue_depth']}, total dropped: {stats['messages_dropped']}"
-            )
+        self.last_sent_midi_values.clear()
+        logging.debug("ParameterSetter tracking reset")
 
     def get_stats(self) -> dict:
         """
@@ -148,5 +95,6 @@ class ParameterSetter:
         return self.bridge.get_stats()
 
     def cleanup(self) -> None:
-        """Clean up resources, if necessary."""
-        logging.info("ParameterSetter cleaned up (bridge remains active)")
+        """Clean up resources."""
+        self.last_sent_midi_values.clear()
+        logging.info("ParameterSetter cleaned up")

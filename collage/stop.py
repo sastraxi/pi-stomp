@@ -17,6 +17,8 @@
 
 from collage.types import (
     DiffMapDict,
+    EnrichedDiffMap,
+    ParamData,
     ParameterTypeGetter,
     SnapshotStateDict,
 )
@@ -122,3 +124,71 @@ class CollageStop:
                 adjusted[instance_id][symbol] = (val_a, val_b, param_type)
 
         return adjusted
+
+    @staticmethod
+    def build_enriched_diff_map(
+        lower_stop: 'CollageStop',
+        upper_stop: 'CollageStop',
+        stops: list['CollageStop'],
+        segment_idx: int,
+        param_type_getter: ParameterTypeGetter,
+    ) -> EnrichedDiffMap:
+        """
+        Build enriched diff map with pre-computed neighbor data.
+
+        For each parameter that differs between lower and upper stops,
+        includes values from neighboring stops for hermite/catmull-rom interpolation.
+        Pre-computes all data needed for interpolation to optimize the critical path.
+
+        Args:
+            lower_stop: Lower stop of segment
+            upper_stop: Upper stop of segment
+            stops: Complete list of all stops (for neighbor lookup)
+            segment_idx: Index of this segment in stops list
+            param_type_getter: Function to get parameter type
+
+        Returns:
+            Enriched diff map: {instance_id: {symbol: ParamData}}
+        """
+        # Build basic diff map (only parameters that differ)
+        diff_map = CollageStop.build_diff_map(
+            lower_stop.snapshot_state,
+            upper_stop.snapshot_state,
+            param_type_getter
+        )
+
+        # Apply binary parameter adjustment ("on wins" logic)
+        diff_map = CollageStop.adjust_binary_params(diff_map)
+
+        # Enrich with neighbor data for hermite/catmull-rom interpolation
+        enriched: EnrichedDiffMap = {}
+        segment_range = upper_stop.position - lower_stop.position
+
+        for instance_id, params in diff_map.items():
+            enriched[instance_id] = {}
+
+            for symbol, (val_a, val_b, param_type) in params.items():
+                # Get neighbor values for hermite/catmull-rom tangent calculation
+                prev_val: float | None = None
+                if segment_idx > 0:
+                    prev_val = stops[segment_idx - 1].snapshot_state.get(
+                        instance_id, {}
+                    ).get(symbol, val_a)
+
+                next_val: float | None = None
+                if segment_idx < len(stops) - 2:
+                    next_val = stops[segment_idx + 2].snapshot_state.get(
+                        instance_id, {}
+                    ).get(symbol, val_b)
+
+                # Create ParamData with all pre-computed values
+                enriched[instance_id][symbol] = ParamData(
+                    val_a=val_a,
+                    val_b=val_b,
+                    prev_val=prev_val,
+                    next_val=next_val,
+                    segment_range=segment_range,
+                    param_type=param_type,
+                )
+
+        return enriched
