@@ -17,6 +17,20 @@ sudo journalctl -u mod-ala-pi-stomp -f
 sudo journalctl -u mod-ala-pi-stomp -n 50
 ```
 
+### Startup Order
+
+Services start in dependency chain: `jack → mod-host → mod-ui → mod-ala-pi-stomp`
+
+- piStomp service has `After=mod-ui.service` + `Requires=mod-ui.service`
+- REST API has graceful fallback if mod-ui not ready (loads default pedalboard)
+- WebSocket retries with exponential backoff (1s → 30s max)
+
+### Initial Snapshot State
+
+- piStomp defaults to snapshot 0 at startup
+- Syncs correctly if pedalboard loads after piStomp starts (via WebSocket `loading_end` event)
+- If piStomp restarts while MOD-UI already running: assumes snapshot 0 until next change
+
 ## Deployment Workflow
 
 ```bash
@@ -157,13 +171,13 @@ Shortpress accepts string (callback name) or object with `callback` and `args` (
 - **Incremental updates** - `reinit()` pattern updates objects in-place, no recreation
 - **Shared class state where needed** - Footswitch groups coordinate via class-level dicts
 - **Explicit state machines** - Encoder modes (v1/v2) use clear state enums
-- **Timestamp-based change detection** - File mtimes for MOD sync, not polling APIs
+- **Event-driven sync** - WebSocket messages for real-time pedalboard/snapshot changes
 
 ### MOD Integration
 - **Direct REST calls** - No SDK abstraction, just `requests` to `localhost:80`
+- **WebSocket events** - Typed protocol (`ws_protocol.py`) for real-time change detection
 - **LILV for local parsing** - Parse `.ttl` bundles locally for performance and rich data
 - **Trust MOD for audio** - piStomp is controller interface, not audio processor
-- **Sync on change** - Reload pedalboard data when MOD writes `last.json`
 
 ### Code Organization
 - **Factories for versioning** - `Handlerfactory` and `Hardwarefactory` route versions
@@ -266,6 +280,7 @@ Config merged and applied
 ```bash
 # Pedalboard operations
 GET  /pedalboard/list                    # List all pedalboards
+GET  /pedalboard/current                 # Get current pedalboard bundle path
 POST /pedalboard/load_bundle/            # Load pedalboard
 POST /pedalboard/save                    # Save state
 

@@ -33,6 +33,7 @@ import modalapi.wifi as Wifi
 import modalapi.external_midi as ExternalMidi
 import pistomp.settings as Settings
 from modalapi.websocket_bridge import AsyncWebSocketBridge
+from modalapi.ws_protocol import parse_message, LoadingEndMessage, PedalSnapshotMessage
 
 from pistomp.analogmidicontrol import AnalogMidiControl
 from pistomp.encodermidicontrol import EncoderMidiControl
@@ -86,11 +87,6 @@ class Modhandler(Handler):
         self.banks_file_timestamp = os.path.getmtime(self.banks_file) if Path(self.banks_file).exists() else 0
         self.banks = {}
         self.current_bank = None
-
-        # This file is modified when the pedalboard is changed via MOD UI
-        self.pedalboard_modification_file = os.path.join(self.data_dir, "last.json")
-        self.pedalboard_change_timestamp = os.path.getmtime(self.pedalboard_modification_file)\
-            if Path(self.pedalboard_modification_file).exists() else 0
 
         self.wifi_manager = Wifi.WifiManager()
 
@@ -156,7 +152,7 @@ class Modhandler(Handler):
         def __init__(self, pedalboard):
             self.pedalboard = pedalboard
             self.presets = {}
-            self.preset_index = 0
+            self.preset_index = 0  # Assumes pedalboard loads at snapshot 0 (default behavior)
             self.analog_controllers = {}  # { type: (plugin_name, param_name) }
 
     def add_hardware(self, hardware):
@@ -271,27 +267,40 @@ class Modhandler(Handler):
         logging.debug("send_midi_cc: sending %s" % cc_msg)
         self.hardware.midiout.send_message(cc_msg)
 
-    def poll_modui_changes(self):
-        # This poll looks for changes made via the MOD UI and tries to sync the pi-Stomp hardware
+    def _handle_ws_message(self, raw_message: str):
+        """Handle incoming WebSocket message from MOD-UI using typed protocol."""
+        msg = parse_message(raw_message)
 
-        # Look for a change of pedalboard
-        #
-        # If the pedalboard_modification_file timestamp has changed, extract the bundle path and set current pedalboard
-        #
-        # TODO this is an interim solution until better MOD-UI to pi-stomp event communication is added
-        #
-        if Path(self.pedalboard_modification_file).exists():
-            ts = os.path.getmtime(self.pedalboard_modification_file)
-            if ts != self.pedalboard_change_timestamp:
-                # Timestamp changed
-                self.pedalboard_change_timestamp = ts
-                self.lcd.draw_info_message("Loading...")
-                mod_bundle = self.get_pedalboard_bundle_from_mod()
-                if mod_bundle:
-                    logging.info("Pedalboard changed via MOD from: %s to: %s" %
-                                 (self.current.pedalboard.bundle, mod_bundle))
-                    pb = self.reload_pedalboard(mod_bundle)
-                    self.set_current_pedalboard(pb)
+        if isinstance(msg, LoadingEndMessage):
+            # Pedalboard finished loading
+            logging.info(f"WebSocket: Pedalboard loaded, snapshot={msg.snapshot_id}")
+            self.lcd.draw_info_message("Loading...")
+            mod_bundle = self.get_pedalboard_bundle_from_mod()
+            if mod_bundle and mod_bundle != self.current.pedalboard.bundle:
+                logging.info(f"Pedalboard changed via MOD from: {self.current.pedalboard.bundle} to: {mod_bundle}")
+                pb = self.reload_pedalboard(mod_bundle)
+                self.set_current_pedalboard(pb)
+            # Update snapshot index
+            self.current.preset_index = msg.snapshot_id
+
+        elif isinstance(msg, PedalSnapshotMessage):
+            # Snapshot changed within current pedalboard
+            logging.info(f"WebSocket: Snapshot changed to {msg.snapshot_id} ({msg.snapshot_name})")
+            self.current.preset_index = msg.snapshot_id
+            self.lcd.draw_title(self.current.pedalboard.title, msg.snapshot_name, False, True, False)
+
+    def poll_modui_changes(self):
+        """Poll for changes from MOD-UI via WebSocket messages."""
+        if self.ws_bridge is None:
+            return
+
+        # Process all pending messages from WebSocket
+        messages = self.ws_bridge.get_received_messages()
+        for msg in messages:
+            try:
+                self._handle_ws_message(msg)
+            except Exception as e:
+                logging.error(f"Error handling WebSocket message '{msg}': {e}")
 
         # Look for a change in banks file
         if Path(self.banks_file).exists():
@@ -378,18 +387,17 @@ class Modhandler(Handler):
         return pedalboard
 
     def get_pedalboard_bundle_from_mod(self):
-        # Assumes the caller has already checked for existence of the file
-        mod_bundle = None
-        with open(self.pedalboard_modification_file, 'r') as file:
-            j = json.load(file)
-            mod_bundle = util.DICT_GET(j, 'pedalboard')
-        return mod_bundle
+        """Get current pedalboard bundle path from MOD-UI via REST API."""
+        try:
+            resp = req.get(self.root_uri + "pedalboard/current")
+            if resp.status_code == 200:
+                return resp.text.strip()
+        except Exception as e:
+            logging.error(f"Failed to get current pedalboard from MOD: {e}")
+        return None
 
     def get_current_pedalboard_bundle_path(self):
-        mod_bundle = None
-        if Path(self.pedalboard_modification_file).exists():
-            mod_bundle = self.get_pedalboard_bundle_from_mod()
-        return mod_bundle
+        return self.get_pedalboard_bundle_from_mod()
 
     def set_current_pedalboard(self, pedalboard):
         # Cleanup previous collage mode if active
