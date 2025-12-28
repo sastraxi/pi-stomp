@@ -424,6 +424,9 @@ class Modhandler(Handler):
         if self.collage_mode:
             self.collage_mode.cleanup()
             self.collage_mode = None
+            # Redraw analog assignments to revert to normal AnalogMidiControl
+            if self.current and self.current.analog_controllers:
+                self.lcd.draw_analog_assignments(self.current.analog_controllers)
 
         # Delete previous "current"
         del self.current
@@ -484,6 +487,9 @@ class Modhandler(Handler):
                 # Initialize collage mode
                 self.collage_mode.initialize()
                 logging.info(f"Collage mode enabled on '{snapshot_name}' snapshot")
+
+                # Redraw analog assignments to use CollageMode object for expression pedal
+                self.lcd.draw_analog_assignments(self.current.analog_controllers)
 
         except Exception as e:
             logging.error(f"Failed to prepare collage mode: {e}")

@@ -28,6 +28,9 @@ from uilib import *
 from uilib.lcd_ili9341 import *
 
 from pistomp.footswitch import Footswitch  # TODO would like to avoid this module knowing such details
+from pistomp.analogmidicontrol import AnalogMidiControl, as_midi_value
+from pistomp.encodermidicontrol import EncoderMidiControl
+from collage.manager import CollageMode
 
 # import traceback
 
@@ -175,14 +178,31 @@ class Lcd(abstract_lcd.Lcd):
                 continue
 
             midi_value = None
-            if hasattr(icon.object, "last_read"):
+            if isinstance(icon.object, AnalogMidiControl):
                 # AnalogMidiControl - convert ADC value to MIDI
-                from pistomp.analogmidicontrol import as_midi_value
-
                 midi_value = as_midi_value(icon.object.last_read)
-            elif hasattr(icon.object, "midi_value"):
+
+            elif isinstance(icon.object, EncoderMidiControl):
                 # EncoderMidiControl - already in MIDI range
                 midi_value = icon.object.midi_value
+
+            elif isinstance(icon.object, CollageMode):
+                # CollageMode - get position from hijacked pedal
+                pedal = icon.object.pedal_controller.controlled_pedal
+                if pedal:
+                    position = pedal.last_read / 1023.0  # Normalize to 0.0-1.0
+                    midi_value = int(position * 127)  # Convert to MIDI range for progress bar
+
+                    # Find closest stop and update label with snapshot name
+                    stops = icon.object.pedal_controller.stops
+                    closest_stop = min(stops, key=lambda s: abs(s.position - position))
+
+                    # Get snapshot name and update label if changed
+                    snapshot_name = self.handler.current.presets.get(closest_stop.snapshot_index, "")
+                    if snapshot_name and snapshot_name != icon.text:
+                        icon.set_text(snapshot_name)
+                else:
+                    logger.warning("CollageMode icon has no associated pedal controller")
 
             if midi_value is not None:
                 progress = midi_value / 127.0
@@ -880,6 +900,18 @@ class Lcd(abstract_lcd.Lcd):
                     analog_control = ac
                     break
 
+            # Determine what object to pass to Icon widget
+            icon_object = analog_control  # Default
+
+            # Check if this control is the CollageMode expression pedal
+            if (
+                analog_control is not None
+                and self.handler.collage_mode
+                and self.handler.collage_mode.enabled
+                and analog_control.id == self.handler.collage_mode.config.get("expression_pedal_id", 0)
+            ):
+                icon_object = self.handler.collage_mode
+
             if k is None:
                 # Non-mapped control
                 name = "none"
@@ -904,6 +936,11 @@ class Lcd(abstract_lcd.Lcd):
                         text_color = Category.get_category_color(category)
                         color = self.default_plugin_color
 
+            # Override color for CollageMode to show it's active (same as volume)
+            if isinstance(icon_object, CollageMode):
+                text_color = self.default_plugin_color
+                color = self.default_plugin_color
+
             if control_type == Token.KNOB:
                 w = Icon(
                     box=Box.xywh(x, y, width_per_control, 20),
@@ -911,7 +948,7 @@ class Lcd(abstract_lcd.Lcd):
                     text_color=text_color,
                     parent=self.main_panel,
                     outline=0,
-                    object=analog_control,
+                    object=icon_object,
                 )
                 w.set_foreground(color)
                 w.add_knob()
@@ -923,7 +960,7 @@ class Lcd(abstract_lcd.Lcd):
                     text_color=text_color,
                     parent=self.main_panel,
                     outline=0,
-                    object=analog_control,
+                    object=icon_object,
                 )
                 w.set_foreground(color)
                 w.add_pedal()

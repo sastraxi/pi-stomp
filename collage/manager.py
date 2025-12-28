@@ -321,6 +321,8 @@ class CollageMode:
                 logging.info(f"Activating collage mode (switched to '{collage_snapshot_name}' snapshot)")
                 try:
                     self.initialize()
+                    # Redraw analog assignments to use CollageMode object for expression pedal
+                    self.handler.lcd.draw_analog_assignments(self.handler.current.analog_controllers)
                 except Exception as e:
                     logging.error(f"Failed to activate collage mode: {e}")
         else:
@@ -328,6 +330,8 @@ class CollageMode:
             if self.enabled:
                 logging.info(f"Deactivating collage mode (switched to '{new_snapshot_name}' snapshot)")
                 self.cleanup()
+                # Redraw analog assignments to revert to normal AnalogMidiControl
+                self.handler.lcd.draw_analog_assignments(self.handler.current.analog_controllers)
 
     def cleanup(self) -> None:
         """
