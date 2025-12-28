@@ -163,6 +163,9 @@ class CollageMode:
                 exp_pedal_id
             )
 
+            # Sync current pedal position to trigger initial interpolation
+            self.handler.hardware.sync_analog_controls()
+
             self.enabled = True
             logging.info(f"Collage mode initialized with {len(self.stops)} stops")
 
