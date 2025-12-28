@@ -26,6 +26,7 @@ import common.util as util
 import modalapi.pedalboard as Pedalboard
 import modalapi.wifi as Wifi
 import pistomp.settings as Settings
+from collage.snapshot import SnapshotManager
 from modalapi.websocket_bridge import AsyncWebSocketBridge
 from modalapi.ws_protocol import parse_message, LoadingEndMessage, PedalSnapshotMessage
 from modalapi.pedalboard_monitor import PedalboardMonitor
@@ -249,6 +250,19 @@ class Modhandler(Handler):
         if self.lcd is not None:
             self.lcd.enc_sw(value)
 
+    def _handle_collage_mode_snapshot_change(self, new_snapshot_index: int):
+        """
+        Handle collage mode activation/deactivation when snapshot changes.
+
+        Args:
+            new_snapshot_index: Index of the new snapshot being loaded
+        """
+        if not self.collage_mode:
+            return
+
+        new_snapshot_name = self.current.presets.get(new_snapshot_index)
+        self.collage_mode.handle_snapshot_change(new_snapshot_name)
+
     def _handle_ws_message(self, raw_message: str):
         """Handle incoming WebSocket message from MOD-UI using typed protocol."""
         msg = parse_message(raw_message)
@@ -434,41 +448,37 @@ class Modhandler(Handler):
         self.lcd.draw_main_panel()
 
         # Prepare collage mode if enabled in config (snapshot-based activation)
-        if cfg and 'collage_mode' in cfg:
-            collage_cfg = cfg['collage_mode']
-            if collage_cfg.get('enabled', False):
-                try:
-                    from collage import CollageMode
-                    self.collage_mode = CollageMode(self, collage_cfg)
+        # Sync collage mode snapshot (create/recreate/remove based on config)
+        try:
+            collage_cfg = cfg.get('collage_mode') if cfg else None
+            bundle_path = Path(self.current.pedalboard.bundle)
 
-                    # Ensure "Collage Mode" snapshot exists (creates if missing)
-                    self.collage_mode.ensure_collage_snapshot()
+            # Sync snapshot (always recreates if enabled, removes if disabled)
+            snapshot_idx = SnapshotManager.sync_collage_snapshot(
+                bundle_path,
+                collage_cfg,
+                self.root_uri
+            )
 
-                    # Auto-switch to "Collage Mode" snapshot
-                    snapshot_name = collage_cfg.get('snapshot_name', 'Collage Mode')
+            # If enabled and snapshot created, initialize collage mode
+            if snapshot_idx is not None and collage_cfg and collage_cfg.get('enabled', False):
+                from collage import CollageMode
+                self.collage_mode = CollageMode(self, collage_cfg)
 
-                    # Find the snapshot index by name
-                    collage_snapshot_index = None
-                    for idx, name in self.current.presets.items():
-                        if name == snapshot_name:
-                            collage_snapshot_index = idx
-                            break
+                snapshot_name = collage_cfg.get('snapshot_name', 'Collage Mode')
 
-                    if collage_snapshot_index is not None:
-                        # Switch to collage mode snapshot if not already on it
-                        if self.current.preset_index != collage_snapshot_index:
-                            logging.info(f"Auto-switching to '{snapshot_name}' snapshot (index {collage_snapshot_index})")
-                            self.preset_change(collage_snapshot_index)
+                # Switch to collage mode snapshot if not already on it
+                if self.current.preset_index != snapshot_idx:
+                    logging.info(f"Auto-switching to '{snapshot_name}' snapshot (index {snapshot_idx})")
+                    self.preset_change(snapshot_idx)
 
-                        # Initialize collage mode
-                        self.collage_mode.initialize()
-                        logging.info(f"Collage mode enabled on '{snapshot_name}' snapshot")
-                    else:
-                        logging.warning(f"Collage mode configured but '{snapshot_name}' snapshot not found")
+                # Initialize collage mode
+                self.collage_mode.initialize()
+                logging.info(f"Collage mode enabled on '{snapshot_name}' snapshot")
 
-                except Exception as e:
-                    logging.error(f"Failed to prepare collage mode: {e}")
-                    self.collage_mode = None
+        except Exception as e:
+            logging.error(f"Failed to prepare collage mode: {e}")
+            self.collage_mode = None
 
     def bind_current_pedalboard(self):
         # "current" being the pedalboard mod-host says is current
@@ -598,23 +608,7 @@ class Modhandler(Handler):
             return
 
         # Handle collage mode snapshot-based activation
-        new_snapshot_name = self.current.presets.get(index)
-        if self.collage_mode:
-            collage_snapshot_name = self.collage_mode.config.get('snapshot_name', 'Collage Mode')
-
-            if new_snapshot_name == collage_snapshot_name:
-                # Switching TO "Collage Mode" snapshot
-                if not self.collage_mode.enabled:
-                    logging.info(f"Activating collage mode (switched to '{collage_snapshot_name}' snapshot)")
-                    try:
-                        self.collage_mode.initialize()
-                    except Exception as e:
-                        logging.error(f"Failed to activate collage mode: {e}")
-            else:
-                # Switching AWAY from "Collage Mode" snapshot
-                if self.collage_mode.enabled:
-                    logging.info(f"Deactivating collage mode (switched to '{new_snapshot_name}' snapshot)")
-                    self.collage_mode.cleanup()
+        self._handle_collage_mode_snapshot_change(index)
 
         self.lcd.draw_info_message("Loading...")
         url = (self.root_uri + "snapshot/load?id=%d" % index)
