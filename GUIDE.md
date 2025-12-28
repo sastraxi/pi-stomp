@@ -304,9 +304,9 @@ GET  /get_bpm                            # Get current BPM
 4. Create `Pedalboard` object with `Plugin` and `Parameter` objects
 
 **Change Detection**:
-- Watches `/home/pistomp/data/last.json` timestamp
-- MOD UI writes this when pedalboard changes
-- piStomp detects → reloads pedalboard → syncs hardware
+- WebSocket messages from MOD-UI (`loading_end`, `pedal_snapshot`)
+- Typed protocol in `ws_protocol.py` parses messages
+- Tracks snapshot index from events, polls REST API for bundle path
 
 ### Core Components
 
@@ -355,17 +355,20 @@ poll_controls() (10ms)
 **Pedalboard Change (via MOD UI)**:
 
 ```
-MOD-UI writes /home/pistomp/data/last.json
-  → poll_modui_changes() detects timestamp change (1000ms)
-    → reload_pedalboard(bundle)
-      → LILV parses TTL → creates Pedalboard object
-        → set_current_pedalboard(pb)
-          → Load {bundle}/config.yml
-          → hardware.reinit(cfg) - overlay config
-          → bind_current_pedalboard() - map controllers to parameters
-          → external_midi.send_messages_for_pedalboard()
-          → hardware.sync_analog_controls()
-          → update_lcd()
+MOD-UI sends WebSocket 'loading_end' message
+  → poll_modui_changes() receives via ws_bridge (1000ms)
+    → parse_message() → LoadingEndMessage
+      → GET /pedalboard/current (REST API)
+        → reload_pedalboard(bundle)
+          → LILV parses TTL → creates Pedalboard object
+            → set_current_pedalboard(pb)
+              → Load {bundle}/config.yml
+              → hardware.reinit(cfg) - overlay config
+              → bind_current_pedalboard() - map controllers to parameters
+              → external_midi.send_messages_for_pedalboard()
+              → hardware.sync_analog_controls()
+              → update_lcd()
+      → Update current.preset_index from snapshot_id
 ```
 
 **Footswitch Press → Plugin Bypass**:
@@ -415,6 +418,8 @@ poll_controls()
 - `modalapi/pedalboard.py` - LILV parser
 - `modalapi/parameter.py` - Parameter representation
 - `modalapi/plugin.py` - Plugin representation
+- `modalapi/websocket_bridge.py` - Async WebSocket client
+- `modalapi/ws_protocol.py` - Typed message parsing
 
 **Config & State**:
 - `pistomp/config.py` - Config loading/validation
