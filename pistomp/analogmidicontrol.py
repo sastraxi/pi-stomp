@@ -51,18 +51,34 @@ class AnalogMidiControl(analogcontrol.AnalogControl):
     def set_value(self, value):
         self.value = value
 
+    def _send_value(self, value):
+        """
+        Route value to callback or MIDI based on current configuration.
+
+        Args:
+            value: Raw ADC value (0-1023)
+        """
+        if self.value_change_callback:
+            # Delegate to callback (e.g., collage mode interpolation)
+            self.value_change_callback(value, self)
+        else:
+            # Default behavior: convert to MIDI and send
+            set_volume = as_midi_value(value)
+            cc = [self.midi_channel | CONTROL_CHANGE, self.midi_CC, set_volume]
+            logging.debug("AnalogControl Sending CC event %s" % cc)
+            self.midiout.send_message(cc)
+
     def send_current_value(self):
         """
-        Force-send the current analog control value via MIDI.
-        Used for syncing external devices during pedalboard load.
+        Force-send the current analog control value.
+        Used for syncing state during pedalboard load or collage mode activation.
+        Routes via callback if registered, otherwise sends MIDI.
         """
         # read the analog pin
         value = self.readChannel()
-        set_volume = as_midi_value(value)
 
-        cc = [self.midi_channel | CONTROL_CHANGE, self.midi_CC, set_volume]
-        logging.debug("AnalogControl force-sending CC event %s" % cc)
-        self.midiout.send_message(cc)
+        # Route to callback or MIDI
+        self._send_value(value)
 
         # save the reading to prevent duplicate sends on next poll
         self.last_read = value
@@ -77,16 +93,8 @@ class AnalogMidiControl(analogcontrol.AnalogControl):
         value_changed = pot_adjust > self.tolerance
 
         if value_changed:
-            # If a callback is registered, delegate to it instead of sending MIDI directly
-            if self.value_change_callback:
-                self.value_change_callback(value, self)
-            else:
-                # Default behavior: convert to MIDI and send
-                set_volume = as_midi_value(value)
-
-                cc = [self.midi_channel | CONTROL_CHANGE, self.midi_CC, set_volume]
-                logging.debug("AnalogControl Sending CC event %s" % cc)
-                self.midiout.send_message(cc)
+            # Route to callback or MIDI
+            self._send_value(value)
 
             # save the potentiometer reading for the next loop
             self.last_read = value
