@@ -50,19 +50,18 @@ from modalapi.parameter import Type as ParameterType
 # Mapping of all interpolation function names
 INTERPOLATION_FUNCTIONS: dict[str, InterpolationFunc] = {
     # Spline interpolation (uses neighbor context)
-    'hermite': hermite_interpolation,
-    'catmull_rom': catmull_rom_interpolation,
-
+    "hermite": hermite_interpolation,
+    "catmull_rom": catmull_rom_interpolation,
     # Easing-based interpolation (segment-local only)
-    'linear': linear_interpolation,
-    'ease_in_quad': ease_in_quad_interpolation,
-    'ease_out_quad': ease_out_quad_interpolation,
-    'ease_in_out_quad': ease_in_out_quad_interpolation,
-    'ease_in_cubic': ease_in_cubic_interpolation,
-    'ease_out_cubic': ease_out_cubic_interpolation,
-    'ease_in_out_cubic': ease_in_out_cubic_interpolation,
-    'exponential': exponential_easing_interpolation,
-    'sine': sine_easing_interpolation,
+    "linear": linear_interpolation,
+    "ease_in_quad": ease_in_quad_interpolation,
+    "ease_out_quad": ease_out_quad_interpolation,
+    "ease_in_out_quad": ease_in_out_quad_interpolation,
+    "ease_in_cubic": ease_in_cubic_interpolation,
+    "ease_out_cubic": ease_out_cubic_interpolation,
+    "ease_in_out_cubic": ease_in_out_cubic_interpolation,
+    "exponential": exponential_easing_interpolation,
+    "sine": sine_easing_interpolation,
 }
 
 
@@ -91,6 +90,9 @@ class CollageMode:
         # Components (initialized in initialize())
         self.parameter_setter: ParameterSetter | None = None
         self.pedal_controller: PedalController | None = None
+
+        # Snapshot file monitoring (for detecting stop modifications)
+        self.snapshots_file_timestamp: float = 0
 
     def initialize(self) -> None:
         """
@@ -148,7 +150,7 @@ class CollageMode:
             self.parameter_setter = ParameterSetter(self.handler.ws_bridge)
 
             # Initialize and attach pedal controller
-            exp_pedal_id = self.config.get('expression_pedal_id', 0)
+            exp_pedal_id = self.config.get("expression_pedal_id", 0)
 
             self.pedal_controller = PedalController(
                 interpolation_func,
@@ -158,10 +160,7 @@ class CollageMode:
             )
 
             # Attach to expression pedal
-            self.pedal_controller.attach_to_pedal(
-                self.handler.hardware.analog_controls,
-                exp_pedal_id
-            )
+            self.pedal_controller.attach_to_pedal(self.handler.hardware.analog_controls, exp_pedal_id)
 
             # Sync current pedal position to trigger initial interpolation
             self.handler.hardware.sync_analog_controls()
@@ -188,13 +187,12 @@ class CollageMode:
             ValueError: If config is invalid
         """
         # Parse interpolation function name
-        interp_name = self.config.get('interpolation', 'linear')
+        interp_name = self.config.get("interpolation", "linear")
         interpolation_func = INTERPOLATION_FUNCTIONS.get(interp_name)
 
         if not interpolation_func:
             raise ValueError(
-                f"Invalid interpolation '{interp_name}', "
-                f"must be one of: {', '.join(INTERPOLATION_FUNCTIONS.keys())}"
+                f"Invalid interpolation '{interp_name}', must be one of: {', '.join(INTERPOLATION_FUNCTIONS.keys())}"
             )
 
         logging.debug(f"Config validated: interpolation={interp_name}")
@@ -211,7 +209,7 @@ class CollageMode:
             ValueError: If config is invalid or stops cannot be created
         """
         # Get snapshot_stops configuration
-        snapshot_stops = self.config.get('snapshot_stops', {})
+        snapshot_stops = self.config.get("snapshot_stops", {})
         if len(snapshot_stops) < 2:
             raise ValueError(f"Collage mode requires at least 2 stops, got {len(snapshot_stops)}")
 
@@ -272,8 +270,7 @@ class CollageMode:
             # Check positions are strictly increasing
             if pos_a >= pos_b:
                 raise ValueError(
-                    f"Stop positions must be strictly increasing: "
-                    f"stop {i} at {pos_a}, stop {i+1} at {pos_b}"
+                    f"Stop positions must be strictly increasing: stop {i} at {pos_a}, stop {i + 1} at {pos_b}"
                 )
 
             # Check positions map to different CC values (MIDI resolution check)
@@ -282,8 +279,8 @@ class CollageMode:
             if cc_a == cc_b:
                 raise ValueError(
                     f"Stop positions too close - both map to CC {cc_a}: "
-                    f"stop {i} at {pos_a}, stop {i+1} at {pos_b}. "
-                    f"Minimum separation is {1.0/127:.6f}"
+                    f"stop {i} at {pos_a}, stop {i + 1} at {pos_b}. "
+                    f"Minimum separation is {1.0 / 127:.6f}"
                 )
 
         return stops
@@ -316,7 +313,7 @@ class CollageMode:
         Args:
             new_snapshot_name: Name of the new snapshot being loaded
         """
-        collage_snapshot_name = self.config.get('snapshot_name', 'Collage Mode')
+        collage_snapshot_name = self.config.get("snapshot_name", "Collage Mode")
 
         if new_snapshot_name == collage_snapshot_name:
             # Switching TO "Collage Mode" snapshot
@@ -366,3 +363,48 @@ class CollageMode:
         self.segment_diff_maps = []
         self.enabled = False
         logging.info("Collage mode cleaned up")
+
+    def check_for_snapshot_changes(self) -> None:
+        """
+        Check if snapshots.json has been modified and reinitialize if needed.
+
+        This detects when stop snapshots are edited in MOD-UI, allowing
+        collage mode to pick up the new parameter values without requiring
+        a full pedalboard reload. Note that this file is only modified when
+        the pedalboard itself is saved in MOD-UI.
+
+        Called periodically from modhandler's poll_modui_changes().
+        """
+        if not self.enabled:
+            return
+
+        from pathlib import Path
+        from collage.snapshot import SnapshotManager
+
+        bundle_path = Path(self.handler.current.pedalboard.bundle)
+        current_timestamp = SnapshotManager.get_snapshots_file_timestamp(bundle_path)
+
+        # First check - just store timestamp
+        if self.snapshots_file_timestamp == 0:
+            self.snapshots_file_timestamp = current_timestamp
+            return
+
+        # Check if file was modified
+        if current_timestamp != self.snapshots_file_timestamp:
+            logging.info("Snapshots file modified, resyncing collage snapshot and reloading...")
+
+            try:
+                # Re-sync the collage snapshot (recreates from updated stops)
+                SnapshotManager.sync_collage_snapshot(bundle_path, self.config, self.handler.root_uri)
+
+                # Reinitialize: cleanup then initialize again
+                self.cleanup()
+                self.initialize()
+
+                # Update timestamp AFTER sync (sync writes the file, changing timestamp)
+                self.snapshots_file_timestamp = SnapshotManager.get_snapshots_file_timestamp(bundle_path)
+
+                logging.info("Collage mode reloaded successfully")
+            except Exception as e:
+                logging.error(f"Failed to reload collage mode: {e}")
+                self.enabled = False

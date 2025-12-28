@@ -225,7 +225,7 @@ Shortpress accepts string (callback name) or object with `callback` and `args` (
 - `10ms`: `poll_controls()` - Read hardware inputs (critical path)
 - `20ms`: `poll_indicators()` - Update LEDs/VU meters
 - `200ms`: `poll_lcd_updates()` - Render LCD
-- `1000ms`: `poll_modui_changes()` - Sync with MOD UI changes
+- `1000ms`: `poll_modui_changes()` - Sync with MOD UI (WebSocket messages, banks.json, collage snapshots.json)
 - `2000ms`: `poll_wifi()` - Update WiFi status
 - `60s`: `poll_system_info()` - System health (CPU, throttling)
 
@@ -435,6 +435,8 @@ poll_controls()
 Expression pedal-driven snapshot interpolation.
 
 **Snapshot Activation**: Auto-switches to "Collage Mode" snapshot on pedalboard load. Switching to other snapshots deactivates; switching back reactivates.
+
+**Stop Modification Detection**: Monitors `snapshots.json` timestamp (1000ms poll). On change, recreates Collage Mode snapshot and reinitializes diff maps without pedalboard reload.
 
 ### Config
 

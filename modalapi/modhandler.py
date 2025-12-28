@@ -327,6 +327,10 @@ class Modhandler(Handler):
                 self.banks_file_timestamp = ts
                 self.load_banks()
 
+        # Check for snapshot file modifications (collage mode stop edits)
+        if self.collage_mode:
+            self.collage_mode.check_for_snapshot_changes()
+
     #
     # Bank Stuff
     #
