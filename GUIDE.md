@@ -336,6 +336,13 @@ GET  /get_bpm                            # Get current BPM
   - Builder pattern constructs UI from pedalboard data
   - Event-driven updates via `link_data()`
 
+**Control Progress Visualization**:
+- Real-time progress bars for analog controls and encoders (v2/v3)
+- Icon widgets display fill effect based on control position (0-127 MIDI range)
+- `poll_updates()` (200ms) reads `AnalogMidiControl.last_read` (ADC) or `EncoderMidiControl.midi_value` (MIDI)
+- Progress bar fills column width, text inverts in filled area
+- Icon boxes sized to full column width/height for visual consistency
+
 ### Data Flow Examples
 
 **Expression Pedal Movement**:
