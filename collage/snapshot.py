@@ -165,85 +165,6 @@ class SnapshotManager:
         return state
 
     @staticmethod
-    def create_sparse_snapshot(
-        snapshots_data: SnapshotsJson,
-        first_stop_index: int,
-        second_stop_index: int,
-        param_type_getter: ParameterTypeGetter,
-        snapshot_name: str = 'Collage Mode'
-    ) -> SnapshotData:
-        """
-        Create sparse snapshot with only non-interpolated parameters.
-
-        This prevents parameter drift when users edit the stop snapshots. Only
-        parameters that DON'T differ between stops are included. Interpolated
-        parameters are omitted and will use current/default values (immediately
-        overridden by midi_map).
-
-        Args:
-            snapshots_data: Parsed snapshots.json dict
-            first_stop_index: Index of first stop snapshot
-            second_stop_index: Index of second stop snapshot
-            param_type_getter: Function(instance_id, symbol) -> ParameterType
-            snapshot_name: Name for the created snapshot
-
-        Returns:
-            Snapshot dict with sparse data
-        """
-        # Parse snapshot states
-        state_a = SnapshotManager.parse_snapshot_data(snapshots_data, first_stop_index)
-        state_b = SnapshotManager.parse_snapshot_data(snapshots_data, second_stop_index)
-
-        # Build diff map to identify interpolated parameters
-        diff_map = CollageStop.build_diff_map(state_a, state_b, param_type_getter)
-        diff_map = CollageStop.adjust_binary_params(diff_map)
-
-        # Get first stop snapshot as base
-        base_snapshot = snapshots_data['snapshots'][first_stop_index]
-        collage_data: dict[str, PluginData] = {}
-
-        # Build sparse snapshot
-        for plugin_symbol, plugin_data in base_snapshot['data'].items():
-            instance_id = SnapshotManager.map_key_to_instance(plugin_symbol)
-
-            # Copy plugin structure
-            collage_plugin: PluginData = {
-                'bypassed': plugin_data.get('bypassed', False),
-                'parameters': {},
-                'ports': {},
-                'preset': plugin_data.get('preset', '')
-            }
-
-            # Add optional bpm/bpb if present
-            if 'bpm' in plugin_data:
-                collage_plugin['bpm'] = plugin_data['bpm']
-            if 'bpb' in plugin_data:
-                collage_plugin['bpb'] = plugin_data['bpb']
-
-            # Include only NON-interpolated parameters
-            for param_symbol, value in plugin_data.get('ports', {}).items():
-                # Check if this parameter is interpolated (in diff_map)
-                is_interpolated = (
-                    instance_id in diff_map and
-                    param_symbol in diff_map[instance_id]
-                )
-
-                if not is_interpolated:
-                    # Not interpolated - include in sparse snapshot
-                    collage_plugin['ports'][param_symbol] = value
-                # else: Interpolated - omit from snapshot (midi_map will handle it)
-
-            collage_data[plugin_symbol] = collage_plugin
-
-        collage_snapshot: SnapshotData = {
-            'name': snapshot_name,
-            'data': collage_data
-        }
-
-        logging.debug(f"Created sparse collage snapshot with {len(collage_data)} plugins")
-        return collage_snapshot
-
-    @staticmethod
     def map_instance_to_key(instance_id: str) -> str:
         """Convert instance_id to snapshot key by stripping leading '/'."""
         return instance_id.lstrip('/')
@@ -349,6 +270,24 @@ class SnapshotManager:
         SnapshotManager._notify_mod_ui(root_uri)
 
         return new_idx
+
+    @staticmethod
+    def get_snapshots_file_timestamp(bundle_path: Path) -> float:
+        """
+        Get modification timestamp of snapshots.json file.
+
+        Args:
+            bundle_path: Path to pedalboard bundle directory
+
+        Returns:
+            Modification timestamp (Unix epoch), or 0 if file doesn't exist
+        """
+        import os
+        snapshots_file = bundle_path / "snapshots.json"
+        try:
+            return os.path.getmtime(snapshots_file)
+        except FileNotFoundError:
+            return 0.0
 
     @staticmethod
     def _notify_mod_ui(root_uri: str) -> None:
