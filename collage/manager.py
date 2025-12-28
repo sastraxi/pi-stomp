@@ -15,9 +15,7 @@
 
 """Main CollageMode coordinator class with pre-computation optimization."""
 
-import json
 import logging
-import requests as req
 from pathlib import Path
 from typing import Any
 
@@ -308,75 +306,28 @@ class CollageMode:
         # Default to DEFAULT type
         return ParameterType.DEFAULT
 
-    def ensure_collage_snapshot(self) -> None:
+    def handle_snapshot_change(self, new_snapshot_name: str) -> None:
         """
-        Ensure "Collage Mode" snapshot exists in snapshots.json.
+        Handle snapshot changes and activate/deactivate collage mode accordingly.
 
-        Creates the snapshot if it doesn't exist, using sparse snapshot approach
-        (only non-interpolated parameters). If it already exists, does nothing.
-
-        Raises:
-            FileNotFoundError: If snapshots.json doesn't exist
-            ValueError: If JSON is malformed or config invalid
+        Args:
+            new_snapshot_name: Name of the new snapshot being loaded
         """
-        # Check if creation is enabled in config
-        if not self.config.get('create_snapshot', True):
-            logging.debug("Snapshot auto-creation disabled in config")
-            return
+        collage_snapshot_name = self.config.get('snapshot_name', 'Collage Mode')
 
-        bundle_path = Path(self.handler.current.pedalboard.bundle)
-        snapshots_file = bundle_path / "snapshots.json"
-
-        # Read current snapshots.json
-        snapshots_data = SnapshotManager.read_snapshots_file(bundle_path)
-        snapshot_name = self.config.get('snapshot_name', 'Collage Mode')
-
-        # Check if snapshot already exists
-        for snapshot in snapshots_data.get('snapshots', []):
-            if snapshot.get('name') == snapshot_name:
-                logging.debug(f"'{snapshot_name}' snapshot already exists, skipping creation")
-                return
-
-        # Get first two stop indices
-        snapshot_stops = self.config.get('snapshot_stops', {})
-        sorted_stops = sorted(snapshot_stops.items(), key=lambda x: float(x[0]))
-        first_identifier = sorted_stops[0][1]
-        second_identifier = sorted_stops[1][1]
-
-        first_stop_index = SnapshotManager.resolve_snapshot_identifier(snapshots_data, first_identifier)
-        second_stop_index = SnapshotManager.resolve_snapshot_identifier(snapshots_data, second_identifier)
-
-        # Create sparse collage snapshot
-        logging.info(f"Creating '{snapshot_name}' snapshot...")
-        collage_snapshot = SnapshotManager.create_sparse_snapshot(
-            snapshots_data,
-            first_stop_index,
-            second_stop_index,
-            self._get_parameter_type,
-            snapshot_name
-        )
-
-        # Append to snapshots list
-        snapshots_data['snapshots'].append(collage_snapshot)
-
-        # Write back to file
-        try:
-            with open(snapshots_file, 'w') as f:
-                json.dump(snapshots_data, f, indent=4)
-            logging.info(f"Created '{snapshot_name}' snapshot in snapshots.json")
-        except Exception as e:
-            raise IOError(f"Failed to write snapshots.json: {e}")
-
-        # Notify MOD-UI to reload snapshots
-        try:
-            url = self.handler.root_uri + "snapshot/list"
-            resp = req.get(url)
-            if resp.status_code != 200:
-                logging.warning(f"Failed to reload snapshots in MOD-UI: status {resp.status_code}")
-            else:
-                logging.debug("MOD-UI snapshots reloaded")
-        except Exception as e:
-            logging.warning(f"Failed to notify MOD-UI: {e}")
+        if new_snapshot_name == collage_snapshot_name:
+            # Switching TO "Collage Mode" snapshot
+            if not self.enabled:
+                logging.info(f"Activating collage mode (switched to '{collage_snapshot_name}' snapshot)")
+                try:
+                    self.initialize()
+                except Exception as e:
+                    logging.error(f"Failed to activate collage mode: {e}")
+        else:
+            # Switching AWAY from "Collage Mode" snapshot
+            if self.enabled:
+                logging.info(f"Deactivating collage mode (switched to '{new_snapshot_name}' snapshot)")
+                self.cleanup()
 
     def cleanup(self) -> None:
         """

@@ -31,6 +31,7 @@ import modalapi.pedalboard as Pedalboard
 import modalapi.parameter as Parameter
 import modalapi.wifi as Wifi
 import modalapi.external_midi as ExternalMidi
+from collage.snapshot import SnapshotManager
 from modalapi.websocket_bridge import AsyncWebSocketBridge
 from modalapi.ws_protocol import parse_message, LoadingEndMessage, PedalSnapshotMessage
 
@@ -616,41 +617,37 @@ class Mod(Handler):
         self.hardware.sync_analog_controls()
 
         # Prepare collage mode if enabled in config (snapshot-based activation)
-        if cfg and 'collage_mode' in cfg:
-            collage_cfg = cfg['collage_mode']
-            if collage_cfg.get('enabled', False):
-                try:
-                    from collage import CollageMode
-                    self.collage_mode = CollageMode(self, collage_cfg)
+        # Sync collage mode snapshot (create/recreate/remove based on config)
+        try:
+            collage_cfg = cfg.get('collage_mode') if cfg else None
+            bundle_path = Path(self.current.pedalboard.bundle)
 
-                    # Ensure "Collage Mode" snapshot exists (creates if missing)
-                    self.collage_mode.ensure_collage_snapshot()
+            # Sync snapshot (always recreates if enabled, removes if disabled)
+            snapshot_idx = SnapshotManager.sync_collage_snapshot(
+                bundle_path,
+                collage_cfg,
+                self.root_uri
+            )
 
-                    # Auto-switch to "Collage Mode" snapshot
-                    snapshot_name = collage_cfg.get('snapshot_name', 'Collage Mode')
+            # If enabled and snapshot created, initialize collage mode
+            if snapshot_idx is not None and collage_cfg and collage_cfg.get('enabled', False):
+                from collage import CollageMode
+                self.collage_mode = CollageMode(self, collage_cfg)
 
-                    # Find the snapshot index by name
-                    collage_snapshot_index = None
-                    for idx, name in self.current.presets.items():
-                        if name == snapshot_name:
-                            collage_snapshot_index = idx
-                            break
+                snapshot_name = collage_cfg.get('snapshot_name', 'Collage Mode')
 
-                    if collage_snapshot_index is not None:
-                        # Switch to collage mode snapshot if not already on it
-                        if self.current.preset_index != collage_snapshot_index:
-                            logging.info(f"Auto-switching to '{snapshot_name}' snapshot (index {collage_snapshot_index})")
-                            self.preset_change(collage_snapshot_index)
+                # Switch to collage mode snapshot if not already on it
+                if self.current.preset_index != snapshot_idx:
+                    logging.info(f"Auto-switching to '{snapshot_name}' snapshot (index {snapshot_idx})")
+                    self.preset_change(snapshot_idx)
 
-                        # Initialize collage mode
-                        self.collage_mode.initialize()
-                        logging.info(f"Collage mode enabled on '{snapshot_name}' snapshot")
-                    else:
-                        logging.warning(f"Collage mode configured but '{snapshot_name}' snapshot not found")
+                # Initialize collage mode
+                self.collage_mode.initialize()
+                logging.info(f"Collage mode enabled on '{snapshot_name}' snapshot")
 
-                except Exception as e:
-                    logging.error(f"Failed to prepare collage mode: {e}")
-                    self.collage_mode = None
+        except Exception as e:
+            logging.error(f"Failed to prepare collage mode: {e}")
+            self.collage_mode = None
 
         # Selection info
         self.selectable_items.clear()

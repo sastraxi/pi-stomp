@@ -15,12 +15,15 @@
 
 """Snapshot file operations for collage mode."""
 
+import copy
 import json
 import logging
+import requests as req
 from pathlib import Path
 
 from collage.stop import CollageStop
 from collage.types import (
+    CollageConfig,
     ParameterTypeGetter,
     PluginData,
     SnapshotData,
@@ -249,3 +252,113 @@ class SnapshotManager:
     def map_key_to_instance(key: str) -> str:
         """Convert snapshot key to instance_id by adding leading '/'."""
         return f"/{key}"
+
+    @staticmethod
+    def sync_collage_snapshot(
+        bundle_path: Path,
+        collage_config: CollageConfig | None,
+        root_uri: str
+    ) -> int | None:
+        """
+        Sync Collage Mode snapshot with current configuration.
+
+        If collage mode enabled: Recreate snapshot from first stop (prevents drift)
+        If collage mode disabled/missing: Remove snapshot if it exists
+
+        Args:
+            bundle_path: Path to pedalboard bundle directory
+            collage_config: Collage mode config dict, or None if not configured
+            root_uri: MOD-UI root URI for snapshot reload notifications
+
+        Returns:
+            Snapshot index if created, None if removed or not created
+
+        Raises:
+            FileNotFoundError: If snapshots.json doesn't exist
+            ValueError: If config is invalid
+        """
+        snapshots_file = bundle_path / "snapshots.json"
+        snapshots_data = SnapshotManager.read_snapshots_file(bundle_path)
+
+        # Determine snapshot name
+        snapshot_name = 'Collage Mode'
+        if collage_config:
+            snapshot_name = collage_config.get('snapshot_name', 'Collage Mode')
+
+        # Find existing Collage Mode snapshot
+        existing_idx = None
+        for i, snapshot in enumerate(snapshots_data.get('snapshots', [])):
+            if snapshot.get('name') == snapshot_name:
+                existing_idx = i
+                break
+
+        # Check if collage mode is enabled
+        enabled = collage_config.get('enabled', False) if collage_config else False
+
+        if not enabled:
+            # Remove snapshot if it exists
+            if existing_idx is not None:
+                logging.info(f"Removing '{snapshot_name}' snapshot (collage mode disabled)")
+                snapshots_data['snapshots'].pop(existing_idx)
+
+                # Write updated snapshots
+                with open(snapshots_file, 'w') as f:
+                    json.dump(snapshots_data, f, indent=4)
+
+                # Notify MOD-UI
+                SnapshotManager._notify_mod_ui(root_uri)
+
+            return None
+
+        # Collage mode enabled - recreate snapshot
+
+        # Remove old snapshot if exists
+        if existing_idx is not None:
+            logging.debug(f"Removing old '{snapshot_name}' snapshot for recreation")
+            snapshots_data['snapshots'].pop(existing_idx)
+
+        # Get first stop snapshot to copy
+        snapshot_stops = collage_config.get('snapshot_stops', {})
+        if len(snapshot_stops) < 2:
+            raise ValueError(f"Collage mode requires at least 2 stops, got {len(snapshot_stops)}")
+
+        sorted_stops = sorted(snapshot_stops.items(), key=lambda x: float(x[0]))
+        first_identifier = sorted_stops[0][1]
+
+        first_stop_index = SnapshotManager.resolve_snapshot_identifier(snapshots_data, first_identifier)
+        first_stop_snapshot = snapshots_data['snapshots'][first_stop_index]
+
+        # Create new snapshot by deep copying first stop
+        logging.info(f"Creating '{snapshot_name}' snapshot from '{first_stop_snapshot['name']}'")
+        collage_snapshot: SnapshotData = {
+            'name': snapshot_name,
+            'data': copy.deepcopy(first_stop_snapshot['data'])
+        }
+
+        # Append new snapshot
+        snapshots_data['snapshots'].append(collage_snapshot)
+        new_idx = len(snapshots_data['snapshots']) - 1
+
+        # Write updated snapshots
+        with open(snapshots_file, 'w') as f:
+            json.dump(snapshots_data, f, indent=4)
+
+        logging.info(f"Created '{snapshot_name}' snapshot at index {new_idx}")
+
+        # Notify MOD-UI
+        SnapshotManager._notify_mod_ui(root_uri)
+
+        return new_idx
+
+    @staticmethod
+    def _notify_mod_ui(root_uri: str) -> None:
+        """Notify MOD-UI to reload snapshots."""
+        try:
+            url = root_uri + "snapshot/list"
+            resp = req.get(url)
+            if resp.status_code != 200:
+                logging.warning(f"Failed to reload snapshots in MOD-UI: status {resp.status_code}")
+            else:
+                logging.debug("MOD-UI snapshots reloaded")
+        except Exception as e:
+            logging.warning(f"Failed to notify MOD-UI: {e}")
