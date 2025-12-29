@@ -102,6 +102,7 @@ class Lcd(abstract_lcd.Lcd):
         self.w_power = None
         self.w_wrench = None
         self.w_pedalboard = None
+        self.w_colon = None
         self.w_preset = None
         self.w_plugins = []
         self.w_footswitches = []
@@ -171,6 +172,12 @@ class Lcd(abstract_lcd.Lcd):
 
     def poll_updates(self):
         self.pstack.poll_updates()
+
+        # Tick text widgets (scrolling animation if needed)
+        if self.w_preset:
+            self.w_preset.tick()
+        if self.w_pedalboard:
+            self.w_pedalboard.tick()
 
         # Update control progress bars (analog controls and encoders)
         for icon in self.w_controls:
@@ -357,29 +364,51 @@ class Lcd(abstract_lcd.Lcd):
         self.main_panel.refresh()
 
     def draw_pedalboard(self, pedalboard_name):
-        pedalboard_name += ":"
-        self.title_split = min(self.title_font.getmask(pedalboard_name).getbbox()[2], self.title_split_orig)
+        text_width = self.title_font.getmask(pedalboard_name).getbbox()[2]
+
+        spacing = 2  # Default sel_width for selectable widgets
+        min_box_width = text_width + (spacing * 2)
+        self.title_split = min(min_box_width, self.title_split_orig)
+
+        # Update or create pedalboard title (no colon)
         if self.w_pedalboard is not None:
             self.w_pedalboard.set_text(pedalboard_name)
             self.w_pedalboard.set_box(box=Box.xywh(0, 20, self.title_split, 36), realign=True, refresh=True)
-            return
-        self.w_pedalboard = TextWidget(
-            box=Box.xywh(0, 20, self.title_split, 36),
-            text=pedalboard_name,
-            font=self.title_font,
-            parent=self.main_panel,
-            action=self.draw_pedalboard_menu,
-        )
-        self.main_panel.add_sel_widget(self.w_pedalboard)
+        else:
+            self.w_pedalboard = ScrollingText(
+                box=Box.xywh(0, 20, self.title_split, 36),
+                text=pedalboard_name,
+                font=self.title_font,
+                parent=self.main_panel,
+                action=self.draw_pedalboard_menu,
+            )
+            self.main_panel.add_sel_widget(self.w_pedalboard)
+
+        # Static colon separator
+        colon_width = self.title_font.getmask(":").getbbox()[2]
+        colon_x = self.title_split + spacing
+        if self.w_colon is not None:
+            self.w_colon.set_box(box=Box.xywh(colon_x, 20, colon_width, 36), realign=True, refresh=True)
+        else:
+            self.w_colon = TextWidget(
+                box=Box.xywh(colon_x, 20, colon_width, 36),
+                text=":",
+                font=self.title_font,
+                h_margin=0,
+                parent=self.main_panel,
+            )
 
     def draw_preset(self, preset_name):
-        x = self.title_split + 4  # title_split gets set by draw_pedalboard
+        # Position after pedalboard title, padding, colon, and padding
+        colon_width = self.title_font.getmask(":").getbbox()[2]
+        padding = 2  # Must match padding in draw_pedalboard
+        x = self.title_split + padding + colon_width + padding
         width = self.display_width - x
         if self.w_preset is not None:
             self.w_preset.set_text(preset_name)
             self.w_preset.set_box(box=Box.xywh(x, 20, width, 36), realign=True, refresh=True)
             return
-        self.w_preset = TextWidget(
+        self.w_preset = ScrollingText(
             box=Box.xywh(x, 20, width, 36),
             text=preset_name,
             font=self.title_font,

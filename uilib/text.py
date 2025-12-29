@@ -14,7 +14,8 @@
 # along with pi-stomp.  If not, see <https://www.gnu.org/licenses/>.
 
 from math import log
-from PIL import ImageFont
+from typing import Optional
+from PIL import Image, ImageFont, ImageDraw
 
 from uilib.panel import *
 from uilib.misc import *
@@ -242,6 +243,10 @@ class TextWidget(Widget):
         self.text_size_valid = False
         self.refresh()
 
+    def tick(self):
+        """Called every 200ms from poll_updates(). Override in subclasses for animation."""
+        pass
+
     def _draw(self, image, draw, real_box):
         # Draw text
         #
@@ -285,3 +290,158 @@ class Button(TextWidget):
         self.outline = self._get_arg(kwargs, 'outline', 1)
         self.sel_width = self._get_arg(kwargs, 'sel_width', 2)
         super(Button,self).__init__(**kwargs)
+
+
+class ScrollingText(TextWidget):
+    """TextWidget with horizontal ping-pong scrolling for overflow text."""
+
+    def __init__(self, scroll_speed: int = 4, pause_start_ticks: int = 10, pause_end_ticks: int = 5, **kwargs):
+        """
+        Args:
+            scroll_speed: Pixels to scroll per tick (200ms interval)
+            pause_start_ticks: Ticks to pause at start position (default: 10 = 2 seconds)
+            pause_end_ticks: Ticks to pause at end position (default: 5 = 1 second)
+        """
+        super().__init__(**kwargs)
+        self.scroll_speed: int = scroll_speed
+        self.pause_start_ticks: int = pause_start_ticks
+        self.pause_end_ticks: int = pause_end_ticks
+
+        # Scrolling state
+        self.scroll_offset: int = 0
+        self.scroll_direction: int = 1  # 1 = scroll left, -1 = scroll right
+        self.scroll_pause_counter: int = pause_start_ticks
+
+        # Cached rendering
+        self.cached_text_image: Optional[Image.Image] = None
+        self.cached_text_width: int = 0
+
+    def _render_text_to_cache(self) -> None:
+        """Pre-render full text to a PIL Image for efficient scrolling."""
+        if self.text is None or len(self.text) == 0:
+            self.cached_text_image = None
+            self.cached_text_width = 0
+            return
+
+        # Get text dimensions
+        tw, th = self._get_text_size()
+        self.cached_text_width = tw
+
+        # Create image for full text (RGB mode to match main display)
+        self.cached_text_image = Image.new('RGB', (tw, th), self.bkgnd_color)
+        draw = ImageDraw.Draw(self.cached_text_image)
+
+        # Draw text at origin
+        draw.text((0, 0), self.text, fill=self.fgnd_color, font=self.font)
+
+    def _should_scroll(self) -> bool:
+        """Check if text overflows available width."""
+        if self.cached_text_image is None:
+            return False
+
+        h_margin, v_margin = self._get_margins()
+        available_width = self.box.width - h_margin - self.outline
+
+        return self.cached_text_width > available_width
+
+    def tick(self) -> None:
+        """Override: Called every 200ms from poll_updates() to advance scrolling animation."""
+        # Ensure cached image exists
+        if self.cached_text_image is None:
+            self._render_text_to_cache()
+
+        # Check if scrolling is needed
+        if not self._should_scroll():
+            # Text fits - reset to start if currently scrolled
+            if self.scroll_offset != 0:
+                self.scroll_offset = 0
+                self.scroll_direction = 1
+                self.scroll_pause_counter = self.pause_start_ticks
+                self.refresh()
+            return
+
+        # Handle pause at ends
+        if self.scroll_pause_counter > 0:
+            self.scroll_pause_counter -= 1
+            return
+
+        # Calculate scroll boundaries
+        h_margin, v_margin = self._get_margins()
+        available_width = self.box.width - 2 * h_margin - self.outline
+        max_offset = self.cached_text_width - available_width
+
+        # Update scroll offset
+        old_offset = self.scroll_offset
+        self.scroll_offset += self.scroll_direction * self.scroll_speed
+
+        # Bounce at boundaries with pause
+        if self.scroll_offset >= max_offset:
+            self.scroll_offset = max_offset
+            self.scroll_direction = -1
+            self.scroll_pause_counter = self.pause_end_ticks
+        elif self.scroll_offset <= 0:
+            self.scroll_offset = 0
+            self.scroll_direction = 1
+            self.scroll_pause_counter = self.pause_start_ticks
+
+        # Only refresh if offset actually changed
+        if self.scroll_offset != old_offset:
+            self.refresh()
+
+    def _clear_cache_and_restart(self) -> None:
+        self.cached_text_image = None
+        self.scroll_offset = 0
+        self.scroll_direction = 1
+        self.scroll_pause_counter = self.pause_start_ticks
+
+    def set_text(self, text: str) -> None:
+        super().set_text(text)
+        self._clear_cache_and_restart()
+
+    def set_font(self, font: ImageFont.FreeTypeFont) -> None:
+        super().set_font(font)
+        self._clear_cache_and_restart()
+
+    def _draw(self, image: Image.Image, draw: ImageDraw.ImageDraw, real_box) -> None:
+        """Blit from cached image at current scroll position"""
+        if self.cached_text_image is None:
+            self._render_text_to_cache()
+
+        # If no cached image (empty text), nothing to draw
+        if self.cached_text_image is None:
+            return
+
+        # Calculate drawing position
+        h_margin, v_margin = self._get_margins()
+        tw, th = self._get_text_size()
+        extra = self.outline
+        hroom = real_box.width - h_margin - extra
+        vroom = real_box.height - v_margin - extra
+
+        if hroom <= 0 or vroom <= 0:
+            return
+
+        # Handle horizontal alignment for non-scrolling text
+        if not self._should_scroll():
+            # Text fits - use normal alignment (guaranteed tw <= hroom)
+            if self.text_halign == TextHAlign.LEFT:
+                hoffset = 0
+            elif self.text_halign == TextHAlign.RIGHT:
+                hoffset = hroom - tw
+            else:  # CENTER or None
+                hoffset = int((hroom - tw) / 2)
+            x_pos = real_box.x0 + h_margin + hoffset
+            y_pos = real_box.y0 + v_margin
+
+            # Paste full cached text (no cropping needed since tw <= hroom)
+            crop_box = (0, 0, tw, th)
+            image.paste(self.cached_text_image.crop(crop_box), (x_pos, y_pos))
+        else:
+            # Text scrolls - always left-aligned, offset by scroll_offset
+            x_pos = real_box.x0 + h_margin
+            y_pos = real_box.y0 + v_margin
+
+            # Crop visible portion from cached image
+            crop_width = min(hroom, self.cached_text_width - self.scroll_offset)
+            crop_box = (self.scroll_offset, 0, self.scroll_offset + crop_width, th)
+            image.paste(self.cached_text_image.crop(crop_box), (x_pos, y_pos))
