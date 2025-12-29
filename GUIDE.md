@@ -306,7 +306,9 @@ GET  /get_bpm                            # Get current BPM
 **Change Detection**:
 - WebSocket messages from MOD-UI (`loading_end`, `pedal_snapshot`)
 - Typed protocol in `ws_protocol.py` parses messages
-- Tracks snapshot index from events, polls REST API for bundle path
+- `loading_end` stages snapshot ID in `next_pedalboard_preset_index` until pedalboard change detected
+- `pedal_snapshot` updates staged ID if pending, otherwise updates current pedalboard
+- Monitors `last.json` mtime to detect pedalboard changes, reads bundle path from file
 
 ### Core Components
 
@@ -365,17 +367,18 @@ poll_controls() (10ms)
 MOD-UI sends WebSocket 'loading_end' message
   → poll_modui_changes() receives via ws_bridge (1000ms)
     → parse_message() → LoadingEndMessage
-      → GET /pedalboard/current (REST API)
-        → reload_pedalboard(bundle)
-          → LILV parses TTL → creates Pedalboard object
-            → set_current_pedalboard(pb)
-              → Load {bundle}/config.yml
-              → hardware.reinit(cfg) - overlay config
-              → bind_current_pedalboard() - map controllers to parameters
-              → external_midi.send_messages_for_pedalboard()
-              → hardware.sync_analog_controls()
-              → update_lcd()
-      → Update current.preset_index from snapshot_id
+      → Store snapshot_id in next_pedalboard_preset_index
+    → pedalboard_monitor.check_for_change() detects last.json mtime change
+      → get_current_pedalboard_bundle() reads bundle path from last.json
+        → LILV parses TTL → creates Pedalboard object
+          → set_current_pedalboard(pb)
+            → Use next_pedalboard_preset_index for preset_index, clear staging
+            → Load {bundle}/config.yml
+            → hardware.reinit(cfg) - overlay config
+            → bind_current_pedalboard() - map controllers to parameters
+            → external_midi.send_messages_for_pedalboard()
+            → hardware.sync_analog_controls()
+            → update_lcd()
 ```
 
 **Footswitch Press → Plugin Bypass**:
