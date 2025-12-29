@@ -24,8 +24,8 @@ sudo journalctl -u mod-ala-pi-stomp -n 50
 # 2. Copy Python files to device
 scp modalapi/*.py pistomp@pistomp.local:/home/pistomp/pi-stomp/modalapi/
 
-# 3. Clear Python cache and restart
-ssh pistomp@pistomp.local "rm -rf /home/pistomp/pi-stomp/modalapi/__pycache__/* && sudo systemctl restart mod-ala-pi-stomp"
+# 3. Restart the service (Python takes care of re-creating __pycache__ files)
+ssh pistomp@pistomp.local "sudo systemctl restart mod-ala-pi-stomp"
 ```
 
 ## Key Data Paths
@@ -292,6 +292,14 @@ GET  /get_bpm                            # Get current BPM
 - Watches `/home/pistomp/data/last.json` timestamp
 - MOD UI writes this when pedalboard changes
 - piStomp detects → reloads pedalboard → syncs hardware
+
+**Banks** (v3 only):
+- Pedalboard grouping/ordering managed by MOD-UI
+- File: `/home/pistomp/data/banks.json` (read-only to piStomp)
+- Polled via mtime check (1000ms) in `poll_modui_changes()`
+- Structure: `{bank_name: [pedalboard_titles]}`
+- Current selection persisted in `settings.yml`
+- Filters pedalboard menu if bank selected, shows all if None
 
 ### Core Components
 
