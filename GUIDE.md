@@ -38,8 +38,8 @@ Services start in dependency chain: `jack → mod-host → mod-ui → mod-ala-pi
 # 2. Copy Python files to device
 scp modalapi/*.py pistomp@pistomp.local:/home/pistomp/pi-stomp/modalapi/
 
-# 3. Clear Python cache and restart
-ssh pistomp@pistomp.local "rm -rf /home/pistomp/pi-stomp/modalapi/__pycache__/* && sudo systemctl restart mod-ala-pi-stomp"
+# 3. Restart the service (Python takes care of re-creating __pycache__ files)
+ssh pistomp@pistomp.local "sudo systemctl restart mod-ala-pi-stomp"
 ```
 
 ## Key Data Paths
@@ -309,6 +309,14 @@ GET  /get_bpm                            # Get current BPM
 - `loading_end` stages snapshot ID in `next_pedalboard_preset_index` until pedalboard change detected
 - `pedal_snapshot` updates staged ID if pending, otherwise updates current pedalboard
 - Monitors `last.json` mtime to detect pedalboard changes, reads bundle path from file
+
+**Banks** (v3 only):
+- Pedalboard grouping/ordering managed by MOD-UI
+- File: `/home/pistomp/data/banks.json` (read-only to piStomp)
+- Polled via mtime check (1000ms) in `poll_modui_changes()`
+- Structure: `{bank_name: [pedalboard_titles]}`
+- Current selection persisted in `settings.yml`
+- Filters pedalboard menu if bank selected, shows all if None
 
 ### Core Components
 
