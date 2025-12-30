@@ -74,6 +74,14 @@ class TrueBypassMessage:
 
 
 @dataclass
+class OutputSetMessage:
+    """Plugin output port value update."""
+    instance_id: str
+    port_symbol: str
+    value: float
+
+
+@dataclass
 class UnknownMessage:
     """Message type we don't handle yet."""
     raw: str
@@ -88,6 +96,7 @@ WebSocketMessage = Union[
     AddHwPortMessage,
     RemoveHwPortMessage,
     TrueBypassMessage,
+    OutputSetMessage,
     UnknownMessage,
 ]
 
@@ -152,6 +161,19 @@ def parse_message(raw_message: str) -> WebSocketMessage:
             left = int(parts[1]) if len(parts) > 1 else 0
             right = int(parts[2].split()[0]) if len(parts) > 2 else 0
             return TrueBypassMessage(left=left, right=right)
+
+        elif cmd == "output_set":
+            # Format: output_set <instance_id> <port_symbol> <value>
+            if len(parts) > 1:
+                details = parts[1].split(' ', 2)
+                instance_id = details[0] if len(details) > 0 else ""
+                port_symbol = details[1] if len(details) > 1 else ""
+                value = float(details[2]) if len(details) > 2 else 0.0
+                return OutputSetMessage(
+                    instance_id=instance_id,
+                    port_symbol=port_symbol,
+                    value=value
+                )
 
     except (ValueError, IndexError) as e:
         logging.warning(f"Failed to parse WebSocket message '{raw_message}': {e}")

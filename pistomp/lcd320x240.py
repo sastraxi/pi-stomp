@@ -101,6 +101,8 @@ class Lcd(abstract_lcd.Lcd):
         self.w_eq = None
         self.w_power = None
         self.w_wrench = None
+        self.w_clip_left = None
+        self.w_clip_right = None
         self.w_pedalboard = None
         self.w_colon = None
         self.w_preset = None
@@ -216,12 +218,54 @@ class Lcd(abstract_lcd.Lcd):
                 if icon.progress != progress:
                     icon.set_progress(progress)
 
+        # Update clipping indicators from handler's clipping_monitor
+        if self.handler and self.handler.clipping_monitor is not None:
+            clip_left, clip_right, enabled = self.handler.clipping_monitor.check_clipping()
+            if self.w_clip_left is not None:
+                if enabled:
+                    self.update_clip_indicators(clip_left, clip_right)
+                else:
+                    # Hide indicators when no meter available
+                    if self.w_clip_left.parent is not None:
+                        self.w_clip_left.destroy()
+                        self.w_clip_right.destroy()
+                        self.w_clip_left = None
+                        self.w_clip_right = None
+
     #
     # Toolbar
     #
     def draw_tools(self, wifi_type=None, eq_type=None, bypass_type=None, system_type=None):
         if self.w_wifi is not None:
             return
+
+        # Clip indicators (non-selectable, left-aligned in status bar)
+        self.w_clip_left = TextWidget(
+            box=Box.xywh(2, 2, 14, 16),
+            text="L",
+            font=self.tiny_font,
+            parent=self.main_panel,
+            outline=1,
+            sel_width=0,  # Non-selectable
+            h_margin=1,
+            v_margin=0,
+        )
+        self.w_clip_left.set_foreground((80, 80, 80))  # Dark gray when not clipping
+        self.w_clip_left.set_outline(1, (80, 80, 80))
+
+        self.w_clip_right = TextWidget(
+            box=Box.xywh(18, 2, 14, 16),
+            text="R",
+            font=self.tiny_font,
+            parent=self.main_panel,
+            outline=1,
+            sel_width=0,  # Non-selectable
+            h_margin=1,
+            v_margin=0,
+        )
+        self.w_clip_right.set_foreground((80, 80, 80))  # Dark gray when not clipping
+        self.w_clip_right.set_outline(1, (80, 80, 80))
+
         self.w_wifi = ImageWidget(
             box=Box.xywh(210, 0, 20, 20),
             image_path=os.path.join(self.imagedir, "wifi_gray.png"),
@@ -359,7 +403,8 @@ class Lcd(abstract_lcd.Lcd):
     #
     def draw_title(self):
         self.draw_pedalboard(self.current.pedalboard.title)
-        self.draw_preset(self.current.presets[self.current.preset_index])
+        preset_name = self.current.presets.get(self.current.preset_index, "")
+        self.draw_preset(preset_name)
         self.draw_info_message("")  # clear loading msg
         self.main_panel.refresh()
 
@@ -872,6 +917,28 @@ class Lcd(abstract_lcd.Lcd):
             img = "power_gray.png"
         image_path = os.path.join(self.imagedir, img)
         self.w_power.replace_img(image_path)
+
+    def update_clip_indicators(self, clip_left, clip_right):
+        """Update clip indicator colors based on clipping state."""
+        if self.w_clip_left is None or self.w_clip_right is None:
+            return
+
+        # Left channel
+        if clip_left:
+            self.w_clip_left.set_foreground((255, 0, 0))  # Red when clipping
+            self.w_clip_left.set_outline(1, (255, 0, 0))
+        else:
+            self.w_clip_left.set_foreground((80, 80, 80))  # Dark gray when not clipping
+            self.w_clip_left.set_outline(1, (80, 80, 80))
+
+        # Right channel
+        if clip_right:
+            self.w_clip_right.set_foreground((255, 0, 0))  # Red when clipping
+            self.w_clip_right.set_outline(1, (255, 0, 0))
+        else:
+            self.w_clip_right.set_foreground((80, 80, 80))  # Dark gray when not clipping
+            self.w_clip_right.set_outline(1, (80, 80, 80))
+
 
     def draw_tool_select(self, tool_type):
         pass

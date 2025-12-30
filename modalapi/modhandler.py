@@ -34,12 +34,13 @@ import modalapi.external_midi as ExternalMidi
 import pistomp.settings as Settings
 from collage.snapshot import SnapshotManager
 from modalapi.websocket_bridge import AsyncWebSocketBridge
-from modalapi.ws_protocol import parse_message, LoadingEndMessage, PedalSnapshotMessage
+from modalapi.ws_protocol import parse_message, LoadingEndMessage, PedalSnapshotMessage, OutputSetMessage
 from modalapi.pedalboard_monitor import PedalboardMonitor
 
 from pistomp.analogmidicontrol import AnalogMidiControl
 from pistomp.encodermidicontrol import EncoderMidiControl
 from pistomp.footswitch import Footswitch
+from pistomp.clipping_monitor import ClippingMonitor
 
 
 class Modhandler(Handler):
@@ -130,6 +131,10 @@ class Modhandler(Handler):
 
         # Collage mode manager (initialized per pedalboard if enabled)
         self.collage_mode = None
+
+        # Clipping monitor using LV2 meter plugins via WebSocket
+        # Threshold 1.0 = full scale (0dBFS) for linear amplitude values
+        self.clipping_monitor = ClippingMonitor()
 
     def __del__(self):
         logging.info("Handler cleanup")
@@ -324,6 +329,11 @@ class Modhandler(Handler):
                 self._handle_collage_mode_snapshot_change(msg.snapshot_id)
                 self.lcd.draw_title()
 
+        elif isinstance(msg, OutputSetMessage):
+            # Route to clipping monitor for meter plugin output monitoring
+            if self.clipping_monitor is not None:
+                self.clipping_monitor.handle_output_set(msg.instance_id, msg.port_symbol, msg.value)
+
     def poll_modui_changes(self):
         """Poll for changes from MOD-UI"""
         if self.ws_bridge is not None:
@@ -488,6 +498,10 @@ class Modhandler(Handler):
 
         # Sync current state of analog controls (expression pedals, etc.)
         self.hardware.sync_analog_controls()
+
+        # Update clipping monitor to find modmeter plugins in new pedalboard
+        if self.clipping_monitor is not None:
+            self.clipping_monitor.update_pedalboard(pedalboard)
 
         # Prepare collage mode if enabled in config (snapshot-based activation)
         # Sync collage mode snapshot (create/recreate/remove based on config)
