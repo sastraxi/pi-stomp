@@ -133,7 +133,6 @@ class Modhandler(Handler):
         self.collage_mode = None
 
         # Clipping monitor using LV2 meter plugins via WebSocket
-        # Threshold 1.0 = full scale (0dBFS) for linear amplitude values
         self.clipping_monitor = ClippingMonitor()
 
     def __del__(self):
@@ -331,6 +330,7 @@ class Modhandler(Handler):
 
         elif isinstance(msg, OutputSetMessage):
             # Route to clipping monitor for meter plugin output monitoring
+            # logging.debug(f"Got output set message: {msg.instance_id} {msg.port_symbol} {msg.value}")
             if self.clipping_monitor is not None:
                 self.clipping_monitor.handle_output_set(msg.instance_id, msg.port_symbol, msg.value)
 

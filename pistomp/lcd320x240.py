@@ -218,19 +218,18 @@ class Lcd(abstract_lcd.Lcd):
                 if icon.progress != progress:
                     icon.set_progress(progress)
 
-        # Update clipping indicators from handler's clipping_monitor
+        # Update output clipping indicators
         if self.handler and self.handler.clipping_monitor is not None:
-            clip_left, clip_right, enabled = self.handler.clipping_monitor.check_clipping()
-            if self.w_clip_left is not None:
-                if enabled:
-                    self.update_clip_indicators(clip_left, clip_right)
-                else:
-                    # Hide indicators when no meter available
-                    if self.w_clip_left.parent is not None:
-                        self.w_clip_left.destroy()
-                        self.w_clip_right.destroy()
-                        self.w_clip_left = None
-                        self.w_clip_right = None
+            if self.handler.clipping_monitor.enabled:                    
+                clip_left, clip_right = self.handler.clipping_monitor.check_clipping()
+                self.update_clip_indicators(clip_left, clip_right)
+            else:
+                # Hide indicators when no meter available, assume it's forever
+                if self.w_clip_left is not None:
+                    self.w_clip_left.destroy()
+                    self.w_clip_right.destroy()
+                    self.w_clip_left = None
+                    self.w_clip_right = None
 
     #
     # Toolbar
@@ -920,9 +919,6 @@ class Lcd(abstract_lcd.Lcd):
 
     def update_clip_indicators(self, clip_left, clip_right):
         """Update clip indicator colors based on clipping state."""
-        if self.w_clip_left is None or self.w_clip_right is None:
-            return
-
         # Left channel
         if clip_left:
             self.w_clip_left.set_foreground((255, 0, 0))  # Red when clipping
@@ -939,6 +935,8 @@ class Lcd(abstract_lcd.Lcd):
             self.w_clip_right.set_foreground((80, 80, 80))  # Dark gray when not clipping
             self.w_clip_right.set_outline(1, (80, 80, 80))
 
+        self.w_clip_left.refresh()
+        self.w_clip_right.refresh()
 
     def draw_tool_select(self, tool_type):
         pass

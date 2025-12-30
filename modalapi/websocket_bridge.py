@@ -36,10 +36,7 @@ def should_log_message(message: str) -> bool:
     """Filter out high-frequency messages to reduce log spam."""
     if message == "ping":
         return False
-    # Filter out high-frequency output_set messages (hundreds per second)
-    if message.startswith('output_set '):
-        return False
-    return not message.startswith(('stats ', 'sys_stats '))
+    return not message.startswith(('output_set ', 'stats ', 'sys_stats '))
 
 
 class AsyncWebSocketBridge:

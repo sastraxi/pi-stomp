@@ -26,7 +26,7 @@ class ClippingMonitor:
 
     MODMETER_URI = "http://gareus.org/oss/lv2/modmeter"
 
-    def __init__(self, clip_threshold=0.5, hold_ticks=5):
+    def __init__(self, clip_threshold=1, hold_ticks=2):
         """
         Initialize clipping monitor.
 
@@ -43,8 +43,8 @@ class ClippingMonitor:
         self.meter_right_id = None
 
         # Peak port symbols to monitor
-        self.left_peak_symbol = "peak"
-        self.right_peak_symbol = "peak"
+        self.left_peak_symbol = "level"
+        self.right_peak_symbol = "level"
 
         # Current peak values
         self.peak_left = 0.0
@@ -56,7 +56,7 @@ class ClippingMonitor:
         self.clip_left_counter = 0
         self.clip_right_counter = 0
 
-        self.enabled = False
+        self.enabled = True
 
     def update_pedalboard(self, pedalboard):
         """
@@ -78,7 +78,9 @@ class ClippingMonitor:
             return
 
         # Find modmeter plugins by instance_id (contains "modmeter" or "meter")
-        meters = [p for p in pedalboard.plugins if "modmeter" in p.instance_id.lower() or "meter" in p.instance_id.lower()]
+        meters = [
+            p for p in pedalboard.plugins if "modmeter" in p.instance_id.lower() or "meter" in p.instance_id.lower()
+        ]
 
         if not meters:
             logging.debug("ClippingMonitor: No modmeter plugins found in pedalboard")
@@ -86,12 +88,12 @@ class ClippingMonitor:
 
         # Use first meter for left channel
         if len(meters) >= 1:
-            self.meter_left_id = meters[0].instance_id  # Keep /graph/ prefix to match websocket format
+            self.meter_left_id = f"/graph{meters[0].instance_id}"
             logging.info(f"ClippingMonitor: Monitoring {self.meter_left_id} for left channel")
 
         # Use second meter for right channel if available
         if len(meters) >= 2:
-            self.meter_right_id = meters[1].instance_id
+            self.meter_right_id = f"/graph{meters[1].instance_id}"
             logging.info(f"ClippingMonitor: Monitoring {self.meter_right_id} for right channel")
         elif len(meters) >= 1:
             # Only one meter - use for both channels
@@ -131,18 +133,14 @@ class ClippingMonitor:
         for next polling interval.
 
         Returns:
-            tuple: (clip_left, clip_right, enabled) - clip flags and monitor status
+            tuple: (clip_left, clip_right) - clip flags per output
         """
         if not self.enabled:
-            return False, False, False
+            return False, False
 
         # Check if current peak values exceed threshold
         clipped_left = self.peak_left >= self.clip_threshold
         clipped_right = self.peak_right >= self.clip_threshold
-
-        # Reset peaks for next polling interval (handle_output_set uses max())
-        self.peak_left = 0.0
-        self.peak_right = 0.0
 
         # Update clip state with hold counter
         if clipped_left:
@@ -163,7 +161,11 @@ class ClippingMonitor:
             else:
                 self.clip_right = False
 
-        return self.clip_left, self.clip_right, True
+        # Reset peaks for next polling interval
+        self.peak_left = 0.0
+        self.peak_right = 0.0
+
+        return self.clip_left, self.clip_right
 
     def reset_clip_indicators(self):
         """Immediately clear clip indicators (e.g., on pedalboard change)."""
@@ -171,3 +173,5 @@ class ClippingMonitor:
         self.clip_right = False
         self.clip_left_counter = 0
         self.clip_right_counter = 0
+        self.peak_left = 0.0
+        self.peak_right = 0.0

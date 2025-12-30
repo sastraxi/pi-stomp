@@ -111,7 +111,7 @@ def parse_message(raw_message: str) -> WebSocketMessage:
     Returns:
         Typed message object
     """
-    parts = raw_message.split(' ', 2)
+    parts = raw_message.split(' ')
     if not parts:
         return UnknownMessage(raw=raw_message)
 
@@ -165,8 +165,8 @@ def parse_message(raw_message: str) -> WebSocketMessage:
         elif cmd == "output_set":
             # Format: output_set <instance_id> <port_symbol> <value>
             if len(parts) > 1:
-                details = parts[1].split(' ', 2)
-                instance_id = details[0] if len(details) > 0 else ""
+                details = parts[1:]
+                instance_id = details[0]
                 port_symbol = details[1] if len(details) > 1 else ""
                 value = float(details[2]) if len(details) > 2 else 0.0
                 return OutputSetMessage(
