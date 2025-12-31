@@ -196,14 +196,18 @@ class Lcd(abstract_lcd.Lcd):
                 midi_value = icon.object.midi_value
 
             elif isinstance(icon.object, BlendMode):
-                # BlendMode - get position from hijacked pedal
-                pedal = icon.object.pedal_controller.controlled_pedal
-                if pedal:
-                    position = pedal.last_read / 1023.0  # Normalize to 0.0-1.0
+                # BlendMode - get position from hijacked input
+                input_ctrl = icon.object.input_controller.controlled_input
+                if input_ctrl:
+                    # Get normalized position based on input type
+                    if isinstance(input_ctrl, EncoderMidiControl):
+                        position = input_ctrl.midi_value / 127.0
+                    else:
+                        position = input_ctrl.last_read / 1023.0  # ADC normalized to 0.0-1.0
                     midi_value = int(position * 127)  # Convert to MIDI range for progress bar
 
                     # Find closest stop and update label with snapshot name
-                    stops = icon.object.pedal_controller.stops
+                    stops = icon.object.input_controller.stops
                     closest_stop = min(stops, key=lambda s: abs(s.position - position))
 
                     # Get snapshot name and update label if changed
@@ -211,7 +215,7 @@ class Lcd(abstract_lcd.Lcd):
                     if snapshot_name and snapshot_name != icon.text:
                         icon.set_text(snapshot_name)
                 else:
-                    logger.warning("BlendMode icon has no associated pedal controller")
+                    logger.warning("BlendMode icon has no associated input controller")
 
             if midi_value is not None:
                 progress = midi_value / 127.0
@@ -1000,11 +1004,10 @@ class Lcd(abstract_lcd.Lcd):
             # Check if this control is a BlendMode analog input
             if (
                 analog_control is not None
-                and self.handler.blend_mode
-                and self.handler.blend_mode.enabled
-                and analog_control.id == self.handler.blend_mode.config.get("input_id", 0)
+                and self.handler.active_blend_mode
+                and analog_control.id == self.handler.active_blend_mode.config.get("input_id", 0)
             ):
-                icon_object = self.handler.blend_mode
+                icon_object = self.handler.active_blend_mode
 
             if k is None:
                 # Non-mapped control
