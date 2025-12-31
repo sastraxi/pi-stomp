@@ -13,7 +13,7 @@
 # You should have received a copy of the GNU General Public License
 # along with pi-stomp.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Type definitions for collage mode."""
+"""Type definitions for blend mode."""
 
 from dataclasses import dataclass
 from typing import Any, Callable, NamedTuple, NotRequired, Protocol, TypedDict
@@ -22,14 +22,24 @@ from modalapi.parameter import Type as ParameterType
 
 
 # Config TypedDicts
-class CollageConfig(TypedDict):
-    """Complete collage mode configuration from YAML."""
-    enabled: bool
-    expression_pedal_id: NotRequired[int]
-    interpolation: NotRequired[str]
-    snapshot_stops: dict[str, int | str]  # "position" -> snapshot (index or name)
-    create_snapshot: NotRequired[bool]
-    snapshot_name: NotRequired[str]
+class BlendSnapshotConfig(TypedDict):
+    """Single blend snapshot configuration from YAML."""
+    name: str  # Required - snapshot name
+    input_id: int  # Required - analog control or encoder ID
+    interpolation: NotRequired[str]  # Optional - default: "linear"
+    stops: dict[str, int | str] | list[str | int]  # Dict or list format
+
+
+class PedalboardBlendConfig(TypedDict):
+    """Pedalboard-level blend configuration containing multiple blend snapshots."""
+    blend_snapshots: list[BlendSnapshotConfig]
+
+
+# Type alias for normalized stops (always dict format after normalization)
+NormalizedStops = dict[str, int | str]  # "position" -> snapshot (index or name)
+
+# Type alias for MIDI-bound parameters (excluded from interpolation)
+MidiBoundParams = set[tuple[str, str]]  # {(instance_id, symbol)}
 
 
 # Snapshots.json TypedDicts
@@ -85,10 +95,18 @@ class ParameterKey(NamedTuple):
 
 
 # Protocol types for external dependencies
-class AnalogControlProtocol(Protocol):
-    """Protocol for expression pedal / analog control objects."""
+class BlendInputProtocol(Protocol):
+    """Protocol for blend mode input sources (expression pedal or encoder)."""
     id: int
     value_change_callback: Callable[[int, Any], None] | None
+
+    def get_normalized_value(self) -> float:
+        """Return current value normalized to [0.0, 1.0]."""
+        ...
+
+
+# Backwards compatibility alias
+AnalogControlProtocol = BlendInputProtocol
 
 
 class WebSocketBridgeProtocol(Protocol):

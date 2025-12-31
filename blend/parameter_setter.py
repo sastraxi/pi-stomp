@@ -17,7 +17,7 @@
 
 import logging
 
-from collage.types import ParameterKey, WebSocketBridgeProtocol
+from blend.types import ParameterKey, WebSocketBridgeProtocol
 
 
 class ParameterSetter:

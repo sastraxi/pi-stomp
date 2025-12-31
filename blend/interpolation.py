@@ -15,7 +15,7 @@
 
 """Per-parameter interpolation functions for collage mode."""
 
-from collage.easing import (
+from blend.easing import (
     ease_in_cubic,
     ease_in_out_cubic,
     ease_in_out_quad,
@@ -25,7 +25,7 @@ from collage.easing import (
     exponential_easing,
     sine_easing,
 )
-from collage.types import EasingFunc, InterpolationFunc, ParamData
+from blend.types import EasingFunc, InterpolationFunc, ParamData
 
 
 # Interpolation Function Framework
