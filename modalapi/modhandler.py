@@ -26,7 +26,7 @@ import common.util as util
 import modalapi.pedalboard as Pedalboard
 import modalapi.wifi as Wifi
 import pistomp.settings as Settings
-from collage.snapshot import SnapshotManager
+from blend.snapshot import SnapshotManager
 from modalapi.websocket_bridge import AsyncWebSocketBridge
 from modalapi.ws_protocol import parse_message, LoadingEndMessage, PedalSnapshotMessage
 from modalapi.pedalboard_monitor import PedalboardMonitor
@@ -128,8 +128,9 @@ class Modhandler(Handler):
                           "toggle_tap_tempo_enable": self.toggle_tap_tempo_enable
         }
 
-        # Collage mode manager (initialized per pedalboard if enabled)
-        self.collage_mode = None
+        # Blend mode manager - multiple blend snapshots per pedalboard
+        self.blend_modes: dict[str, Any] = {}  # {snapshot_name: BlendMode}
+        self.active_blend_mode: Any | None = None  # Currently active blend mode
 
     def __del__(self):
         logging.info("Handler cleanup")
@@ -250,18 +251,35 @@ class Modhandler(Handler):
         if self.lcd is not None:
             self.lcd.enc_sw(value)
 
-    def _handle_collage_mode_snapshot_change(self, new_snapshot_index: int):
+    def _handle_blend_mode_snapshot_change(self, new_snapshot_index: int):
         """
-        Handle collage mode activation/deactivation when snapshot changes.
+        Handle blend mode activation/deactivation when snapshot changes.
 
         Args:
             new_snapshot_index: Index of the new snapshot being loaded
         """
-        if not self.collage_mode:
+        if not self.blend_modes:
             return
 
         new_snapshot_name = self.current.presets.get(new_snapshot_index)
-        self.collage_mode.handle_snapshot_change(new_snapshot_name)
+
+        # Deactivate current blend mode if switching away
+        if self.active_blend_mode:
+            old_name = self.active_blend_mode.config.get('name')
+            if old_name != new_snapshot_name:
+                logging.info(f"Deactivating blend mode: '{old_name}'")
+                self.active_blend_mode.cleanup()
+                self.active_blend_mode = None
+
+        # Activate new blend mode if switching to a blend snapshot
+        if new_snapshot_name in self.blend_modes:
+            self.active_blend_mode = self.blend_modes[new_snapshot_name]
+            logging.info(f"Activating blend mode: '{new_snapshot_name}'")
+            try:
+                self.active_blend_mode.initialize()
+            except Exception as e:
+                logging.error(f"Failed to activate blend mode '{new_snapshot_name}': {e}")
+                self.active_blend_mode = None
 
     def _handle_ws_message(self, raw_message: str):
         """Handle incoming WebSocket message from MOD-UI using typed protocol."""
@@ -285,7 +303,7 @@ class Modhandler(Handler):
                         self.current.presets[msg.snapshot_id] = msg.snapshot_name
 
                     self.current.preset_index = msg.snapshot_id
-                    self._handle_collage_mode_snapshot_change(msg.snapshot_id)
+                    self._handle_blend_mode_snapshot_change(msg.snapshot_id)
                     self.lcd.draw_title()
                 else:
                     # Different pedalboard pending - this is a legitimate pre-switch update
@@ -298,6 +316,7 @@ class Modhandler(Handler):
                     self.current.presets[msg.snapshot_id] = msg.snapshot_name
 
                 self.current.preset_index = msg.snapshot_id
+                self._handle_blend_mode_snapshot_change(msg.snapshot_id)
                 self.lcd.draw_title()
 
     def poll_modui_changes(self):
@@ -326,7 +345,7 @@ class Modhandler(Handler):
                 # Same pedalboard reloaded with a pending snapshot - apply it now
                 logging.info(f"Applying pending snapshot {self.next_pedalboard_preset_index} to current pedalboard")
                 self.current.preset_index = self.next_pedalboard_preset_index
-                self._handle_collage_mode_snapshot_change(self.next_pedalboard_preset_index)
+                self._handle_blend_mode_snapshot_change(self.next_pedalboard_preset_index)
                 self.next_pedalboard_preset_index = None
                 self.lcd.draw_title()
 
@@ -339,9 +358,9 @@ class Modhandler(Handler):
                 self.banks_file_timestamp = ts
                 self.load_banks()
 
-        # Check for snapshot file modifications (collage mode stop edits)
-        if self.collage_mode:
-            self.collage_mode.check_for_snapshot_changes()
+        # Check for snapshot file modifications (blend mode stop edits)
+        if self.active_blend_mode:
+            self.active_blend_mode.check_for_snapshot_changes()
 
     #
     # Bank Stuff
@@ -422,10 +441,11 @@ class Modhandler(Handler):
         return self.pedalboard_monitor.get_current_pedalboard_bundle()
 
     def set_current_pedalboard(self, pedalboard):
-        # Cleanup previous collage mode if active
-        if self.collage_mode:
-            self.collage_mode.cleanup()
-            self.collage_mode = None
+        # Cleanup all previous blend modes if active
+        for blend_mode in self.blend_modes.values():
+            blend_mode.cleanup()
+        self.blend_modes = {}
+        self.active_blend_mode = None
 
         # Delete previous "current"
         del self.current
@@ -451,38 +471,47 @@ class Modhandler(Handler):
         self.lcd.link_data(self.pedalboard_list, self.current, self.hardware.footswitches)
         self.lcd.draw_main_panel()
 
-        # Prepare collage mode if enabled in config (snapshot-based activation)
-        # Sync collage mode snapshot (create/recreate/remove based on config)
+        # Prepare blend modes if configured (snapshot-based activation)
         try:
-            collage_cfg = cfg.get('collage_mode') if cfg else None
+            blend_configs = cfg.get('blend_snapshots', []) if cfg else []
             bundle_path = Path(self.current.pedalboard.bundle)
 
-            # Sync snapshot (always recreates if enabled, removes if disabled)
-            snapshot_idx = SnapshotManager.sync_collage_snapshot(
+            # Sync all blend snapshots (create/recreate based on config)
+            snapshot_indices = SnapshotManager.sync_blend_snapshots(
                 bundle_path,
-                collage_cfg,
+                blend_configs,
                 self.root_uri
             )
 
-            # If enabled and snapshot created, initialize collage mode
-            if snapshot_idx is not None and collage_cfg and collage_cfg.get('enabled', False):
-                from collage import CollageMode
-                self.collage_mode = CollageMode(self, collage_cfg)
+            # Initialize BlendMode instances for each blend snapshot
+            from blend import BlendMode
+            for blend_cfg in blend_configs:
+                snapshot_name = blend_cfg.get('name')
+                if not snapshot_name:
+                    continue
 
-                snapshot_name = collage_cfg.get('snapshot_name', 'Collage Mode')
+                blend_mode = BlendMode(self, blend_cfg)
+                self.blend_modes[snapshot_name] = blend_mode
+                logging.info(f"Prepared blend mode: '{snapshot_name}'")
 
-                # Switch to collage mode snapshot if not already on it
-                if self.current.preset_index != snapshot_idx:
-                    logging.info(f"Auto-switching to '{snapshot_name}' snapshot (index {snapshot_idx})")
-                    self.preset_change(snapshot_idx)
+            # Auto-switch to FIRST blend snapshot if any exist
+            if self.blend_modes:
+                first_snapshot_name = list(self.blend_modes.keys())[0]
+                first_snapshot_idx = snapshot_indices.get(first_snapshot_name)
 
-                # Initialize collage mode
-                self.collage_mode.initialize()
-                logging.info(f"Collage mode enabled on '{snapshot_name}' snapshot")
+                if first_snapshot_idx is not None:
+                    logging.info(f"Auto-switching to first blend snapshot: '{first_snapshot_name}' (index {first_snapshot_idx})")
+                    self.preset_change(first_snapshot_idx)
+
+                    # Activate the first blend mode
+                    self.active_blend_mode = self.blend_modes[first_snapshot_name]
+                    self.active_blend_mode.initialize()
+                    logging.info(f"Activated blend mode: '{first_snapshot_name}'")
 
         except Exception as e:
-            logging.error(f"Failed to prepare collage mode: {e}")
-            self.collage_mode = None
+            logging.error(f"Failed to prepare blend modes: {e}")
+            self.blend_modes = {}
+            self.active_blend_mode = None
 
     def bind_current_pedalboard(self):
         # "current" being the pedalboard mod-host says is current
@@ -612,7 +641,7 @@ class Modhandler(Handler):
             return
 
         # Handle collage mode snapshot-based activation
-        self._handle_collage_mode_snapshot_change(index)
+        self._handle_blend_mode_snapshot_change(index)
 
         self.lcd.draw_info_message("Loading...")
         url = (self.root_uri + "snapshot/load?id=%d" % index)

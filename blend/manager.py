@@ -13,13 +13,13 @@
 # You should have received a copy of the GNU General Public License
 # along with pi-stomp.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Main CollageMode coordinator class with pre-computation optimization."""
+"""Main BlendMode coordinator class with pre-computation optimization."""
 
 import logging
 from pathlib import Path
 from typing import Any
 
-from collage.interpolation import (
+from blend.interpolation import (
     # Spline interpolation
     hermite_interpolation,
     catmull_rom_interpolation,
@@ -34,14 +34,16 @@ from collage.interpolation import (
     exponential_easing_interpolation,
     sine_easing_interpolation,
 )
-from collage.parameter_setter import ParameterSetter
-from collage.pedal_controller import PedalController
-from collage.snapshot import SnapshotManager
-from collage.stop import CollageStop
-from collage.types import (
-    CollageConfig,
+from blend.parameter_setter import ParameterSetter
+from blend.input_controller import InputController
+from blend.snapshot import SnapshotManager
+from blend.stop import BlendStop
+from blend.types import (
+    BlendSnapshotConfig,
     EnrichedDiffMap,
     InterpolationFunc,
+    MidiBoundParams,
+    NormalizedStops,
     StopData,
 )
 from modalapi.parameter import Type as ParameterType
@@ -65,7 +67,7 @@ INTERPOLATION_FUNCTIONS: dict[str, InterpolationFunc] = {
 }
 
 
-class CollageMode:
+class BlendMode:
     """
     Coordinates collage mode components with pre-computation optimization.
 
@@ -73,23 +75,23 @@ class CollageMode:
     minimize work in the critical path (10ms polling loop).
     """
 
-    def __init__(self, handler: Any, config: CollageConfig) -> None:
+    def __init__(self, handler: Any, config: BlendSnapshotConfig) -> None:
         """
-        Initialize collage mode coordinator.
+        Initialize blend mode coordinator.
 
         Args:
             handler: Reference to Modhandler instance
-            config: Collage mode configuration dict from YAML
+            config: Single blend snapshot configuration dict from YAML
         """
         self.handler: Any = handler  # Modhandler - avoiding circular import
-        self.config: CollageConfig = config
+        self.config: BlendSnapshotConfig = config
         self.enabled: bool = False
-        self.stops: list[CollageStop] = []
+        self.stops: list[BlendStop] = []
         self.segment_diff_maps: list[EnrichedDiffMap] = []
 
         # Components (initialized in initialize())
         self.parameter_setter: ParameterSetter | None = None
-        self.pedal_controller: PedalController | None = None
+        self.input_controller: InputController | None = None
 
         # Snapshot file monitoring (for detecting stop modifications)
         self.snapshots_file_timestamp: float = 0
@@ -118,6 +120,9 @@ class CollageMode:
             # Load snapshots and create stops
             self.stops = self._create_stops()
 
+            # Extract MIDI-bound parameters to exclude from interpolation
+            midi_bound_params = self._extract_midi_bound_parameters()
+
             # PRE-COMPUTE: Build enriched diff maps for each segment
             logging.info(f"Pre-computing diff maps for {len(self.stops) - 1} segments...")
             self.segment_diff_maps = []
@@ -127,12 +132,13 @@ class CollageMode:
                 upper = self.stops[segment_idx + 1]
 
                 # Build enriched diff map with neighbor data
-                diff_map = CollageStop.build_enriched_diff_map(
+                diff_map = BlendStop.build_enriched_diff_map(
                     lower,
                     upper,
                     self.stops,
                     segment_idx,
                     self._get_parameter_type,
+                    midi_bound_params,
                 )
 
                 self.segment_diff_maps.append(diff_map)
@@ -149,18 +155,24 @@ class CollageMode:
             # Initialize parameter setter (uses shared WebSocket bridge from handler)
             self.parameter_setter = ParameterSetter(self.handler.ws_bridge)
 
-            # Initialize and attach pedal controller
-            exp_pedal_id = self.config.get("expression_pedal_id", 0)
+            # Initialize and attach input controller
+            input_id = self.config.get("input_id")
+            if input_id is None:
+                raise ValueError("Blend mode requires 'input_id' config")
 
-            self.pedal_controller = PedalController(
+            self.input_controller = InputController(
                 interpolation_func,
                 self.stops,
                 self.segment_diff_maps,  # Pre-computed!
                 self.parameter_setter,
             )
 
-            # Attach to expression pedal
-            self.pedal_controller.attach_to_pedal(self.handler.hardware.analog_controls, exp_pedal_id)
+            # Attach to analog input (expression pedal or encoder)
+            self.input_controller.attach_to_input(
+                self.handler.hardware.analog_controls,
+                self.handler.hardware.encoders,
+                input_id
+            )
 
             # Sync current pedal position to trigger initial interpolation
             self.handler.hardware.sync_analog_controls()
@@ -172,6 +184,71 @@ class CollageMode:
             logging.error(f"Failed to initialize collage mode: {e}")
             self.enabled = False
             raise
+
+    def _normalize_stops_config(self, stops_config: dict[str, int | str] | list[str | int]) -> NormalizedStops:
+        """
+        Normalize stops configuration to dict format.
+
+        Converts list format to dict with evenly spaced positions.
+        Example: ["A", "B", "C"] → {"0.0": "A", "0.5": "B", "1.0": "C"}
+
+        Args:
+            stops_config: Stops in dict or list format
+
+        Returns:
+            Normalized stops as dict {"position": snapshot_id}
+
+        Raises:
+            ValueError: If list has less than 2 entries or invalid format
+        """
+        if isinstance(stops_config, dict):
+            return stops_config
+
+        if isinstance(stops_config, list):
+            if len(stops_config) < 2:
+                raise ValueError("Stops list must have at least 2 entries")
+
+            # Auto-space evenly across [0.0, 1.0]
+            count = len(stops_config)
+            step = 1.0 / (count - 1) if count > 1 else 0.0
+
+            normalized_stops: NormalizedStops = {}
+            for i, snapshot_id in enumerate(stops_config):
+                position = i * step
+                # Use 6 decimal places for precision
+                normalized_stops[f"{position:.6f}"] = snapshot_id
+
+            logging.debug(f"Normalized list stops to: {normalized_stops}")
+            return normalized_stops
+
+        raise ValueError(f"Stops must be dict or list, got {type(stops_config)}")
+
+    def _extract_midi_bound_parameters(self) -> MidiBoundParams:
+        """
+        Extract all MIDI-bound parameters from current pedalboard.
+
+        Scans all plugins in the pedalboard and collects parameters that have
+        MIDI bindings. These parameters should be excluded from interpolation
+        to avoid conflicts with the blend mode input.
+
+        Returns:
+            Set of (instance_id, symbol) tuples for MIDI-bound parameters
+        """
+        midi_params: set[tuple[str, str]] = set()
+        pedalboard = self.handler.current.pedalboard
+
+        for plugin in pedalboard.plugins:
+            for symbol, param in plugin.parameters.items():
+                if param.binding is not None:  # Format: "channel:CC"
+                    midi_params.add((plugin.instance_id, symbol))
+                    logging.debug(
+                        f"Found MIDI binding: {plugin.instance_id}/{symbol} -> {param.binding}"
+                    )
+
+        if midi_params:
+            logging.info(f"Excluding {len(midi_params)} MIDI-bound parameters from blend interpolation")
+
+        return midi_params
 
     def _validate_config(self) -> InterpolationFunc:
         """
@@ -198,20 +275,26 @@ class CollageMode:
         logging.debug(f"Config validated: interpolation={interp_name}")
         return interpolation_func
 
-    def _create_stops(self) -> list[CollageStop]:
+    def _create_stops(self) -> list[BlendStop]:
         """
-        Load snapshots and create CollageStop objects.
+        Load snapshots and create BlendStop objects.
 
         Returns:
-            List of CollageStop objects (sorted by position)
+            List of BlendStop objects (sorted by position)
 
         Raises:
             ValueError: If config is invalid or stops cannot be created
         """
-        # Get snapshot_stops configuration
-        snapshot_stops = self.config.get("snapshot_stops", {})
+        # Get and normalize stops configuration
+        stops_config = self.config.get("stops")
+        if not stops_config:
+            raise ValueError("Blend mode requires 'stops' config")
+
+        # Normalize to dict format (handles both dict and list)
+        snapshot_stops = self._normalize_stops_config(stops_config)
+
         if len(snapshot_stops) < 2:
-            raise ValueError(f"Collage mode requires at least 2 stops, got {len(snapshot_stops)}")
+            raise ValueError(f"Blend mode requires at least 2 stops, got {len(snapshot_stops)}")
 
         # Read snapshots file
         bundle_path = Path(self.handler.current.pedalboard.bundle)
@@ -241,11 +324,11 @@ class CollageMode:
         # Sort by position
         stops_data.sort(key=lambda x: x.position)
 
-        # Create CollageStop objects
+        # Create BlendStop objects
         stops = []
         for stop_data in stops_data:
             state = SnapshotManager.parse_snapshot_data(snapshots_data, stop_data.snapshot_index)
-            stop = CollageStop(stop_data.position, stop_data.snapshot_index, state)
+            stop = BlendStop(stop_data.position, stop_data.snapshot_index, state)
             stops.append(stop)
             logging.debug(f"Created {stop}")
 
@@ -348,10 +431,10 @@ class CollageMode:
             if cleared > 0:
                 logging.info(f"Cleared {cleared} pending websocket messages")
 
-        # Detach from expression pedal and reset tracking
-        if self.pedal_controller:
-            self.pedal_controller.detach_from_pedal()
-            self.pedal_controller.reset_tracking()  # Reset segment cache
+        # Detach from input and reset tracking
+        if self.input_controller:
+            self.input_controller.detach_from_input()
+            self.input_controller.reset_tracking()  # Reset segment cache
 
         # Clean up parameter setter and reset MIDI tracking
         if self.parameter_setter:
@@ -379,7 +462,7 @@ class CollageMode:
             return
 
         from pathlib import Path
-        from collage.snapshot import SnapshotManager
+        from blend.snapshot import SnapshotManager
 
         bundle_path = Path(self.handler.current.pedalboard.bundle)
         current_timestamp = SnapshotManager.get_snapshots_file_timestamp(bundle_path)
