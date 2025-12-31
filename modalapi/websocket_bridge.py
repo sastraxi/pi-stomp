@@ -128,7 +128,6 @@ class AsyncWebSocketBridge:
             'messages_dropped': self.messages_dropped,
             'backpressure_events': self.backpressure_events,
             'backpressure_active': self.backpressure_active,
-            'connected': self.ws is not None and not self.ws.closed if self.ws else False,
         }
 
         # Add write buffer size if available
