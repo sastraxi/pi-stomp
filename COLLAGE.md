@@ -63,3 +63,11 @@ blend_snapshots:
 7. Documentation
   - Updated GUIDE.md with comprehensive blend mode documentation
   - Updated config template (default_config_pistomptre.yml) with examples
+
+## Next steps
+
+1. Update Beths pedalboard with new config shape
+2. Re-deploy modified code and delete old collage/ folder on device
+3. Test on the device
+4. `git sync -s` and fix merge conflicts with lower branches
+
