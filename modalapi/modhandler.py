@@ -562,7 +562,7 @@ class Modhandler(Handler):
                     self.active_blend_mode.initialize()
                     logging.info(f"Activated blend mode: '{first_snapshot_name}'")
 
-                # Redraw analog assignments to use CollageMode object for expression pedal
+                # Redraw analog assignments to use BlendMode object for expression pedal
                 self.lcd.draw_analog_assignments(self.current.analog_controllers)
 
         except Exception as e:

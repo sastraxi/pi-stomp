@@ -400,7 +400,7 @@ class BlendMode:
                 logging.info(f"Activating blend mode (switched to '{blend_snapshot_name}' snapshot)")
                 try:
                     self.initialize()
-                    # Redraw analog assignments to use CollageMode object for expression pedal
+                    # Redraw analog assignments to use BlendMode object for expression pedal
                     self.handler.lcd.draw_analog_assignments(self.handler.current.analog_controllers)
                 except Exception as e:
                     logging.error(f"Failed to activate blend mode: {e}")
