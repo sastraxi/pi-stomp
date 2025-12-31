@@ -225,7 +225,7 @@ Shortpress accepts string (callback name) or object with `callback` and `args` (
 - `10ms`: `poll_controls()` - Read hardware inputs (critical path)
 - `20ms`: `poll_indicators()` - Update LEDs/VU meters
 - `200ms`: `poll_lcd_updates()` - Render LCD
-- `1000ms`: `poll_modui_changes()` - Sync with MOD UI (WebSocket messages, banks.json, collage snapshots.json)
+- `1000ms`: `poll_modui_changes()` - Sync with MOD UI (WebSocket messages, banks.json, blend snapshots.json)
 - `2000ms`: `poll_wifi()` - Update WiFi status
 - `60s`: `poll_system_info()` - System health (CPU, throttling)
 
@@ -451,35 +451,46 @@ poll_controls()
 - `pistomp/lcdgfx.py` - Mono LCD (v1)
 - `uilib/*` - Widget library (v3)
 
-## Collage Mode
+## Blend Mode
 
-Expression pedal-driven snapshot interpolation.
+Analog input-driven snapshot interpolation. Smoothly blend between snapshots using expression pedals or tweak encoders.
 
-**Snapshot Activation**: Auto-switches to "Collage Mode" snapshot on pedalboard load. Switching to other snapshots deactivates; switching back reactivates.
+**Multiple Blend Snapshots**: Each pedalboard can have multiple blend snapshots, each controlled by a different analog input. Each blend snapshot defines its own set of stops and interpolation curve.
 
-**Stop Modification Detection**: Monitors `snapshots.json` timestamp (1000ms poll). On change, recreates Collage Mode snapshot and reinitializes diff maps without pedalboard reload.
+**Snapshot Activation**: Auto-switches to the FIRST blend snapshot on pedalboard load. Switching between blend snapshots activates/deactivates them automatically.
+
+**Stop Modification Detection**: Monitors `snapshots.json` timestamp (1000ms poll). On change, recreates blend snapshots and reinitializes diff maps without pedalboard reload.
+
+**MIDI Parameter Exclusion**: Parameters with MIDI bindings are automatically excluded from interpolation to prevent conflicts with the blend input.
 
 ### Config
 
 ```yaml
-collage_mode:
-  enabled: true
-  interpolation: linear  # linear, hermite, catmull_rom, ease_in_quad, ease_out_quad, etc.
-  expression_pedal_id: 0
-  snapshot_stops:
-    "0.0": "Clean"
-    "0.5": "Crunch"
-    "1.0": "Lead"
+blend_snapshots:
+  - name: "Clean to Fuzz"           # Required: blend snapshot name
+    input_id: 0                     # Required: expression pedal (0) or encoder (1, 2)
+    interpolation: ease_out_quad    # Optional: linear (default), hermite, catmull_rom, ease_*
+    stops:
+      "0.0": "Clean"                # Dict format: position -> snapshot
+      "0.5": "Crunch"
+      "1.0": "Fuzz"
+  - name: "Volume Swell"
+    input_id: 1                     # Tweak1 encoder (v3 only)
+    stops: ["Quiet", "Loud"]        # List format: auto-spaced evenly
 ```
 
-**Position keys**: stringified floats [0.0-1.0], min separation 1/127.
-**Snapshot values**: index (int) or name (str, prefix match, case-insensitive).
+**Position keys**: Stringified floats [0.0-1.0], min separation 1/127.
+**Snapshot values**: Index (int) or name (str, prefix match, case-insensitive).
 **Interpolation**: Easing (ease_in_quad, etc.) or spline (hermite, catmull_rom).
 **Context limit**: hermite/catmull_rom look 2 stops back/forward for smoothness.
+**Stops formats**: Dict `{"0.0": "A", "1.0": "B"}` or list `["A", "B"]` (auto-spaced).
 
 ### Implementation
 
 - Pre-computes diff maps per segment at load (optimized 10ms critical path)
 - MIDI-level de-duplication skips redundant WebSocket sends
 - Per-parameter interpolation with neighbor context for splines
-- `collage/` - interpolation.py, stop.py, manager.py, pedal_controller.py
+- MIDI-bound parameters automatically excluded from interpolation
+- Supports both expression pedals and tweak encoders (v3)
+- Encoder callback override: skips display update when blend mode active
+- `blend/` - interpolation.py, stop.py, manager.py, input_controller.py

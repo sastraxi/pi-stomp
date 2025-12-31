@@ -13,20 +13,21 @@
 # You should have received a copy of the GNU General Public License
 # along with pi-stomp.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Expression pedal hijacking and control for collage mode."""
+"""Analog input hijacking and control for blend mode."""
 
 import logging
 from typing import Any
 
-from collage.stop import CollageStop
-from collage.types import AnalogControlProtocol, EnrichedDiffMap, InterpolationFunc
+from blend.stop import BlendStop
+from blend.types import BlendInputProtocol, EnrichedDiffMap, InterpolationFunc
 
 
-class PedalController:
+class InputController:
     """
-    Manages expression pedal callback for collage mode with optimized critical path.
+    Manages analog input callback for blend mode with optimized critical path.
 
-    Implements the critical path (10ms polling loop) for pedal movement:
+    Supports both expression pedals and tweak encoders. Implements the critical
+    path (10ms polling loop) for input movement:
     1. Find segment (with cached hint)
     2. Calculate local percentage
     3. Lookup pre-computed diff map
@@ -37,16 +38,16 @@ class PedalController:
     def __init__(
         self,
         interpolation_func: InterpolationFunc,
-        stops: list[CollageStop],
+        stops: list[BlendStop],
         segment_diff_maps: list[EnrichedDiffMap],
         parameter_setter: Any,  # ParameterSetter - avoid circular import
     ) -> None:
         """
-        Initialize pedal controller with pre-computed diff maps.
+        Initialize input controller with pre-computed diff maps.
 
         Args:
             interpolation_func: Per-parameter value transformer
-            stops: List of CollageStop (for segment lookup)
+            stops: List of BlendStop (for segment lookup)
             segment_diff_maps: Pre-computed enriched diff maps per segment
             parameter_setter: For sending WebSocket messages
         """
@@ -54,56 +55,84 @@ class PedalController:
         self.stops = stops
         self.segment_diff_maps = segment_diff_maps
         self.parameter_setter = parameter_setter
-        self.controlled_pedal: AnalogControlProtocol | None = None
+        self.controlled_input: BlendInputProtocol | None = None
 
         # Segment caching (optimization for sequential movements)
         self.current_segment_idx: int = 0
 
-    def attach_to_pedal(self, analog_controls: list[AnalogControlProtocol], pedal_id: int) -> None:
+    def attach_to_input(
+        self,
+        analog_controls: list,
+        encoders: list,
+        input_id: int
+    ) -> None:
         """
-        Attach collage mode callback to expression pedal.
+        Attach blend mode callback to analog input (expression pedal or encoder).
 
-        Hijacks the value_change_callback on the AnalogMidiControl to intercept
-        value changes and route them through the interpolation system.
+        Hijacks the value_change_callback to intercept value changes and route
+        them through the interpolation system.
 
         Args:
             analog_controls: List of analog controls from hardware
-            pedal_id: Expression pedal ID to control
+            encoders: List of encoders from hardware
+            input_id: Input ID to control (searches both lists)
+
+        Raises:
+            ValueError: If input_id not found or encoder doesn't support MIDI
         """
-        # Find expression pedal control
+        # Search analog_controls first (expression pedals)
         for control in analog_controls:
-            if hasattr(control, "id") and control.id == pedal_id:
-                self.controlled_pedal = control
+            if hasattr(control, "id") and control.id == input_id:
+                self.controlled_input = control
                 control.value_change_callback = self.handle_value_change
-                logging.info(f"Attached collage mode to expression pedal {pedal_id}")
+                logging.info(f"Attached blend mode to analog control {input_id}")
                 return
 
-        logging.warning(f"Expression pedal {pedal_id} not found")
+        # Search encoders (tweak encoders)
+        for encoder in encoders:
+            if hasattr(encoder, "id") and encoder.id == input_id:
+                from pistomp.encodermidicontrol import EncoderMidiControl
+                if not isinstance(encoder, EncoderMidiControl):
+                    raise ValueError(
+                        f"Encoder {input_id} must be EncoderMidiControl (has MIDI support) for blend mode"
+                    )
+                self.controlled_input = encoder
+                encoder.value_change_callback = self.handle_value_change
+                logging.info(f"Attached blend mode to encoder {input_id}")
+                return
 
-    def detach_from_pedal(self) -> None:
-        """Remove collage mode callback from expression pedal."""
-        if self.controlled_pedal:
-            self.controlled_pedal.value_change_callback = None
-            self.controlled_pedal = None
-            logging.debug("Detached collage mode from expression pedal")
+        raise ValueError(f"Input {input_id} not found in analog_controls or encoders")
+
+    def detach_from_input(self) -> None:
+        """Remove blend mode callback from input."""
+        if self.controlled_input:
+            self.controlled_input.value_change_callback = None
+            self.controlled_input = None
+            logging.debug("Detached blend mode from input")
 
     def reset_tracking(self) -> None:
         """Reset state tracking (call on re-initialization)."""
         self.current_segment_idx = 0
 
-    def handle_value_change(self, raw_value: int, control: AnalogControlProtocol) -> None:
+    def handle_value_change(self, raw_value: int, control: BlendInputProtocol) -> None:
         """
-        Handle expression pedal movement (CRITICAL PATH - optimized for 10ms polling).
+        Handle analog input movement (CRITICAL PATH - optimized for 10ms polling).
 
-        Called by AnalogMidiControl.refresh() when the pedal value changes.
-        Implements the core collage mode interpolation loop.
+        Called by control.refresh() when the input value changes.
+        Implements the core blend mode interpolation loop.
 
         Args:
-            raw_value: Raw ADC value (0-1023)
-            control: The AnalogMidiControl instance
+            raw_value: Input value (0-1023 for expression pedal ADC, 0-127 for encoder MIDI)
+            control: The input control that triggered the callback
         """
-        # Convert ADC value to percentage [0.0, 1.0]
-        percentage = raw_value / 1023.0  # ADC is 10-bit
+        # Normalize value to [0.0, 1.0] based on input type
+        from pistomp.encodermidicontrol import EncoderMidiControl
+        if isinstance(control, EncoderMidiControl):
+            # Encoder: use accumulated MIDI value
+            percentage = control.midi_value / 127.0
+        else:
+            # Expression pedal: use ADC value
+            percentage = raw_value / 1023.0  # ADC is 10-bit
 
         # Find segment (use cached value as hint for optimization)
         segment_idx = self._find_segment(percentage)
