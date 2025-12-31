@@ -244,7 +244,7 @@ class TextWidget(Widget):
         self.refresh()
 
     def tick(self):
-        """Called every 200ms from poll_updates(). Override in subclasses for animation."""
+        """Override in subclasses for animation."""
         pass
 
     def _draw(self, image, draw, real_box):
@@ -345,7 +345,7 @@ class ScrollingText(TextWidget):
         return self.cached_text_width > available_width
 
     def tick(self) -> None:
-        """Override: Called every 200ms from poll_updates() to advance scrolling animation."""
+        """Override: advance scrolling animation."""
         # Ensure cached image exists
         if self.cached_text_image is None:
             self._render_text_to_cache()

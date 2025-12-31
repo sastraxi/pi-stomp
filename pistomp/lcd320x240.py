@@ -185,9 +185,13 @@ class Lcd(abstract_lcd.Lcd):
         if not self.main_panel_pushed:
             self.pstack.push_panel(self.main_panel)
             self.main_panel_pushed = True
-        logging.info("LCD: Refreshing main panel...")
-        self.main_panel.refresh()
-        logging.info("LCD: Main panel drawn")
+        # Queue initial panel refresh to LCD thread
+        if hasattr(self, 'lcd_thread') and self.lcd_thread is not None:
+            from pistomp.lcd_update_thread import LcdUpdateCommand, UpdateType
+            self.lcd_thread.enqueue(
+                LcdUpdateCommand(UpdateType.PANEL_REFRESH, target=self.main_panel)
+            )
+        logging.info("LCD: Main panel drawn (queued for refresh)")
 
     def poll_fast_lcd_updates(self):
         """
@@ -243,17 +247,19 @@ class Lcd(abstract_lcd.Lcd):
 
             if midi_value is not None:
                 progress = midi_value / 127.0
-                # Only enqueue if changed (dedup handles rest)
+                # Update state in main thread, then enqueue refresh
+                state_changed = False
                 if icon.progress != progress:
-                    kwargs = {'progress': progress}
-                    if text_update:
-                        kwargs['text'] = text_update
+                    icon.set_progress(progress)
+                    state_changed = True
+                if text_update and text_update != icon.text:
+                    icon.set_text(text_update)
+                    state_changed = True
+
+                # Only enqueue refresh if state actually changed
+                if state_changed:
                     self.lcd_thread.enqueue(
-                        LcdUpdateCommand(
-                            UpdateType.WIDGET_REFRESH,
-                            target=icon,
-                            **kwargs
-                        )
+                        LcdUpdateCommand(UpdateType.WIDGET_REFRESH, target=icon)
                     )
 
         # Clip indicators (already checked at 20ms in poll_indicators)
@@ -274,47 +280,66 @@ class Lcd(abstract_lcd.Lcd):
         Slow LCD updates @ 5Hz (200ms).
 
         Handles slower-changing elements:
-        - Panel stack updates (synchronous - handles menus/dialogs)
+        - Panel stack updates (enqueued to thread)
         - Text scrolling (enqueued to thread)
         """
-        # Panel stack updates - keep synchronous for now (complex refresh logic)
-        self.pstack.poll_updates()
+        if not hasattr(self, 'lcd_thread') or self.lcd_thread is None:
+            return
 
-        # Text scrolling - enqueue to thread
-        if hasattr(self, 'lcd_thread') and self.lcd_thread is not None:
-            from pistomp.lcd_update_thread import LcdUpdateCommand, UpdateType
-
-            if self.w_preset:
-                self.lcd_thread.enqueue(
-                    LcdUpdateCommand(UpdateType.TICK, target=self.w_preset)
-                )
-            if self.w_pedalboard:
-                self.lcd_thread.enqueue(
-                    LcdUpdateCommand(UpdateType.TICK, target=self.w_pedalboard)
-                )
-
-    def _enqueue_clip_updates(self, clip_left, clip_right):
-        """Enqueue clip indicator color changes if state changed."""
         from pistomp.lcd_update_thread import LcdUpdateCommand, UpdateType
 
+        # Panel stack updates - enqueue to thread if refresh needed
+        if self.pstack.lcd_needs_update:
+            self.lcd_thread.enqueue(
+                LcdUpdateCommand(UpdateType.PANEL_REFRESH, target=self.pstack)
+            )
+
+        # Text scrolling - enqueue to thread
+        if self.w_preset:
+            self.lcd_thread.enqueue(
+                LcdUpdateCommand(UpdateType.TICK, target=self.w_preset)
+            )
+        if self.w_pedalboard:
+            self.lcd_thread.enqueue(
+                LcdUpdateCommand(UpdateType.TICK, target=self.w_pedalboard)
+            )
+
+    def _enqueue_refresh(self, target, refresh_type="widget"):
+        """Helper to enqueue refresh commands to LCD thread.
+
+        Args:
+            target: Widget, Panel, or PanelStack to refresh
+            refresh_type: "widget" or "panel" (default: "widget")
+        """
+        if not hasattr(self, 'lcd_thread') or self.lcd_thread is None:
+            logging.warning(f"LCD thread not initialized, skipping refresh of {target}")
+            return
+
+        from pistomp.lcd_update_thread import LcdUpdateCommand, UpdateType
+        update_type = UpdateType.PANEL_REFRESH if refresh_type == "panel" else UpdateType.WIDGET_REFRESH
+        self.lcd_thread.enqueue(LcdUpdateCommand(update_type, target=target))
+
+    def _enqueue_clip_updates(self, clip_left, clip_right):
+        """Update clip indicator colors if state changed.
+
+        State changes happen in main thread, then refresh is enqueued.
+        """
         if (clip_left, clip_right) != self._last_clip_state:
             self._last_clip_state = (clip_left, clip_right)
 
-            # Enqueue updates with color data in kwargs
-            self.lcd_thread.enqueue(
-                LcdUpdateCommand(
-                    UpdateType.WIDGET_REFRESH,
-                    target=self.w_clip_left,
-                    color=(255, 0, 0) if clip_left else (80, 80, 80)
-                )
-            )
-            self.lcd_thread.enqueue(
-                LcdUpdateCommand(
-                    UpdateType.WIDGET_REFRESH,
-                    target=self.w_clip_right,
-                    color=(255, 0, 0) if clip_right else (80, 80, 80)
-                )
-            )
+            # Update widget state in main thread
+            left_color = (255, 0, 0) if clip_left else (80, 80, 80)
+            right_color = (255, 0, 0) if clip_right else (80, 80, 80)
+
+            self.w_clip_left.set_foreground(left_color)
+            self.w_clip_left.set_outline(1, left_color)
+
+            self.w_clip_right.set_foreground(right_color)
+            self.w_clip_right.set_outline(1, right_color)
+
+            # Enqueue refreshes to render the new state
+            self._enqueue_refresh(self.w_clip_left)
+            self._enqueue_refresh(self.w_clip_right)
 
     #
     # Toolbar
@@ -404,10 +429,10 @@ class Lcd(abstract_lcd.Lcd):
     def toggle_hotspot(self, arg1):
         self.pstack.pop_panel(None)
         self.draw_info_message("connecting...")
-        self.main_panel.refresh()
+        self._enqueue_refresh(self.main_panel, refresh_type="panel")
         self.handler.system_toggle_hotspot()
         self.draw_info_message("")
-        self.main_panel.refresh()
+        self._enqueue_refresh(self.main_panel, refresh_type="panel")
 
     def configure_wifi(self, event, button):
         result = self.handler.configure_wifi_credentials(self.w_wifi_ssid.text, self.w_wifi_pw.text)
@@ -480,7 +505,7 @@ class Lcd(abstract_lcd.Lcd):
         d.add_sel_widget(b)
 
         self.pstack.push_panel(d)
-        d.refresh()
+        self._enqueue_refresh(d, refresh_type="panel")
 
     #
     # Title (Pedalboard and Preset)
@@ -490,7 +515,7 @@ class Lcd(abstract_lcd.Lcd):
         preset_name = self.current.presets.get(self.current.preset_index, "")
         self.draw_preset(preset_name)
         self.draw_info_message("")  # clear loading msg
-        self.main_panel.refresh()
+        self._enqueue_refresh(self.main_panel, refresh_type="panel")
 
     def draw_pedalboard(self, pedalboard_name):
         text_width = self.title_font.getmask(pedalboard_name).getbbox()[2]
@@ -637,8 +662,9 @@ class Lcd(abstract_lcd.Lcd):
             if plugin.has_footswitch:
                 self.draw_footswitch(plugin)
 
-        self.main_panel.refresh()
-        self.footswitch_panel.refresh()
+        # Enqueue refreshes to LCD thread
+        self._enqueue_refresh(self.main_panel, refresh_type="panel")
+        self._enqueue_refresh(self.footswitch_panel, refresh_type="panel")
 
     def plugin_event(self, event, widget, plugin):
         if event == InputEvent.CLICK:
@@ -661,11 +687,13 @@ class Lcd(abstract_lcd.Lcd):
         for w in self.w_plugins:
             plugin = w.object
             self.color_plugin(w, plugin)
-        self.main_panel.refresh()
+        # Enqueue refresh to LCD thread
+        self._enqueue_refresh(self.main_panel, refresh_type="panel")
 
     def toggle_plugin(self, widget, plugin):
         self.color_plugin(widget, plugin)
-        self.main_panel.refresh()
+        # Enqueue refresh to LCD thread
+        self._enqueue_refresh(self.main_panel, refresh_type="panel")
 
     # Try to map color to a valid displayable color, if not use foreground
     def valid_color(self, color):
@@ -802,7 +830,8 @@ class Lcd(abstract_lcd.Lcd):
             )
             self.w_footswitches.append(p)
             self.footswitch_panel.add_widget(p)
-        self.footswitch_panel.refresh()
+        # Enqueue refresh to LCD thread
+        self._enqueue_refresh(self.footswitch_panel, refresh_type="panel")
 
     def update_footswitch(self, footswitch):
         for wfs in self.w_footswitches:
@@ -812,8 +841,9 @@ class Lcd(abstract_lcd.Lcd):
                 if label:
                     wfs.label = label
                 break
-        self.footswitch_panel.refresh()
-        self.refresh_plugins()  # TODO maybe not the most efficient, does exhibit some lag time
+        # Enqueue refreshes to LCD thread
+        self._enqueue_refresh(self.footswitch_panel, refresh_type="panel")
+        self.refresh_plugins()
 
     def update_footswitches(self):
         for fs in self.footswitches:
@@ -856,10 +886,10 @@ class Lcd(abstract_lcd.Lcd):
     def update_sample_pedalboards(self, arg):
         self.pstack.pop_panel(None)
         self.draw_info_message("updating...")
-        self.main_panel.refresh()
+        self._enqueue_refresh(self.main_panel, refresh_type="panel")
         result = self.handler.system_menu_update_sample_pedalboards()
         self.draw_info_message("")
-        self.main_panel.refresh()
+        self._enqueue_refresh(self.main_panel, refresh_type="panel")
 
         # Show update stdout dialog
         d = MessageDialog(self.pstack, str(result), title="Pedalboard Update", width=250, height=140)
@@ -1006,27 +1036,6 @@ class Lcd(abstract_lcd.Lcd):
         image_path = os.path.join(self.imagedir, img)
         self.w_power.replace_img(image_path)
 
-    def update_clip_indicators(self, clip_left, clip_right):
-        """Update clip indicator colors based on clipping state."""
-        # Left channel
-        if clip_left:
-            self.w_clip_left.set_foreground((255, 0, 0))  # Red when clipping
-            self.w_clip_left.set_outline(1, (255, 0, 0))
-        else:
-            self.w_clip_left.set_foreground((80, 80, 80))  # Dark gray when not clipping
-            self.w_clip_left.set_outline(1, (80, 80, 80))
-
-        # Right channel
-        if clip_right:
-            self.w_clip_right.set_foreground((255, 0, 0))  # Red when clipping
-            self.w_clip_right.set_outline(1, (255, 0, 0))
-        else:
-            self.w_clip_right.set_foreground((80, 80, 80))  # Dark gray when not clipping
-            self.w_clip_right.set_outline(1, (80, 80, 80))
-
-        self.w_clip_left.refresh()
-        self.w_clip_right.refresh()
-
     def draw_tool_select(self, tool_type):
         pass
 
@@ -1158,7 +1167,7 @@ class Lcd(abstract_lcd.Lcd):
         else:
             self.w_info_msg.set_text(text)
         if refresh:
-            self.main_panel.refresh()
+            self._enqueue_refresh(self.main_panel, refresh_type="panel")
 
     # Plugins
 

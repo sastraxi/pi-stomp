@@ -28,11 +28,10 @@ class UpdateType(Enum):
 
 
 class LcdUpdateCommand:
-    def __init__(self, update_type: UpdateType, target, timestamp: float = None, **kwargs):
+    def __init__(self, update_type: UpdateType, target, timestamp: float = None):
         self.update_type = update_type
         self.target = target
         self.timestamp = timestamp or time.time()
-        self.kwargs = kwargs  # Extra data (e.g., progress value)
 
     def get_key(self) -> Tuple[int, UpdateType]:
         """Return unique key for deduplication.
@@ -152,25 +151,30 @@ class LcdUpdateThread(threading.Thread):
         )
 
     def _execute_command(self, cmd: LcdUpdateCommand):
-        """Execute update command. Runs in LCD thread."""
+        """Execute update command. Runs in LCD thread.
+
+        IMPORTANT: This only renders widgets. All state changes must happen
+        in the main thread before enqueueing the refresh command.
+        """
         if cmd.update_type == UpdateType.SHUTDOWN:
             self.running = False
             return
 
-        # All refresh types just call refresh() - unified!
-        if cmd.update_type in (UpdateType.WIDGET_REFRESH, UpdateType.PANEL_REFRESH):
+        if cmd.update_type == UpdateType.WIDGET_REFRESH:
+            # Widget refresh - just render current state
             if cmd.target and hasattr(cmd.target, 'refresh'):
-                # Apply any kwargs first (e.g., set_progress, color)
-                if 'progress' in cmd.kwargs:
-                    cmd.target.set_progress(cmd.kwargs['progress'])
-                if 'color' in cmd.kwargs:
-                    cmd.target.set_foreground(cmd.kwargs['color'])
-                    cmd.target.set_outline(1, cmd.kwargs['color'])
-                if 'text' in cmd.kwargs:
-                    cmd.target.set_text(cmd.kwargs['text'])
                 cmd.target.refresh()
 
+        elif cmd.update_type == UpdateType.PANEL_REFRESH:
+            # Panel/PanelStack refresh
+            if cmd.target and hasattr(cmd.target, 'refresh'):
+                cmd.target.refresh()
+                # Clear the update flag if it's a PanelStack
+                if hasattr(cmd.target, 'lcd_needs_update'):
+                    cmd.target.lcd_needs_update = False
+
         elif cmd.update_type == UpdateType.TICK:
+            # Text scrolling animation
             if cmd.target and hasattr(cmd.target, 'tick'):
                 cmd.target.tick()
 
