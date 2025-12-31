@@ -58,7 +58,7 @@ class LcdUpdateThread(threading.Thread):
     - Backpressure: Replacing old commands prevents queue growth
     """
 
-    def __init__(self, max_age_ms: float = 200):
+    def __init__(self, max_age_ms: float = 1000):
         super().__init__(name="LCDUpdate", daemon=True)
         self.pending_updates: Dict[Tuple, LcdUpdateCommand] = {}
         self.lock = threading.Lock()  # Protects pending_updates dict

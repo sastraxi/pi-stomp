@@ -136,7 +136,7 @@ class Lcd(abstract_lcd.Lcd):
         # NOW start LCD update thread (after display is working)
         logging.info("LCD: Starting update thread...")
         from pistomp.lcd_update_thread import LcdUpdateThread
-        self.lcd_thread = LcdUpdateThread(max_age_ms=200)
+        self.lcd_thread = LcdUpdateThread()
         self.lcd_thread.start()
         logging.info("LCD: Update thread started, initialization complete")
 
