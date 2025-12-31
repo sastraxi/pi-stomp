@@ -13,7 +13,7 @@
 # You should have received a copy of the GNU General Public License
 # along with pi-stomp.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Per-parameter interpolation functions for collage mode."""
+"""Per-parameter interpolation functions for blend mode."""
 
 from blend.easing import (
     ease_in_cubic,

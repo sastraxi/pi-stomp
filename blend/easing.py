@@ -13,7 +13,7 @@
 # You should have received a copy of the GNU General Public License
 # along with pi-stomp.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Easing functions for collage mode segment interpolation."""
+"""Easing functions for blend mode segment interpolation."""
 
 import math
 

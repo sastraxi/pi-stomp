@@ -77,6 +77,3 @@ __all__ = [
     'linear_interpolation',
 ]
 
-# Temporary backwards compatibility aliases for import transition
-# TODO: Remove once all code is updated
-CollageMode = BlendMode
