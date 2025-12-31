@@ -13,7 +13,7 @@
 # You should have received a copy of the GNU General Public License
 # along with pi-stomp.  If not, see <https://www.gnu.org/licenses/>.
 
-"""WebSocket-based parameter setting for collage mode with MIDI de-duplication."""
+"""WebSocket-based parameter setting for blend mode with MIDI de-duplication."""
 
 import logging
 
