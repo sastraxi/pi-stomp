@@ -161,7 +161,7 @@ class InputController:
                     # Send parameter (ParameterSetter handles MIDI de-dupe and backpressure)
                     self.parameter_setter.send_parameter(instance_id, symbol, float_value)
         except Exception as e:
-            logging.error(f"Error in collage interpolation: {e}", exc_info=True)
+            logging.error(f"Error in blend interpolation: {e}", exc_info=True)
             # Continue operation - don't crash the polling loop
 
         # Log if segment changed
