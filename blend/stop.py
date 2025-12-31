@@ -13,11 +13,14 @@
 # You should have received a copy of the GNU General Public License
 # along with pi-stomp.  If not, see <https://www.gnu.org/licenses/>.
 
-"""CollageStop class and related utilities for collage mode."""
+"""BlendStop class and related utilities for blend mode."""
 
-from collage.types import (
+import logging
+
+from blend.types import (
     DiffMapDict,
     EnrichedDiffMap,
+    MidiBoundParams,
     ParamData,
     ParameterTypeGetter,
     SnapshotStateDict,
@@ -25,7 +28,7 @@ from collage.types import (
 from modalapi.parameter import Type as ParameterType
 
 
-class CollageStop:
+class BlendStop:
     """
     Represents a gradient stop in the collage interpolation space.
 
@@ -50,7 +53,7 @@ class CollageStop:
 
     def __repr__(self) -> str:
         param_count = sum(len(params) for params in self.snapshot_state.values())
-        return f"CollageStop(pos={self.position:.2f}, snap={self.snapshot_index}, params={param_count})"
+        return f"BlendStop(pos={self.position:.2f}, snap={self.snapshot_index}, params={param_count})"
 
     @staticmethod
     def build_diff_map(
@@ -127,11 +130,12 @@ class CollageStop:
 
     @staticmethod
     def build_enriched_diff_map(
-        lower_stop: 'CollageStop',
-        upper_stop: 'CollageStop',
-        stops: list['CollageStop'],
+        lower_stop: 'BlendStop',
+        upper_stop: 'BlendStop',
+        stops: list['BlendStop'],
         segment_idx: int,
         param_type_getter: ParameterTypeGetter,
+        midi_bound_params: MidiBoundParams | None = None,
     ) -> EnrichedDiffMap:
         """
         Build enriched diff map with pre-computed neighbor data.
@@ -146,19 +150,31 @@ class CollageStop:
             stops: Complete list of all stops (for neighbor lookup)
             segment_idx: Index of this segment in stops list
             param_type_getter: Function to get parameter type
+            midi_bound_params: Set of (instance_id, symbol) tuples for MIDI-bound params to exclude
 
         Returns:
             Enriched diff map: {instance_id: {symbol: ParamData}}
         """
         # Build basic diff map (only parameters that differ)
-        diff_map = CollageStop.build_diff_map(
+        diff_map = BlendStop.build_diff_map(
             lower_stop.snapshot_state,
             upper_stop.snapshot_state,
             param_type_getter
         )
 
         # Apply binary parameter adjustment ("on wins" logic)
-        diff_map = CollageStop.adjust_binary_params(diff_map)
+        diff_map = BlendStop.adjust_binary_params(diff_map)
+
+        # Filter out MIDI-bound parameters (prevents conflicts with blend mode input)
+        if midi_bound_params:
+            for instance_id in list(diff_map.keys()):
+                for symbol in list(diff_map[instance_id].keys()):
+                    if (instance_id, symbol) in midi_bound_params:
+                        del diff_map[instance_id][symbol]
+                        logging.debug(f"Excluding MIDI-bound parameter: {instance_id}/{symbol}")
+                # Remove instance if no parameters left
+                if not diff_map[instance_id]:
+                    del diff_map[instance_id]
 
         # Enrich with neighbor data for hermite/catmull-rom interpolation
         enriched: EnrichedDiffMap = {}
