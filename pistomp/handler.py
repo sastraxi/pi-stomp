@@ -81,7 +81,10 @@ class Handler:
     def poll_indicators(self):
         raise NotImplementedError()
 
-    def poll_lcd_updates(self):
+    def poll_fast_lcd_updates(self):
+        raise NotImplementedError()
+
+    def poll_slow_lcd_updates(self):
         raise NotImplementedError()
 
     def poll_wifi(self):

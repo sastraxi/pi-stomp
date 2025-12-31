@@ -33,6 +33,7 @@ from pistomp.encodermidicontrol import EncoderMidiControl
 from blend.manager import BlendMode
 
 # import traceback
+# Note: lcd_update_thread imported lazily to avoid initialization issues
 
 
 class Lcd(abstract_lcd.Lcd):
@@ -124,7 +125,20 @@ class Lcd(abstract_lcd.Lcd):
 
         self.pedalboards = {}
 
+        # Track last clip state for change detection
+        self._last_clip_state = (False, False)
+
+        # Show splash screen FIRST, before starting thread
+        logging.info("LCD: Showing splash screen...")
         self.splash_show(True)
+        logging.info("LCD: Splash shown")
+
+        # NOW start LCD update thread (after display is working)
+        logging.info("LCD: Starting update thread...")
+        from pistomp.lcd_update_thread import LcdUpdateThread
+        self.lcd_thread = LcdUpdateThread(max_age_ms=200)
+        self.lcd_thread.start()
+        logging.info("LCD: Update thread started, initialization complete")
 
     #
     # Navigation
@@ -160,6 +174,7 @@ class Lcd(abstract_lcd.Lcd):
         self.footswitches = footswitches
 
     def draw_main_panel(self):
+        logging.info("LCD: Drawing main panel...")
         self.footswitch_slots = {}
         self.draw_tools(None, None, None, None)
         self.main_panel.sel_widget(self.w_wrench)  # Make the System tool (wrench) the initial selected item
@@ -170,23 +185,32 @@ class Lcd(abstract_lcd.Lcd):
         if not self.main_panel_pushed:
             self.pstack.push_panel(self.main_panel)
             self.main_panel_pushed = True
-        # self.main_panel.refresh()
+        logging.info("LCD: Refreshing main panel...")
+        self.main_panel.refresh()
+        logging.info("LCD: Main panel drawn")
 
-    def poll_updates(self):
-        self.pstack.poll_updates()
+    def poll_fast_lcd_updates(self):
+        """
+        Fast LCD updates @ 20Hz (50ms).
 
-        # Tick text widgets (scrolling animation if needed)
-        if self.w_preset:
-            self.w_preset.tick()
-        if self.w_pedalboard:
-            self.w_pedalboard.tick()
+        Enqueues commands for frequently-changing widgets:
+        - Progress bars (analog controls, encoders)
+        - Clip indicators (if clipping state changed)
+        """
+        if not hasattr(self, 'lcd_thread') or self.lcd_thread is None:
+            logging.warning("poll_fast_lcd_updates called before LCD thread initialized")
+            return
 
-        # Update control progress bars (analog controls and encoders)
+        from pistomp.lcd_update_thread import LcdUpdateCommand, UpdateType
+
+        # Progress bar updates
         for icon in self.w_controls:
             if icon.object is None:
                 continue
 
             midi_value = None
+            text_update = None
+
             if isinstance(icon.object, AnalogMidiControl):
                 # AnalogMidiControl - convert ADC value to MIDI
                 midi_value = as_midi_value(icon.object.last_read)
@@ -213,27 +237,84 @@ class Lcd(abstract_lcd.Lcd):
                     # Get snapshot name and update label if changed
                     snapshot_name = self.handler.current.presets.get(closest_stop.snapshot_index, "")
                     if snapshot_name and snapshot_name != icon.text:
-                        icon.set_text(snapshot_name)
+                        text_update = snapshot_name
                 else:
-                    logger.warning("BlendMode icon has no associated input controller")
+                    logging.warning("BlendMode icon has no associated input controller")
 
             if midi_value is not None:
                 progress = midi_value / 127.0
+                # Only enqueue if changed (dedup handles rest)
                 if icon.progress != progress:
-                    icon.set_progress(progress)
+                    kwargs = {'progress': progress}
+                    if text_update:
+                        kwargs['text'] = text_update
+                    self.lcd_thread.enqueue(
+                        LcdUpdateCommand(
+                            UpdateType.WIDGET_REFRESH,
+                            target=icon,
+                            **kwargs
+                        )
+                    )
 
-        # Update output clipping indicators
+        # Clip indicators (already checked at 20ms in poll_indicators)
         if self.handler and self.handler.clipping_monitor is not None:
-            if self.handler.clipping_monitor.enabled:                    
+            if self.handler.clipping_monitor.enabled:
                 clip_left, clip_right = self.handler.clipping_monitor.check_clipping()
-                self.update_clip_indicators(clip_left, clip_right)
+                self._enqueue_clip_updates(clip_left, clip_right)
             else:
-                # Hide indicators when no meter available, assume it's forever
+                # Hide indicators when no meter available
                 if self.w_clip_left is not None:
                     self.w_clip_left.destroy()
                     self.w_clip_right.destroy()
                     self.w_clip_left = None
                     self.w_clip_right = None
+
+    def poll_slow_lcd_updates(self):
+        """
+        Slow LCD updates @ 5Hz (200ms).
+
+        Handles slower-changing elements:
+        - Panel stack updates (synchronous - handles menus/dialogs)
+        - Text scrolling (enqueued to thread)
+        """
+        # Panel stack updates - keep synchronous for now (complex refresh logic)
+        self.pstack.poll_updates()
+
+        # Text scrolling - enqueue to thread
+        if hasattr(self, 'lcd_thread') and self.lcd_thread is not None:
+            from pistomp.lcd_update_thread import LcdUpdateCommand, UpdateType
+
+            if self.w_preset:
+                self.lcd_thread.enqueue(
+                    LcdUpdateCommand(UpdateType.TICK, target=self.w_preset)
+                )
+            if self.w_pedalboard:
+                self.lcd_thread.enqueue(
+                    LcdUpdateCommand(UpdateType.TICK, target=self.w_pedalboard)
+                )
+
+    def _enqueue_clip_updates(self, clip_left, clip_right):
+        """Enqueue clip indicator color changes if state changed."""
+        from pistomp.lcd_update_thread import LcdUpdateCommand, UpdateType
+
+        if (clip_left, clip_right) != self._last_clip_state:
+            self._last_clip_state = (clip_left, clip_right)
+
+            # Enqueue updates with color data in kwargs
+            self.lcd_thread.enqueue(
+                LcdUpdateCommand(
+                    UpdateType.WIDGET_REFRESH,
+                    target=self.w_clip_left,
+                    color=(255, 0, 0) if clip_left else (80, 80, 80)
+                )
+            )
+            self.lcd_thread.enqueue(
+                LcdUpdateCommand(
+                    UpdateType.WIDGET_REFRESH,
+                    target=self.w_clip_right,
+                    color=(255, 0, 0) if clip_right else (80, 80, 80)
+                )
+            )
 
     #
     # Toolbar
@@ -880,6 +961,10 @@ class Lcd(abstract_lcd.Lcd):
         self.splash_panel.refresh()
 
     def cleanup(self):
+        # Shutdown LCD thread first
+        if hasattr(self, 'lcd_thread'):
+            self.lcd_thread.shutdown()
+
         self.pstack.pop_panel(None)  # current panel
         self.pstack.pop_panel(self.footswitch_panel)
         self.pstack.pop_panel(self.main_panel)

@@ -146,18 +146,27 @@ def main():
         # main loop
         while True:
             handler.poll_controls()
-            time.sleep(0.01)  # lower to increase responsiveness, but can cause conflict with LCD if too low
+            time.sleep(0.01)  # 10ms base rate - no more LCD conflicts!
 
             # For less frequent events
             period += 1
-            if period % 2 == 0:
+
+            if period % 2 == 0:  # 20ms
                 handler.poll_indicators()
-            if period % 20 == 0:
-                handler.poll_lcd_updates()
+
+            if period % 5 == 0:  # 50ms = 20Hz - FAST LCD UPDATES
+                handler.poll_fast_lcd_updates()
+
+            if period % 20 == 0:  # 200ms = 5Hz - SLOW LCD UPDATES
+                handler.poll_slow_lcd_updates()
+
+            if period % 100 == 0:  # 1000ms
                 handler.poll_modui_changes()
-            if period % 200 == 0:
+
+            if period % 200 == 0:  # 2000ms
                 handler.poll_wifi()
-            if period > 6000: # every 60 seconds (when sleep = 0.01)
+
+            if period > 6000:  # 60s
                 handler.poll_system_info()
                 period = 0
 

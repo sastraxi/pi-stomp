@@ -250,9 +250,15 @@ class Modhandler(Handler):
             logging.error("Unexpected error getting temperature: %s" % e)
             self.temperature = "unknown"
 
-    def poll_lcd_updates(self):
+    def poll_fast_lcd_updates(self):
+        """Fast LCD updates @ 20Hz (50ms) - progress bars and clip indicators."""
         if self.lcd:
-            self.lcd.poll_updates()
+            self.lcd.poll_fast_lcd_updates()
+
+    def poll_slow_lcd_updates(self):
+        """Slow LCD updates @ 5Hz (200ms) - text scrolling and panels."""
+        if self.lcd:
+            self.lcd.poll_slow_lcd_updates()
 
     def universal_encoder_select(self, direction):
         if self.lcd is not None:

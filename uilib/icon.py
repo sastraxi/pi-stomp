@@ -75,10 +75,12 @@ class Icon(TextWidget):
         self.lines.append(l)
 
     def set_progress(self, progress):
-        """Set progress value (0.0-1.0) for progress bar fill effect"""
+        """Set progress value (0.0-1.0). Does not trigger refresh.
+
+        This allows decoupling value update from LCD refresh,
+        enabling thread-safe updates via command queue.
+        """
         self.progress = max(0.0, min(1.0, progress)) if progress is not None else None
-        if self.visible and self.parent:
-            self.refresh()
 
     def _draw(self, image, draw, real_box):
         # Draw shapes and text
