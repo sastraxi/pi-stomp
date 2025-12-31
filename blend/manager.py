@@ -69,7 +69,7 @@ INTERPOLATION_FUNCTIONS: dict[str, InterpolationFunc] = {
 
 class BlendMode:
     """
-    Coordinates collage mode components with pre-computation optimization.
+    Coordinates blend mode components with pre-computation optimization.
 
     Pre-computes enriched diff maps for each segment at initialization to
     minimize work in the critical path (10ms polling loop).
@@ -98,7 +98,7 @@ class BlendMode:
 
     def initialize(self) -> None:
         """
-        Initialize collage mode with pre-computation optimization.
+        Initialize blend mode with pre-computation optimization.
 
         Pre-computes enriched diff maps for each segment at initialization
         to minimize work in the critical path (pedal movement).
@@ -111,7 +111,7 @@ class BlendMode:
         5. Initialize parameter setter
         6. Initialize and attach pedal controller
         """
-        logging.info("Initializing collage mode...")
+        logging.info("Initializing blend mode...")
 
         try:
             # Validate configuration and resolve interpolation function
@@ -169,19 +169,17 @@ class BlendMode:
 
             # Attach to analog input (expression pedal or encoder)
             self.input_controller.attach_to_input(
-                self.handler.hardware.analog_controls,
-                self.handler.hardware.encoders,
-                input_id
+                self.handler.hardware.analog_controls, self.handler.hardware.encoders, input_id
             )
 
             # Sync current pedal position to trigger initial interpolation
             self.handler.hardware.sync_analog_controls()
 
             self.enabled = True
-            logging.info(f"Collage mode initialized with {len(self.stops)} stops")
+            logging.info(f"Blend mode initialized with {len(self.stops)} stops")
 
         except Exception as e:
-            logging.error(f"Failed to initialize collage mode: {e}")
+            logging.error(f"Failed to initialize blend mode: {e}")
             self.enabled = False
             raise
 
@@ -241,9 +239,7 @@ class BlendMode:
             for symbol, param in plugin.parameters.items():
                 if param.binding is not None:  # Format: "channel:CC"
                     midi_params.add((plugin.instance_id, symbol))
-                    logging.debug(
-                        f"Found MIDI binding: {plugin.instance_id}/{symbol} -> {param.binding}"
-                    )
+                    logging.debug(f"Found MIDI binding: {plugin.instance_id}/{symbol} -> {param.binding}")
 
         if midi_params:
             logging.info(f"Excluding {len(midi_params)} MIDI-bound parameters from blend interpolation")
@@ -391,30 +387,30 @@ class BlendMode:
 
     def handle_snapshot_change(self, new_snapshot_name: str) -> None:
         """
-        Handle snapshot changes and activate/deactivate collage mode accordingly.
+        Handle snapshot changes and activate/deactivate blend mode accordingly.
 
         Args:
             new_snapshot_name: Name of the new snapshot being loaded
         """
-        collage_snapshot_name = self.config.get("snapshot_name", "Collage Mode")
+        blend_snapshot_name = self.config.get("snapshot_name", "Blend Mode")
 
-        if new_snapshot_name == collage_snapshot_name:
-            # Switching TO "Collage Mode" snapshot
+        if new_snapshot_name == blend_snapshot_name:
+            # Switching TO "Blend Mode" snapshot
             if not self.enabled:
-                logging.info(f"Activating collage mode (switched to '{collage_snapshot_name}' snapshot)")
+                logging.info(f"Activating blend mode (switched to '{blend_snapshot_name}' snapshot)")
                 try:
                     self.initialize()
                 except Exception as e:
-                    logging.error(f"Failed to activate collage mode: {e}")
+                    logging.error(f"Failed to activate blend mode: {e}")
         else:
-            # Switching AWAY from "Collage Mode" snapshot
+            # Switching AWAY from "Blend Mode" snapshot
             if self.enabled:
-                logging.info(f"Deactivating collage mode (switched to '{new_snapshot_name}' snapshot)")
+                logging.info(f"Deactivating blend mode (switched to '{new_snapshot_name}' snapshot)")
                 self.cleanup()
 
     def cleanup(self) -> None:
         """
-        Clean up collage mode:
+        Clean up blend mode:
         - Detach from expression pedal
         - Reset tracking state
         - Close parameter setter
@@ -423,7 +419,7 @@ class BlendMode:
         if not self.enabled:
             return
 
-        logging.info("Cleaning up collage mode...")
+        logging.info("Cleaning up blend mode...")
 
         # Clear any pending parameter updates to prevent stale messages
         if self.handler.ws_bridge:
@@ -445,14 +441,14 @@ class BlendMode:
         self.stops = []
         self.segment_diff_maps = []
         self.enabled = False
-        logging.info("Collage mode cleaned up")
+        logging.info("Blend mode cleaned up")
 
     def check_for_snapshot_changes(self) -> None:
         """
         Check if snapshots.json has been modified and reinitialize if needed.
 
         This detects when stop snapshots are edited in MOD-UI, allowing
-        collage mode to pick up the new parameter values without requiring
+        blend mode to pick up the new parameter values without requiring
         a full pedalboard reload. Note that this file is only modified when
         the pedalboard itself is saved in MOD-UI.
 
@@ -474,11 +470,11 @@ class BlendMode:
 
         # Check if file was modified
         if current_timestamp != self.snapshots_file_timestamp:
-            logging.info("Snapshots file modified, resyncing collage snapshot and reloading...")
+            logging.info("Snapshots file modified, resyncing blend snapshot and reloading...")
 
             try:
-                # Re-sync the collage snapshot (recreates from updated stops)
-                SnapshotManager.sync_collage_snapshot(bundle_path, self.config, self.handler.root_uri)
+                # Re-sync the blend snapshot (recreates from updated stops)
+                SnapshotManager.sync_blend_snapshot(bundle_path, self.config, self.handler.root_uri)
 
                 # Reinitialize: cleanup then initialize again
                 self.cleanup()
@@ -487,7 +483,7 @@ class BlendMode:
                 # Update timestamp AFTER sync (sync writes the file, changing timestamp)
                 self.snapshots_file_timestamp = SnapshotManager.get_snapshots_file_timestamp(bundle_path)
 
-                logging.info("Collage mode reloaded successfully")
+                logging.info("Blend mode reloaded successfully")
             except Exception as e:
-                logging.error(f"Failed to reload collage mode: {e}")
+                logging.error(f"Failed to reload blend mode: {e}")
                 self.enabled = False

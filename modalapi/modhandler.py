@@ -22,6 +22,7 @@ import requests as req
 import subprocess
 import sys
 import yaml
+from typing import Any
 
 from pathlib import Path
 from rtmidi.midiconstants import CONTROL_CHANGE
@@ -675,7 +676,7 @@ class Modhandler(Handler):
             self.lcd.draw_message_dialog("Snapshot id %d does not exist for this pedalboard" % index)
             return
 
-        # Handle collage mode snapshot-based activation
+        # Handle blend mode snapshot-based activation
         self._handle_blend_mode_snapshot_change(index)
 
         self.lcd.draw_info_message("Loading...")
