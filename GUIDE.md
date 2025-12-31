@@ -343,8 +343,18 @@ GET  /get_bpm                            # Get current BPM
 **LCD System**:
 - **v1**: `lcdgfx.py` - Monochrome text display
 - **v2/v3**: `lcd320x240.py` - Color GUI with widget-based UI library (`uilib/`)
+  - ILI9341 controller, 320×240 RGB, 24MHz SPI (`uilib/lcd_ili9341.py`)
   - Builder pattern constructs UI from pedalboard data
   - Event-driven updates via `link_data()`
+
+**LCD Performance**:
+- **Refresh rate**: 5Hz (200ms poll in `modalapistomp.py:156`)
+- **Partial updates supported**: `widget.refresh()` updates bounding box only
+- **Current pattern**: `panel.refresh()` redraws entire panel (320×170 or 320×64)
+- **Optimization**: Call `widget.refresh()` for small changes (footswitch, parameter value)
+  - Single widget (~60×40): ~100Hz capable vs 5Hz panel refresh
+  - Trade-off: CPU overhead vs visual responsiveness
+- **Thread safety**: `lcd_ili9341.py` uses lock - avoid blocking in refresh path
 
 ### Data Flow Examples
 
