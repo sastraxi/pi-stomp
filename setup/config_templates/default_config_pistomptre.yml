@@ -79,14 +79,11 @@ hardware:
     - id: 3
       type: VOLUME
 
-# Collage Mode Configuration (Pedalboard-specific)
-# This feature interpolates between snapshots based on expression pedal position.
+
+# Blend Mode Configuration (Pedalboard-specific)
+# This feature interpolates between snapshots based on analog input position.
 # IMPORTANT: This should be configured per-pedalboard in <pedalboard>.pedalboard/config.yml
-# Requires an expression pedal to be configured in analog_controllers above.
-#
-# Expression pedal-driven snapshot interpolation with per-parameter control.
-# Pre-computes diff maps at load for optimized 10ms critical path.
-# MIDI-level de-duplication prevents redundant WebSocket traffic.
+# Requires an expression pedal or encoder to be configured in analog_controllers above.
 #
 # Blend Mode: Smoothly interpolate between snapshots using analog input
 # Supports expression pedals and tweak encoders (Tweak1=ID 1, Tweak2=ID 2)

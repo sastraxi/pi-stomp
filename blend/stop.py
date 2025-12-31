@@ -30,7 +30,7 @@ from modalapi.parameter import Type as ParameterType
 
 class BlendStop:
     """
-    Represents a gradient stop in the collage interpolation space.
+    Represents a gradient stop in the blend interpolation space.
 
     A stop defines a point along the expression pedal's range (0.0-1.0)
     and the parameter state (snapshot) that should be active at that point.
@@ -38,7 +38,7 @@ class BlendStop:
 
     def __init__(self, position: float, snapshot_index: int, snapshot_state: SnapshotStateDict) -> None:
         """
-        Initialize a collage stop.
+        Initialize a blend stop.
 
         Args:
             position: float (0.0-1.0), position in global interpolation space
@@ -130,9 +130,9 @@ class BlendStop:
 
     @staticmethod
     def build_enriched_diff_map(
-        lower_stop: 'BlendStop',
-        upper_stop: 'BlendStop',
-        stops: list['BlendStop'],
+        lower_stop: "BlendStop",
+        upper_stop: "BlendStop",
+        stops: list["BlendStop"],
         segment_idx: int,
         param_type_getter: ParameterTypeGetter,
         midi_bound_params: MidiBoundParams | None = None,
@@ -156,11 +156,7 @@ class BlendStop:
             Enriched diff map: {instance_id: {symbol: ParamData}}
         """
         # Build basic diff map (only parameters that differ)
-        diff_map = BlendStop.build_diff_map(
-            lower_stop.snapshot_state,
-            upper_stop.snapshot_state,
-            param_type_getter
-        )
+        diff_map = BlendStop.build_diff_map(lower_stop.snapshot_state, upper_stop.snapshot_state, param_type_getter)
 
         # Apply binary parameter adjustment ("on wins" logic)
         diff_map = BlendStop.adjust_binary_params(diff_map)
@@ -187,15 +183,11 @@ class BlendStop:
                 # Get neighbor values for hermite/catmull-rom tangent calculation
                 prev_val: float | None = None
                 if segment_idx > 0:
-                    prev_val = stops[segment_idx - 1].snapshot_state.get(
-                        instance_id, {}
-                    ).get(symbol, val_a)
+                    prev_val = stops[segment_idx - 1].snapshot_state.get(instance_id, {}).get(symbol, val_a)
 
                 next_val: float | None = None
                 if segment_idx < len(stops) - 2:
-                    next_val = stops[segment_idx + 2].snapshot_state.get(
-                        instance_id, {}
-                    ).get(symbol, val_b)
+                    next_val = stops[segment_idx + 2].snapshot_state.get(instance_id, {}).get(symbol, val_b)
 
                 # Create ParamData with all pre-computed values
                 enriched[instance_id][symbol] = ParamData(

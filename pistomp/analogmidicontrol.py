@@ -20,7 +20,6 @@ from rtmidi.midiutil import open_midioutput
 from rtmidi.midiconstants import CONTROL_CHANGE
 
 import common.util as util
-import json
 import pistomp.analogcontrol as analogcontrol
 
 import logging
@@ -55,7 +54,7 @@ class AnalogMidiControl(analogcontrol.AnalogControl):
             value: Raw ADC value (0-1023)
         """
         if self.value_change_callback:
-            # Delegate to callback (e.g., collage mode interpolation)
+            # Delegate to callback (e.g., blend mode interpolation)
             self.value_change_callback(value, self)
         else:
             # Default behavior: convert to MIDI and send
@@ -67,7 +66,7 @@ class AnalogMidiControl(analogcontrol.AnalogControl):
     def send_current_value(self):
         """
         Force-send the current analog control value.
-        Used for syncing state during pedalboard load or collage mode activation.
+        Used for syncing state during pedalboard load or blend mode activation.
         Routes via callback if registered, otherwise sends MIDI.
         """
         # read the analog pin
