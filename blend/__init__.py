@@ -14,20 +14,23 @@
 # along with pi-stomp.  If not, see <https://www.gnu.org/licenses/>.
 
 """
-Collage mode package - Expression pedal-driven snapshot interpolation.
+Blend mode package - Analog input-driven snapshot interpolation.
 
 This package provides functionality for smoothly interpolating between snapshots
-based on expression pedal position, with per-parameter interpolation and
-pre-computed diff maps for optimized performance.
+based on analog input position (expression pedals or tweak encoders), with
+per-parameter interpolation and pre-computed diff maps for optimized performance.
 """
 
 # Main public API
-from collage.manager import CollageMode
-from collage.stop import CollageStop
-from collage.types import CollageConfig
+from blend.manager import BlendMode
+from blend.stop import BlendStop
+from blend.input_controller import InputController
+from blend.snapshot import SnapshotManager
+from blend.parameter_setter import ParameterSetter
+from blend.types import BlendSnapshotConfig, PedalboardBlendConfig, NormalizedStops
 
 # Easing functions
-from collage.easing import (
+from blend.easing import (
     linear_easing,
     ease_in_quad,
     ease_out_quad,
@@ -40,21 +43,22 @@ from collage.easing import (
 )
 
 # Spline interpolation functions
-from collage.interpolation import (
+from blend.interpolation import (
     hermite_interpolation,
     catmull_rom_interpolation,
-)
-
-# Easing-based interpolation functions
-from collage.interpolation import (
     linear_interpolation,
 )
 
 __all__ = [
     # Core classes
-    'CollageMode',
-    'CollageStop',
-    'CollageConfig',
+    'BlendMode',
+    'BlendStop',
+    'InputController',
+    'SnapshotManager',
+    'ParameterSetter',
+    'BlendSnapshotConfig',
+    'PedalboardBlendConfig',
+    'NormalizedStops',
 
     # Easing functions (for standalone use)
     'linear_easing',
@@ -70,7 +74,9 @@ __all__ = [
     # Spline interpolation functions
     'hermite_interpolation',
     'catmull_rom_interpolation',
-
-    # Easing-based interpolation functions
     'linear_interpolation',
 ]
+
+# Temporary backwards compatibility aliases for import transition
+# TODO: Remove once all code is updated
+CollageMode = BlendMode

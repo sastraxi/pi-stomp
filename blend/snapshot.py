@@ -13,7 +13,7 @@
 # You should have received a copy of the GNU General Public License
 # along with pi-stomp.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Snapshot file operations for collage mode."""
+"""Snapshot file operations for blend mode."""
 
 import copy
 import json
@@ -21,9 +21,9 @@ import logging
 import requests as req
 from pathlib import Path
 
-from collage.stop import CollageStop
-from collage.types import (
-    CollageConfig,
+from blend.stop import BlendStop
+from blend.types import (
+    BlendSnapshotConfig,
     ParameterTypeGetter,
     PluginData,
     SnapshotData,
@@ -175,24 +175,24 @@ class SnapshotManager:
         return f"/{key}"
 
     @staticmethod
-    def sync_collage_snapshot(
+    def sync_blend_snapshots(
         bundle_path: Path,
-        collage_config: CollageConfig | None,
+        blend_configs: list[BlendSnapshotConfig] | None,
         root_uri: str
-    ) -> int | None:
+    ) -> dict[str, int]:
         """
-        Sync Collage Mode snapshot with current configuration.
+        Sync blend snapshots with current configuration.
 
-        If collage mode enabled: Recreate snapshot from first stop (prevents drift)
-        If collage mode disabled/missing: Remove snapshot if it exists
+        Creates/recreates all blend snapshots defined in config. Each blend snapshot
+        is created from its first stop to prevent parameter drift.
 
         Args:
             bundle_path: Path to pedalboard bundle directory
-            collage_config: Collage mode config dict, or None if not configured
+            blend_configs: List of blend snapshot configs, or None/empty if no blend mode
             root_uri: MOD-UI root URI for snapshot reload notifications
 
         Returns:
-            Snapshot index if created, None if removed or not created
+            Dict mapping snapshot names to indices: {name: index}
 
         Raises:
             FileNotFoundError: If snapshots.json doesn't exist
@@ -201,75 +201,89 @@ class SnapshotManager:
         snapshots_file = bundle_path / "snapshots.json"
         snapshots_data = SnapshotManager.read_snapshots_file(bundle_path)
 
-        # Determine snapshot name
-        snapshot_name = 'Collage Mode'
-        if collage_config:
-            snapshot_name = collage_config.get('snapshot_name', 'Collage Mode')
+        # If no blend configs, nothing to create
+        if not blend_configs:
+            logging.debug("No blend snapshots to create")
+            return {}
 
-        # Find existing Collage Mode snapshot
-        existing_idx = None
-        for i, snapshot in enumerate(snapshots_data.get('snapshots', [])):
-            if snapshot.get('name') == snapshot_name:
-                existing_idx = i
-                break
+        snapshot_indices: dict[str, int] = {}
+        snapshots_modified = False
 
-        # Check if collage mode is enabled
-        enabled = collage_config.get('enabled', False) if collage_config else False
+        for blend_cfg in blend_configs:
+            snapshot_name = blend_cfg.get('name')
+            if not snapshot_name:
+                logging.warning("Blend config missing 'name', skipping")
+                continue
 
-        if not enabled:
-            # Remove snapshot if it exists
+            # Remove existing snapshot with same name (for recreation)
+            existing_idx = None
+            for i, snapshot in enumerate(snapshots_data.get('snapshots', [])):
+                if snapshot.get('name') == snapshot_name:
+                    existing_idx = i
+                    break
+
             if existing_idx is not None:
-                logging.info(f"Removing '{snapshot_name}' snapshot (collage mode disabled)")
+                logging.debug(f"Removing old '{snapshot_name}' snapshot for recreation")
                 snapshots_data['snapshots'].pop(existing_idx)
+                snapshots_modified = True
 
-                # Write updated snapshots
-                with open(snapshots_file, 'w') as f:
-                    json.dump(snapshots_data, f, indent=4)
+            # Get stops and find first one
+            stops_config = blend_cfg.get('stops')
+            if not stops_config:
+                logging.warning(f"Blend snapshot '{snapshot_name}' missing 'stops', skipping")
+                continue
 
-                # Notify MOD-UI
-                SnapshotManager._notify_mod_ui(root_uri)
+            # Normalize stops to dict format (handle list)
+            if isinstance(stops_config, list):
+                if len(stops_config) < 2:
+                    logging.warning(f"Blend snapshot '{snapshot_name}' needs at least 2 stops, skipping")
+                    continue
+                # List format: use first entry
+                first_identifier = stops_config[0]
+            elif isinstance(stops_config, dict):
+                if len(stops_config) < 2:
+                    logging.warning(f"Blend snapshot '{snapshot_name}' needs at least 2 stops, skipping")
+                    continue
+                # Dict format: find stop with lowest position
+                sorted_stops = sorted(stops_config.items(), key=lambda x: float(x[0]))
+                first_identifier = sorted_stops[0][1]
+            else:
+                logging.warning(f"Blend snapshot '{snapshot_name}' has invalid 'stops' format, skipping")
+                continue
 
-            return None
+            # Resolve first stop identifier to snapshot index
+            try:
+                first_stop_index = SnapshotManager.resolve_snapshot_identifier(snapshots_data, first_identifier)
+                first_stop_snapshot = snapshots_data['snapshots'][first_stop_index]
+            except (ValueError, IndexError) as e:
+                logging.warning(f"Failed to resolve first stop '{first_identifier}' for '{snapshot_name}': {e}")
+                continue
 
-        # Collage mode enabled - recreate snapshot
+            # Create new blend snapshot by deep copying first stop
+            logging.info(f"Creating blend snapshot '{snapshot_name}' from '{first_stop_snapshot['name']}'")
+            blend_snapshot: SnapshotData = {
+                'name': snapshot_name,
+                'data': copy.deepcopy(first_stop_snapshot['data'])
+            }
 
-        # Remove old snapshot if exists
-        if existing_idx is not None:
-            logging.debug(f"Removing old '{snapshot_name}' snapshot for recreation")
-            snapshots_data['snapshots'].pop(existing_idx)
+            # Append new snapshot
+            snapshots_data['snapshots'].append(blend_snapshot)
+            new_idx = len(snapshots_data['snapshots']) - 1
+            snapshot_indices[snapshot_name] = new_idx
+            snapshots_modified = True
 
-        # Get first stop snapshot to copy
-        snapshot_stops = collage_config.get('snapshot_stops', {})
-        if len(snapshot_stops) < 2:
-            raise ValueError(f"Collage mode requires at least 2 stops, got {len(snapshot_stops)}")
+            logging.info(f"Created blend snapshot '{snapshot_name}' at index {new_idx}")
 
-        sorted_stops = sorted(snapshot_stops.items(), key=lambda x: float(x[0]))
-        first_identifier = sorted_stops[0][1]
+        # Write updated snapshots if any changes were made
+        if snapshots_modified:
+            with open(snapshots_file, 'w') as f:
+                json.dump(snapshots_data, f, indent=4)
 
-        first_stop_index = SnapshotManager.resolve_snapshot_identifier(snapshots_data, first_identifier)
-        first_stop_snapshot = snapshots_data['snapshots'][first_stop_index]
+            # Notify MOD-UI
+            SnapshotManager._notify_mod_ui(root_uri)
+            logging.info(f"Synced {len(snapshot_indices)} blend snapshots")
 
-        # Create new snapshot by deep copying first stop
-        logging.info(f"Creating '{snapshot_name}' snapshot from '{first_stop_snapshot['name']}'")
-        collage_snapshot: SnapshotData = {
-            'name': snapshot_name,
-            'data': copy.deepcopy(first_stop_snapshot['data'])
-        }
-
-        # Append new snapshot
-        snapshots_data['snapshots'].append(collage_snapshot)
-        new_idx = len(snapshots_data['snapshots']) - 1
-
-        # Write updated snapshots
-        with open(snapshots_file, 'w') as f:
-            json.dump(snapshots_data, f, indent=4)
-
-        logging.info(f"Created '{snapshot_name}' snapshot at index {new_idx}")
-
-        # Notify MOD-UI
-        SnapshotManager._notify_mod_ui(root_uri)
-
-        return new_idx
+        return snapshot_indices
 
     @staticmethod
     def get_snapshots_file_timestamp(bundle_path: Path) -> float:

@@ -39,6 +39,9 @@ class EncoderMidiControl(encoder.Encoder, controller.Controller):
         self.midi_value = 0  # the midi equivalent value
         self.per_click = 8   # resolution (midi values per click)
 
+        # Blend mode integration: callback override
+        self.value_change_callback = None
+
         # Override base class to call our update function
         self.callback = self.refresh
 
@@ -79,7 +82,18 @@ class EncoderMidiControl(encoder.Encoder, controller.Controller):
         # Now that the MIDI msg was sent, update our current value
         self.midi_value = midi_value
 
-        # Display
-        self.handler.parameter_midi_change(self.parameter, direction) # TODO LAME object linkage
+        # Blend mode callback override: if set, ONLY call callback (skip display update)
+        # XXX: When blend mode is active, we may need to update the LCD to show the
+        # encoder's current value. Consider adding a separate display update mechanism
+        # that doesn't interfere with blend mode's parameter interpolation.
+        if self.value_change_callback:
+            self.value_change_callback(midi_value, self)
+        else:
+            # Regular behavior: update display
+            self.handler.parameter_midi_change(self.parameter, direction)
+
+    def get_normalized_value(self) -> float:
+        """Get current value normalized to [0.0, 1.0] for blend mode."""
+        return self.midi_value / 127.0
 
 
