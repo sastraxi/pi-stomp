@@ -20,6 +20,7 @@ import requests as req
 import subprocess
 import sys
 import yaml
+from typing import Any
 
 from enum import Enum
 from rtmidi.midiconstants import CONTROL_CHANGE
@@ -547,6 +548,15 @@ class Mod(Handler):
                 pb = self.pedalboards[mod_bundle]
                 self.set_current_pedalboard(pb)
 
+        # Check for snapshot file modifications (blend mode stop edits)
+        if self.active_blend_mode:
+            try:
+                self.active_blend_mode.check_for_snapshot_changes()
+            except Exception as e:
+                logging.error(f"Blend mode snapshot check failed, deactivating: {e}")
+                self.active_blend_mode.cleanup()
+                self.active_blend_mode = None
+
     #
     # Pedalboard Stuff
     #
@@ -661,6 +671,9 @@ class Mod(Handler):
                     self.active_blend_mode = self.blend_modes[first_snapshot_name]
                     self.active_blend_mode.initialize()
                     logging.info(f"Activated blend mode: '{first_snapshot_name}'")
+
+                # Redraw analog assignments to use BlendMode object for expression pedal
+                self.lcd.draw_analog_assignments(self.current.analog_controllers)
 
         except Exception as e:
             logging.error(f"Failed to prepare blend modes: {e}")

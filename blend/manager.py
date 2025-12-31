@@ -85,7 +85,6 @@ class BlendMode:
         """
         self.handler: Any = handler  # Modhandler - avoiding circular import
         self.config: BlendSnapshotConfig = config
-        self.enabled: bool = False
         self.stops: list[BlendStop] = []
         self.segment_diff_maps: list[EnrichedDiffMap] = []
 
@@ -175,12 +174,10 @@ class BlendMode:
             # Sync current pedal position to trigger initial interpolation
             self.handler.hardware.sync_analog_controls()
 
-            self.enabled = True
             logging.info(f"Blend mode initialized with {len(self.stops)} stops")
 
         except Exception as e:
             logging.error(f"Failed to initialize blend mode: {e}")
-            self.enabled = False
             raise
 
     def _normalize_stops_config(self, stops_config: dict[str, int | str] | list[str | int]) -> NormalizedStops:
@@ -385,42 +382,18 @@ class BlendMode:
         # Default to DEFAULT type
         return ParameterType.DEFAULT
 
-    def handle_snapshot_change(self, new_snapshot_name: str) -> None:
-        """
-        Handle snapshot changes and activate/deactivate blend mode accordingly.
-
-        Args:
-            new_snapshot_name: Name of the new snapshot being loaded
-        """
-        blend_snapshot_name = self.config.get("snapshot_name", "Blend Mode")
-
-        if new_snapshot_name == blend_snapshot_name:
-            # Switching TO "Blend Mode" snapshot
-            if not self.enabled:
-                logging.info(f"Activating blend mode (switched to '{blend_snapshot_name}' snapshot)")
-                try:
-                    self.initialize()
-                    # Redraw analog assignments to use BlendMode object for expression pedal
-                    self.handler.lcd.draw_analog_assignments(self.handler.current.analog_controllers)
-                except Exception as e:
-                    logging.error(f"Failed to activate blend mode: {e}")
-        else:
-            # Switching AWAY from "Blend Mode" snapshot
-            if self.enabled:
-                logging.info(f"Deactivating blend mode (switched to '{new_snapshot_name}' snapshot)")
-                self.cleanup()
-                # Redraw analog assignments to revert to normal AnalogMidiControl
-                self.handler.lcd.draw_analog_assignments(self.handler.current.analog_controllers)
-
     def cleanup(self) -> None:
         """
         Clean up blend mode:
-        - Detach from expression pedal
+        - Detach from input controller
         - Reset tracking state
         - Close parameter setter
         - Reset state
+
+        Idempotent - safe to call multiple times.
         """
-        if not self.enabled:
+        # Idempotent check - if already cleaned up, nothing to do
+        if self.input_controller is None:
             return
 
         logging.info("Cleaning up blend mode...")
@@ -432,19 +405,19 @@ class BlendMode:
                 logging.info(f"Cleared {cleared} pending websocket messages")
 
         # Detach from input and reset tracking
-        if self.input_controller:
-            self.input_controller.detach_from_input()
-            self.input_controller.reset_tracking()  # Reset segment cache
+        self.input_controller.detach_from_input()
+        self.input_controller.reset_tracking()  # Reset segment cache
+        self.input_controller = None
 
         # Clean up parameter setter and reset MIDI tracking
         if self.parameter_setter:
             self.parameter_setter.reset_tracking()  # Clear MIDI de-dupe tracking
             self.parameter_setter.cleanup()
+            self.parameter_setter = None
 
         # Reset state
         self.stops = []
         self.segment_diff_maps = []
-        self.enabled = False
         logging.info("Blend mode cleaned up")
 
     def check_for_snapshot_changes(self) -> None:
@@ -456,11 +429,8 @@ class BlendMode:
         a full pedalboard reload. Note that this file is only modified when
         the pedalboard itself is saved in MOD-UI.
 
-        Called periodically from modhandler's poll_modui_changes().
+        Called periodically from handler's poll_modui_changes() on the active blend mode only.
         """
-        if not self.enabled:
-            return
-
         from pathlib import Path
         from blend.snapshot import SnapshotManager
 
@@ -476,18 +446,14 @@ class BlendMode:
         if current_timestamp != self.snapshots_file_timestamp:
             logging.info("Snapshots file modified, resyncing blend snapshot and reloading...")
 
-            try:
-                # Re-sync the blend snapshot (recreates from updated stops)
-                SnapshotManager.sync_blend_snapshot(bundle_path, self.config, self.handler.root_uri)
+            # Re-sync the blend snapshot (recreates from updated stops)
+            SnapshotManager.sync_blend_snapshot(bundle_path, self.config, self.handler.root_uri)
 
-                # Reinitialize: cleanup then initialize again
-                self.cleanup()
-                self.initialize()
+            # Reinitialize: cleanup then initialize again
+            self.cleanup()
+            self.initialize()
 
-                # Update timestamp AFTER sync (sync writes the file, changing timestamp)
-                self.snapshots_file_timestamp = SnapshotManager.get_snapshots_file_timestamp(bundle_path)
+            # Update timestamp AFTER sync (sync writes the file, changing timestamp)
+            self.snapshots_file_timestamp = SnapshotManager.get_snapshots_file_timestamp(bundle_path)
 
-                logging.info("Blend mode reloaded successfully")
-            except Exception as e:
-                logging.error(f"Failed to reload blend mode: {e}")
-                self.enabled = False
+            logging.info("Blend mode reloaded successfully")
