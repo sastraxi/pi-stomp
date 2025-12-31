@@ -361,7 +361,12 @@ class Modhandler(Handler):
 
         # Check for snapshot file modifications (blend mode stop edits)
         if self.active_blend_mode:
-            self.active_blend_mode.check_for_snapshot_changes()
+            try:
+                self.active_blend_mode.check_for_snapshot_changes()
+            except Exception as e:
+                logging.error(f"Blend mode snapshot check failed, deactivating: {e}")
+                self.active_blend_mode.cleanup()
+                self.active_blend_mode = None
 
     #
     # Bank Stuff
