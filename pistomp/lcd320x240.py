@@ -30,7 +30,7 @@ from uilib.lcd_ili9341 import *
 from pistomp.footswitch import Footswitch  # TODO would like to avoid this module knowing such details
 from pistomp.analogmidicontrol import AnalogMidiControl, as_midi_value
 from pistomp.encodermidicontrol import EncoderMidiControl
-from collage.manager import CollageMode
+from blend.manager import BlendMode
 
 # import traceback
 
@@ -186,8 +186,8 @@ class Lcd(abstract_lcd.Lcd):
                 # EncoderMidiControl - already in MIDI range
                 midi_value = icon.object.midi_value
 
-            elif isinstance(icon.object, CollageMode):
-                # CollageMode - get position from hijacked pedal
+            elif isinstance(icon.object, BlendMode):
+                # BlendMode - get position from hijacked pedal
                 pedal = icon.object.pedal_controller.controlled_pedal
                 if pedal:
                     position = pedal.last_read / 1023.0  # Normalize to 0.0-1.0
@@ -202,7 +202,7 @@ class Lcd(abstract_lcd.Lcd):
                     if snapshot_name and snapshot_name != icon.text:
                         icon.set_text(snapshot_name)
                 else:
-                    logger.warning("CollageMode icon has no associated pedal controller")
+                    logger.warning("BlendMode icon has no associated pedal controller")
 
             if midi_value is not None:
                 progress = midi_value / 127.0
@@ -903,14 +903,14 @@ class Lcd(abstract_lcd.Lcd):
             # Determine what object to pass to Icon widget
             icon_object = analog_control  # Default
 
-            # Check if this control is the CollageMode expression pedal
+            # Check if this control is a BlendMode analog input
             if (
                 analog_control is not None
-                and self.handler.collage_mode
-                and self.handler.collage_mode.enabled
-                and analog_control.id == self.handler.collage_mode.config.get("expression_pedal_id", 0)
+                and self.handler.blend_mode
+                and self.handler.blend_mode.enabled
+                and analog_control.id == self.handler.blend_mode.config.get("input_id", 0)
             ):
-                icon_object = self.handler.collage_mode
+                icon_object = self.handler.blend_mode
 
             if k is None:
                 # Non-mapped control
@@ -936,8 +936,8 @@ class Lcd(abstract_lcd.Lcd):
                         text_color = Category.get_category_color(category)
                         color = self.default_plugin_color
 
-            # Override color for CollageMode to show it's active (same as volume)
-            if isinstance(icon_object, CollageMode):
+            # Override color for BlendMode to show it's active (same as volume)
+            if isinstance(icon_object, BlendMode):
                 text_color = self.default_plugin_color
                 color = self.default_plugin_color
 
