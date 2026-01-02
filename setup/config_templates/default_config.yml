@@ -84,10 +84,6 @@ hardware:
 # IMPORTANT: This should be configured per-pedalboard in <pedalboard>.pedalboard/config.yml
 # Requires an expression pedal or encoder to be configured in analog_controllers above.
 #
-# Analog input-driven snapshot interpolation with per-parameter control.
-# Pre-computes diff maps at load for optimized 10ms critical path.
-# MIDI-level de-duplication prevents redundant WebSocket traffic.
-#
 # blend_snapshots:
 #   - name: "Clean to Fuzz"          # Required: descriptive name for this blend snapshot
 #     input_id: 0                    # Required: expression pedal (0) or encoder (1, 2)
@@ -103,5 +99,3 @@ hardware:
 #   - name: "Volume Swell"
 #     input_id: 1                    # Tweak1 encoder
 #     stops: ["Quiet", "Loud"]       # List format: auto-spaced evenly
-#
-# Note: hermite/catmull_rom use up to 2 stops back/forward for context (smooth curves)
