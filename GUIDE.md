@@ -1,5 +1,24 @@
 # Guide for piStomp Development
 
+## Contributing Code
+
+**Code Style**:
+- Terse, minimal comments - docstrings for public methods only
+- Comment only when surprising or justifying an approach
+- Type hints everywhere - use actual types, not `Any`
+- No `TYPE_CHECKING` unless there's an actual circular import
+
+**Architecture**:
+- No unnecessary "defensive programming" - fail fast!
+- No premature branches - don't handle cases that don't exist yet
+- Question complexity - "why do we need this branch?" should have a clear answer
+- Read existing code before writing - understand patterns first
+
+**Development**:
+- Phase changes - don't try to do everything at once
+- Migrate incrementally - one subsystem at a time
+- Type system catches errors at development time, not runtime
+
 ## Remote Development
 
 **SSH Access**: `ssh pistomp@pistomp.local`

@@ -452,6 +452,12 @@ class Lcd(abstract_lcd.Lcd):
         self.w_parameter_dialogs[parameter.name] = d
         return d  # return the dialog so the parameter can be modified using the tweak knob
 
+    def display_parameter_value(self, parameter: Parameter.Parameter, value: float) -> None:
+        """Update parameter dialog with new value (controller already calculated it)."""
+        d = self.draw_parameter_dialog(parameter, timeout=2)
+        if d:
+            d.update_value(value)
+
     def parameter_commit(self, parameter, value):
         self.handler.parameter_value_commit(parameter, value)
 

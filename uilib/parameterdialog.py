@@ -99,18 +99,22 @@ class Parameterdialog(Dialog):
 
         self.refresh()
 
-    def parameter_value_change(self, direction):
+    def _reset_timeout_timer(self):
         if self.timeout is not None:
-            # For autoclose, add a timer which eventually pops the dialog.
-            # If timer exists, reset via cancel and recreate
             if self.timer is not None:
                 self.timer.cancel()
-            # The timeout callback (eg. self.pop) will be executed in a separate thread.
-            # that thread should not refresh the LCD or else it could cause SPI conflicts between LCD and the MCP ADC
             self.timer = threading.Timer(self.timeout, self.pop)
             self.timer.start()
 
-        # Find the point on the graph for the current param_value, then get the previous or next value
+    def update_value(self, new_value: float) -> None:
+        """Update display with new value (controller already calculated it)."""
+        self._reset_timeout_timer()
+        self.param_value = new_value
+        self._draw_graph()
+
+    def parameter_value_change(self, direction):
+        self._reset_timeout_timer()
+
         value = float(self.param_value)
         i = self._find_nearest_element_index(self.actual_points, value)
         new = i-1 if (direction != 1) else i+1
@@ -124,8 +128,8 @@ class Parameterdialog(Dialog):
             return
         self.param_value = new_value
         if self.action is not None:
-            self.action(self.object, new_value)  # This assumes the method signature
-        self._draw_graph()  # TODO XXX redrawing with every tweak produces a shit-load of line widgets
+            self.action(self.object, new_value)
+        self._draw_graph()
 
     def input_event(self, event):
         if event == InputEvent.CLICK:

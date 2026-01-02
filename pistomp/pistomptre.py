@@ -21,7 +21,7 @@ import common.token as Token
 import common.util as Util
 import pistomp.encoder as Encoder
 import pistomp.encoderconfig as encoderconfig
-import pistomp.encodermidicontrol as EncoderMidiControl
+import pistomp.encoder_controller as EncoderController
 import pistomp.gpioswitch as gpioswitch
 import pistomp.hardware as hardware
 import pistomp.ledstrip as Ledstrip
@@ -107,10 +107,9 @@ class Pistomptre(hardware.Hardware):
             enc = Encoder.Encoder(d_pin, clk_pin, callback=self.handler.system_menu_headphone_volume,
                                   type=type, id=id)
         else:
-            enc = EncoderMidiControl.EncoderMidiControl(self.handler, d_pin=d_pin, clk_pin=clk_pin,
-                                                        callback=callback,
-                                                        midi_channel=midi_channel, midi_CC=midi_cc,
-                                                        midiout=self.midiout, type=Token.KNOB, id=id)
+            enc = EncoderController.EncoderController(self.handler, d_pin=d_pin, clk_pin=clk_pin,
+                                                      midi_channel=midi_channel, midi_CC=midi_cc,
+                                                      midiout=self.midiout, type=Token.KNOB, id=id)
 
         if sw_pin is not None:
             parsed = encoderconfig.parse_shortpress_config(shortpress_config)

@@ -37,9 +37,10 @@ from blend.snapshot import SnapshotManager
 from modalapi.websocket_bridge import AsyncWebSocketBridge
 from modalapi.ws_protocol import parse_message, LoadingEndMessage, PedalSnapshotMessage
 from modalapi.pedalboard_monitor import PedalboardMonitor
+from modalapi.parameter import Parameter, Type
 
 from pistomp.analogmidicontrol import AnalogMidiControl
-from pistomp.encodermidicontrol import EncoderMidiControl
+from pistomp.encoder_controller import EncoderController
 from pistomp.footswitch import Footswitch
 
 
@@ -568,10 +569,12 @@ class Modhandler(Handler):
                     if param.binding is not None:
                         controller = self.hardware.controllers.get(param.binding)
                         if controller is not None:
-                            # TODO possibly use a setter instead of accessing var directly
-                            # What if multiple params could map to the same controller?
-                            controller.parameter = param
-                            controller.set_value(param.value)
+                            if isinstance(controller, EncoderController):
+                                taper = 2 if param.type == Type.LOGARITHMIC else 1
+                                controller.bind_to_parameter(param, taper)
+                            else:
+                                controller.parameter = param
+                                controller.set_value(param.value)
                             plugin.controllers.append(controller)
                             if isinstance(controller, Footswitch):
                                 # TODO sort this list so selection orders correctly (sort on midi_CC?)
@@ -584,12 +587,14 @@ class Modhandler(Handler):
                                 controller.cfg[Token.TYPE] = controller.type
                                 controller.cfg[Token.ID] = controller.id
                                 self.current.analog_controllers[key] = controller.cfg
-                            elif isinstance(controller, EncoderMidiControl):
+                            elif isinstance(controller, EncoderController):
                                 key = "%s:%s" % (plugin.instance_id, param.name)
-                                controller.cfg[Token.CATEGORY] = plugin.category  # somewhat LAME adding to cfg dict
-                                controller.cfg[Token.TYPE] = controller.type
-                                controller.cfg[Token.ID] = controller.id
-                                self.current.analog_controllers[key] = controller.cfg
+                                cfg = {
+                                    Token.CATEGORY: plugin.category,
+                                    Token.TYPE: controller.type,
+                                    Token.ID: controller.id
+                                }
+                                self.current.analog_controllers[key] = cfg
 
             # LAME special case for volume control
             # Doesn't seem quite right to add this here, but it's where all the mapped controls are bound
@@ -778,6 +783,10 @@ class Modhandler(Handler):
             d = self.lcd.draw_parameter_dialog(param)
             if d:
                 self.lcd.enc_step_widget(d, direction)
+
+    def encoder_value_changed(self, param: Parameter, new_value: float) -> None:
+        self.lcd.display_parameter_value(param, new_value)
+        self.parameter_value_commit(param, new_value)
 
     #
     # System Menu

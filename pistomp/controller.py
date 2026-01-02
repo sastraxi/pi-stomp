@@ -27,7 +27,7 @@ class Controller:
         self.maximum = None
         self.parameter = None
         self.hardware_name = None
-        #self.type = None  # this will conflict with encoder.type for EncoderMidiControl
+        #self.type = None  # this will conflict with encoder.type for EncoderController
         self.midi_min = 0
         self.midi_max = 127
 
