@@ -29,7 +29,7 @@ import common.token as Token
 import common.util as util
 import pistomp.switchstate as switchstate
 import modalapi.pedalboard as Pedalboard
-import modalapi.parameter as Parameter
+import common.parameter as Parameter
 import modalapi.wifi as Wifi
 import modalapi.external_midi as ExternalMidi
 from blend.snapshot import SnapshotManager

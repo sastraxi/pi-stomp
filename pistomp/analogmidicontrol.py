@@ -20,6 +20,7 @@ from rtmidi.midiconstants import CONTROL_CHANGE
 
 import common.util as util
 import pistomp.analogcontrol as analogcontrol
+import pistomp.controller as controller
 from pistomp.controller import AnalogDisplayInfo, RoutingDestination
 
 import logging
@@ -30,12 +31,11 @@ def as_midi_value(adc_value: int):
     return util.renormalize(adc_value, 0, 1023, 0, 127)
 
 
-class AnalogMidiControl(analogcontrol.AnalogControl):
+class AnalogMidiControl(analogcontrol.AnalogControl, controller.Controller):
     def __init__(self, spi, adc_channel, tolerance, midi_CC, midi_channel, midiout, type, id=None, cfg={}, value_change_callback=None):
         super(AnalogMidiControl, self).__init__(spi, adc_channel, tolerance)
-        self.midi_CC = midi_CC
+        controller.Controller.__init__(self, midi_channel, midi_CC)
         self.midiout = midiout
-        self.midi_channel = midi_channel
 
         # Parent member overrides
         self.type = type

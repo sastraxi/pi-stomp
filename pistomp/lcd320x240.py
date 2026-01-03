@@ -18,7 +18,7 @@ import digitalio
 import logging
 import os
 import common.token as Token
-import modalapi.parameter as Parameter
+import common.parameter as Parameter
 import pistomp.category as Category
 import pistomp.lcd as abstract_lcd
 import pistomp.switchstate as switchstate
@@ -443,11 +443,9 @@ class Lcd(abstract_lcd.Lcd):
                       ("Off", self.parameter_commit_enum, (parameter, 0), current_value==0)]
             d = self.draw_selection_menu(items, title, auto_dismiss=True)
         else:
-            taper = 2 if parameter.type == Parameter.Type.LOGARITHMIC else 1
-            unit_symbol = getattr(parameter, 'unit_symbol', None)
-            d = Parameterdialog(self.pstack, parameter.name, current_value, parameter.minimum, parameter.maximum,
+            d = Parameterdialog(self.pstack, parameter,
                                 width=270, height=130, auto_destroy=True, title=title, timeout=timeout,
-                                action=self.parameter_commit, object=parameter, taper=taper, unit_symbol=unit_symbol)
+                                action=self.parameter_commit, object=parameter)
             self.pstack.push_panel(d)
 
         self.w_parameter_dialogs[parameter.name] = d
@@ -596,9 +594,21 @@ class Lcd(abstract_lcd.Lcd):
         if d is not None and d.parent is not None:
             return d
 
-        d = Parameterdialog(self.pstack, name, value, min, max,
+        # Create dummy parameter for the dialog
+        info = {
+            Token.NAME: name,
+            Token.SYMBOL: symbol,
+            Token.RANGES: {
+                Token.MINIMUM: min,
+                Token.MAXIMUM: max
+            }
+        }
+        param = Parameter.Parameter(info, value, None)
+        param.unit_symbol = "dB"
+
+        d = Parameterdialog(self.pstack, param,
                             width=270, height=130, auto_destroy=True, title=name, timeout=2.2,
-                            action=commit_callback, object=symbol, taper=1, unit_symbol="dB")
+                            action=commit_callback, object=symbol)
         self.w_parameter_dialogs[symbol] = d
         self.pstack.push_panel(d)
         return d
@@ -607,7 +617,19 @@ class Lcd(abstract_lcd.Lcd):
         if value is None:
             value = 512  # 1024 / 2
         name = "VU Calibration"
-        d = Parameterdialog(self.pstack, name, value, 502, 522,
+        
+        # Create dummy parameter for the dialog
+        info = {
+            Token.NAME: name,
+            Token.SYMBOL: symbol,
+            Token.RANGES: {
+                Token.MINIMUM: 502,
+                Token.MAXIMUM: 522
+            }
+        }
+        param = Parameter.Parameter(info, value, None)
+
+        d = Parameterdialog(self.pstack, param,
                             width=270, height=130, auto_destroy=False, title=name, timeout=2.2,
                             action=commit_callback, object=symbol)
         self.pstack.push_panel(d)

@@ -74,6 +74,19 @@ class Parameter:
             ret.append((util.DICT_GET(v,'label'), util.DICT_GET(v,'value')))
         return ret
 
+    def get_taper(self):
+        return 2 if self.type == Type.LOGARITHMIC else 1
+
+    def format(self, value):
+        if self.type == Type.INTEGER or self.type == Type.TOGGLED or self.type == Type.ENUMERATION:
+             text = "%d" % round(float(value))
+        else:
+             text = util.format_float(value)
+        
+        if self.unit_symbol:
+            text = f"{text} {self.unit_symbol}"
+        return text
+
     def to_json(self):
         return json.dumps(self, default=lambda o: o.__dict__, sort_keys=True, indent=4)
 

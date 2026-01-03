@@ -29,6 +29,7 @@ from rtmidi.midiconstants import CONTROL_CHANGE
 
 import common.token as Token
 import common.util as util
+import common.parameter as Parameter
 import modalapi.pedalboard as Pedalboard
 import modalapi.wifi as Wifi
 import modalapi.external_midi as ExternalMidi
@@ -561,8 +562,10 @@ class Modhandler(Handler):
         # any real time settings
 
         # Clear previous parameter bindings from all controllers
+        # Only clear if controller is NOT routed externally (external controllers keep their dummy parameter)
         for controller in self.hardware.controllers.values():
-            controller.parameter = None
+            if controller.get_routing_info().destination == RoutingDestination.VIRTUAL:
+                controller.parameter = None
 
         # Clear analog controllers display data
         self.current.analog_controllers = {}
@@ -618,6 +621,17 @@ class Modhandler(Handler):
                 if e.type == Token.VOLUME:
                     display_info = e.get_display_info()
                     self.current.analog_controllers[Token.VOLUME] = display_info
+
+        # Add external controllers to display list (if not already added by binding loop)
+        for controller in self.hardware.controllers.values():
+            if controller.get_routing_info().destination == RoutingDestination.EXTERNAL:
+                if isinstance(controller, (AnalogMidiControl, EncoderMidiControl)):
+                    if hasattr(controller, 'midi_CC') and controller.midi_CC is not None:
+                        key = f"{controller.midi_channel}:{controller.midi_CC}"
+                        if key not in self.current.analog_controllers:
+                            display_info = controller.get_display_info()
+                            display_info['category'] = 'External'
+                            self.current.analog_controllers[key] = display_info
 
     def pedalboard_change(self, pedalboard=None):
         logging.info("Pedalboard change")

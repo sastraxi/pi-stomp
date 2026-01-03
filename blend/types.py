@@ -18,7 +18,13 @@
 from dataclasses import dataclass
 from typing import Any, Callable, NamedTuple, NotRequired, Protocol, TypedDict
 
-from modalapi.parameter import Type as ParameterType
+from typing import List, Dict, Union, Optional, Any, Callable
+from dataclasses import dataclass
+from enum import Enum, auto
+from common.parameter import Type as ParameterType
+
+# Type aliases
+SnapshotName = str
 
 
 # Config TypedDicts

@@ -24,6 +24,7 @@ import pistomp.analogmidicontrol as AnalogMidiControl
 import pistomp.footswitch as Footswitch
 import pistomp.taptempo as taptempo
 from modalapi.external_midi import ExternalMidiOut
+import common.parameter as Parameter
 
 from abc import abstractmethod
 
@@ -363,6 +364,20 @@ class Hardware:
     def __init_midi_default(self):
         self.__init_midi(self.cfg)
 
+    def _create_external_parameter(self, controller, port_name, midi_channel, midi_cc):
+        name = f"{port_name}:{midi_cc}"
+        info = {
+            Token.NAME: name,
+            Token.SYMBOL: f"external_{port_name}_{midi_cc}",
+            Token.RANGES: {
+                Token.MINIMUM: 0,
+                Token.MAXIMUM: 127
+            },
+            'properties': ['integer']
+        }
+        val = getattr(controller, 'midi_value', 0)
+        return Parameter.Parameter(info, val, f"{midi_channel}:{midi_cc}", "External")
+
     def __init_encoders_and_analog(self, cfg):
         """Update midiout for encoders and analog controllers based on config"""
         if cfg is None:
@@ -395,12 +410,14 @@ class Hardware:
                     if midi_cc is not None and hasattr(encoder, 'midi_CC'):
                         encoder.midi_CC = midi_cc
 
-                    # Update midiout
+                    # Update midiout and parameter
                     if midi_port:
                         encoder.midiout = ExternalMidiOut(self.external_midi, midi_port, midi_channel, self.midiout)
                         logging.debug(f"Encoder {enc_id} routing CC {midi_cc if midi_cc else 'N/A'} to external port '{midi_port}'")
+                        encoder.parameter = self._create_external_parameter(encoder, midi_port, midi_channel, midi_cc)
                     else:
                         encoder.midiout = self.midiout
+                        encoder.parameter = None
                         logging.debug(f"Encoder {enc_id} routing to virtual port")
 
         # Update analog controllers
@@ -428,12 +445,14 @@ class Hardware:
                     if midi_cc is not None and hasattr(analog, 'midi_CC'):
                         analog.midi_CC = midi_cc
 
-                    # Update midiout
+                    # Update midiout and parameter
                     if midi_port:
                         analog.midiout = ExternalMidiOut(self.external_midi, midi_port, midi_channel, self.midiout)
                         logging.debug(f"Analog controller {analog_id} routing CC {midi_cc if midi_cc else 'N/A'} to external port '{midi_port}'")
+                        analog.parameter = self._create_external_parameter(analog, midi_port, midi_channel, midi_cc)
                     else:
                         analog.midiout = self.midiout
+                        analog.parameter = None
                         logging.debug(f"Analog controller {analog_id} routing to virtual port")
 
     def __init_midi(self, cfg):

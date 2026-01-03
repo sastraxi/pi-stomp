@@ -16,6 +16,7 @@
 from rtmidi.midiconstants import CONTROL_CHANGE
 
 import common.util as util
+import common.parameter as Parameter
 import pistomp.controller as controller
 import pistomp.encoder as encoder
 from pistomp.controller import AnalogDisplayInfo, RoutingDestination
@@ -68,7 +69,11 @@ class EncoderMidiControl(encoder.Encoder, controller.Controller):
 
     # Override of base class method
     def refresh(self, direction):
-        midi_value = self.midi_value + (direction * self.per_click)
+        step = self.per_click
+        if self.parameter and self.parameter.type in (Parameter.Type.INTEGER, Parameter.Type.ENUMERATION, Parameter.Type.TOGGLED):
+            step = 1
+
+        midi_value = self.midi_value + (direction * step)
 
         # Keep midi value within limits
         if midi_value > self.midi_max:
