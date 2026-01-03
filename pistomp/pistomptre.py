@@ -104,8 +104,9 @@ class Pistomptre(hardware.Hardware):
         sw_pin = Util.DICT_GET(enc_pins, 'SW')
 
         if type == Token.VOLUME:
-            enc = Encoder.Encoder(d_pin, clk_pin, callback=self.handler.system_menu_headphone_volume,
-                                  type=type, id=id)
+            enc = EncoderController.EncoderController(self.handler, d_pin=d_pin, clk_pin=clk_pin,
+                                                      midi_channel=midi_channel, midi_CC=None,
+                                                      midiout=self.midiout, type=type, id=id)
         else:
             enc = EncoderController.EncoderController(self.handler, d_pin=d_pin, clk_pin=clk_pin,
                                                       midi_channel=midi_channel, midi_CC=midi_cc,

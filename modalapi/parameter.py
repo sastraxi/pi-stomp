@@ -74,3 +74,18 @@ class Parameter:
         return json.dumps(self, default=lambda o: o.__dict__, sort_keys=True, indent=4)
 
 
+class AudioParameter:
+    """Lightweight parameter wrapper for audiocard controls (volume, EQ, etc.)."""
+
+    def __init__(self, name: str, symbol: str, minimum: float, maximum: float, value: float, binding: int = None):
+        self.name = name
+        self.symbol = symbol
+        self.minimum = minimum
+        self.maximum = maximum
+        self.value = value
+        self.binding = binding
+        self.instance_id = None  # Marker: audio parameters don't have instance_id
+        self.type = Type.DEFAULT
+        self.enum_values = []
+
+

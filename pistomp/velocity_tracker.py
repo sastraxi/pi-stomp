@@ -20,8 +20,10 @@ import numpy as np
 class VelocityTracker:
     """Tracks rotation timing and calculates velocity-based step multipliers."""
 
-    WINDOW_MS = 200
-    MIN_SAMPLES = 2
+    WINDOW_MS = 400
+    MIN_SAMPLES = 3
+    DECAY_FACTOR = 0.4
+    VELOCITY_DEAD_ZONE = 3.5
 
     def __init__(self):
         self.samples = []
@@ -29,7 +31,6 @@ class VelocityTracker:
 
     def add_rotation(self, direction: int) -> int:
         """Return step multiplier (1-32) based on rotation velocity."""
-        # Clear samples on direction change (instant response)
         if self.last_direction != 0 and direction != self.last_direction:
             self.samples = []
 
@@ -51,16 +52,23 @@ class VelocityTracker:
             return 0.0
 
         timestamps = np.array([ts for ts, _ in self.samples])
-        directions = np.array([d for _, d in self.samples])
-        cumulative_rotations = np.abs(np.cumsum(directions))
-        time_deltas = timestamps - timestamps[0]
+        diffs = np.diff(timestamps)
 
-        if time_deltas[-1] < 0.001:
-            return float(len(self.samples) * 10)
+        if len(diffs) == 0:
+            return 0.0
 
-        coeffs = np.polyfit(time_deltas, cumulative_rotations, 1)
-        return abs(coeffs[0])
+        n = len(diffs)
+        weights = np.array([self.DECAY_FACTOR ** (n - 1 - i) for i in range(n)])
+        weights /= weights.sum()
+
+        avg_interval = np.dot(diffs, weights)
+
+        if avg_interval < 0.001:
+            return 100.0
+
+        return 1.0 / avg_interval
 
     def _velocity_to_multiplier(self, velocity: float) -> int:
-        multiplier = int(velocity * 1.8)
+        velocity = max(0, velocity - self.VELOCITY_DEAD_ZONE)
+        multiplier = int((velocity**2.2) * 3)
         return max(1, min(multiplier, 12))

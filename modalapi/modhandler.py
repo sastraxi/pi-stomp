@@ -169,6 +169,8 @@ class Modhandler(Handler):
         self.hardware = hardware
         # Pass external MIDI manager to hardware for config updates
         hardware.external_midi = self.external_midi
+        # Bind volume encoder to audio parameter
+        self.bind_volume_encoder()
 
     def add_lcd(self, lcd):
         self.lcd = lcd
@@ -555,6 +557,24 @@ class Modhandler(Handler):
             self.blend_modes = {}
             self.active_blend_mode = None
 
+    def bind_volume_encoder(self):
+        from modalapi.parameter import AudioParameter
+        from pistomp.encoder_controller import EncoderController
+
+        for enc in self.hardware.encoders:
+            if enc.type == Token.VOLUME and isinstance(enc, EncoderController):
+                value = self.audiocard.get_volume_parameter(self.audiocard.MASTER)
+                volume_param = AudioParameter(
+                    name="Output Volume",
+                    symbol=self.audiocard.MASTER,
+                    minimum=-25.75,
+                    maximum=6.0,
+                    value=value
+                )
+                enc.bind_to_parameter(volume_param, taper=1)
+                logging.info(f"Bound volume encoder to audio parameter: {volume_param.name}")
+                break
+
     def bind_current_pedalboard(self):
         # "current" being the pedalboard mod-host says is current
         # The pedalboard data has already been loaded, but this will overlay
@@ -595,17 +615,6 @@ class Modhandler(Handler):
                                     Token.ID: controller.id
                                 }
                                 self.current.analog_controllers[key] = cfg
-
-            # LAME special case for volume control
-            # Doesn't seem quite right to add this here, but it's where all the mapped controls are bound
-            for e in self.hardware.encoders:
-                if e.type == Token.VOLUME:
-                    cfg = {
-                        Token.CATEGORY : None,
-                        Token.TYPE : e.type,
-                        Token.ID : e.id
-                    }
-                    self.current.analog_controllers[Token.VOLUME] = cfg
 
     def pedalboard_change(self, pedalboard=None):
         logging.info("Pedalboard change")
@@ -786,7 +795,12 @@ class Modhandler(Handler):
 
     def encoder_value_changed(self, param: Parameter, new_value: float) -> None:
         self.lcd.queue_parameter_update(param, new_value)
-        self.parameter_value_commit(param, new_value)
+        if param.instance_id is None:
+            # Audio parameter (volume, EQ, etc.)
+            self.audio_parameter_commit(param.symbol, new_value)
+        else:
+            # Plugin parameter
+            self.parameter_value_commit(param, new_value)
 
     #
     # System Menu

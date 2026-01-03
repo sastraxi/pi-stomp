@@ -45,7 +45,7 @@ class Lcd(abstract_lcd.Lcd):
                              digitalio.DigitalInOut(board.CE0),
                              digitalio.DigitalInOut(board.D6),
                              digitalio.DigitalInOut(board.D5),
-                             24000000,
+                             48_000_000,
                              flip)
 
         # Colors
@@ -439,7 +439,7 @@ class Lcd(abstract_lcd.Lcd):
             return d
 
         # Create a new dialog
-        title = parameter.instance_id + ":" + parameter.name
+        title = parameter.name if parameter.instance_id is None else parameter.instance_id + ":" + parameter.name
         current_value = parameter.value
         if parameter.type == Parameter.Type.ENUMERATION:
             items = []
