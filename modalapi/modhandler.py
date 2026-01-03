@@ -785,7 +785,7 @@ class Modhandler(Handler):
                 self.lcd.enc_step_widget(d, direction)
 
     def encoder_value_changed(self, param: Parameter, new_value: float) -> None:
-        self.lcd.display_parameter_value(param, new_value)
+        self.lcd.queue_parameter_update(param, new_value)
         self.parameter_value_commit(param, new_value)
 
     #

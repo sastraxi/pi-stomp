@@ -114,6 +114,9 @@ class Lcd(abstract_lcd.Lcd):
         self.footswitch_panel = Panel(box=Box.xywh(0, 176, self.display_width, 64))
         self.pstack.push_panel(self.footswitch_panel)
 
+        # render token queue (frame dropping for responsiveness)
+        self.render_token: tuple[Parameter.Parameter, float] | None = None
+
         self.pedalboards = {}
 
         self.splash_show(True)
@@ -165,6 +168,12 @@ class Lcd(abstract_lcd.Lcd):
         #self.main_panel.refresh()
 
     def poll_updates(self):
+        # Dequeue and render latest parameter update (if any)
+        if self.render_token:
+            param, value = self.render_token
+            self.render_token = None
+            self._render_parameter_update(param, value)
+
         self.pstack.poll_updates()
 
     #
@@ -446,11 +455,21 @@ class Lcd(abstract_lcd.Lcd):
             taper = 2 if parameter.type == Parameter.Type.LOGARITHMIC else 1
             d = Parameterdialog(self.pstack, parameter.name, current_value, parameter.minimum, parameter.maximum,
                                 width=270, height=130, auto_destroy=True, title=title, timeout=timeout,
-                                action=self.parameter_commit, object=parameter, taper=taper)
+                                margin=8, action=self.parameter_commit, object=parameter, taper=taper)
             self.pstack.push_panel(d)
 
         self.w_parameter_dialogs[parameter.name] = d
         return d  # return the dialog so the parameter can be modified using the tweak knob
+
+    def queue_parameter_update(self, parameter: Parameter.Parameter, value: float) -> None:
+        """Queue parameter update for next LCD poll (frame dropping for responsiveness)."""
+        self.render_token = (parameter, value)
+
+    def _render_parameter_update(self, parameter: Parameter.Parameter, value: float) -> None:
+        """Render queued parameter update (called from poll_updates)."""
+        d = self.draw_parameter_dialog(parameter, timeout=2)
+        if d:
+            d.update_value(value)
 
     def display_parameter_value(self, parameter: Parameter.Parameter, value: float) -> None:
         """Update parameter dialog with new value (controller already calculated it)."""
@@ -603,6 +622,7 @@ class Lcd(abstract_lcd.Lcd):
 
         d = Parameterdialog(self.pstack, name, value, min, max,
                             width=270, height=130, auto_destroy=True, title=name, timeout=2.2,
+                            margin=8,
                             action=commit_callback, object=symbol, taper=1)
         self.w_parameter_dialogs[symbol] = d
         self.pstack.push_panel(d)
@@ -614,6 +634,7 @@ class Lcd(abstract_lcd.Lcd):
         name = "VU Calibration"
         d = Parameterdialog(self.pstack, name, value, 502, 522,
                             width=270, height=130, auto_destroy=False, title=name, timeout=2.2,
+                            margin=8,
                             action=commit_callback, object=symbol)
         self.pstack.push_panel(d)
         return d

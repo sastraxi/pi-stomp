@@ -60,8 +60,12 @@ class EncoderController(encoder.Encoder, controller.Controller):
 
     def refresh(self, direction: int) -> None:
         """Handle encoder rotation: calculate new value, send MIDI, notify handler."""
-        multiplier = self.velocity_tracker.add_rotation(direction)
-        delta = direction * multiplier
+        # If abs(direction) > 1, it's accumulated rotations (velocity implicit in accumulation)
+        if abs(direction) > 1:
+            delta = direction  # Use accumulated count directly
+        else:
+            multiplier = self.velocity_tracker.add_rotation(direction)
+            delta = direction * multiplier
 
         if self.quantizer:
             new_value = self.quantizer.move_steps(delta)

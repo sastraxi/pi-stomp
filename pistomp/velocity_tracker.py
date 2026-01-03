@@ -25,11 +25,17 @@ class VelocityTracker:
 
     def __init__(self):
         self.samples = []
+        self.last_direction = 0
 
     def add_rotation(self, direction: int) -> int:
         """Return step multiplier (1-32) based on rotation velocity."""
+        # Clear samples on direction change (instant response)
+        if self.last_direction != 0 and direction != self.last_direction:
+            self.samples = []
+
         now = time.monotonic()
         self.samples.append((now, direction))
+        self.last_direction = direction
         self._prune_old_samples(now)
 
         velocity = self._calculate_velocity()
@@ -56,8 +62,5 @@ class VelocityTracker:
         return abs(coeffs[0])
 
     def _velocity_to_multiplier(self, velocity: float) -> int:
-        if velocity < 0.1:
-            return 1
-
-        multiplier = int(velocity**2)
-        return max(1, min(multiplier, 8))
+        multiplier = int(velocity * 1.8)
+        return max(1, min(multiplier, 12))

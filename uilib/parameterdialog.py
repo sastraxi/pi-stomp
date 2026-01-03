@@ -66,17 +66,26 @@ class Parameterdialog(Dialog):
         self._draw_graph()
 
     def _draw_graph(self):
-        # TODO detailed dimensions, colors, etc. should not be defined in uilib
-        y0 = 80
-        x_offset = 10
+        # Use actual box dimensions for balanced margins
+        margin = 10
+        graph_width = self.num_points * self.points_per_actual
+        content_height = self.box.height
+
+        # Position graph baseline with room for labels below
+        y0 = content_height - margin - 18  # 18px for label height + spacing
+        x_offset = margin
+
         val_text = util.format_float(self.param_value)
         if self.w_value is None:
-            self.w_value = TextWidget(box=Box.xywh(118, 20, 0, 0), text=val_text, parent=self,
+            # Center value label horizontally
+            self.w_value = TextWidget(box=Box.xywh(self.box.width // 2 - 15, 15, 0, 0), text=val_text, parent=self,
                        align=WidgetAlign.NONE, name='value')
             self.w_value.set_foreground('yellow')
-            TextWidget(box=Box.xywh(0, y0, 0, 0), text=util.format_float(self.param_min), parent=self, outline=0,
+            # Min label at left edge with margin
+            TextWidget(box=Box.xywh(margin, y0, 0, 0), text=util.format_float(self.param_min), parent=self, outline=0,
                        align=WidgetAlign.NONE, name='value')
-            TextWidget(box=Box.xywh(220, y0, 0, 0), text=util.format_float(self.param_max), parent=self, outline=0,
+            # Max label at right edge with margin
+            TextWidget(box=Box.xywh(self.box.width - margin - 30, y0, 0, 0), text=util.format_float(self.param_max), parent=self, outline=0,
                        align=WidgetAlign.NONE, name='value')
         else:
             self.w_value.set_text(val_text)
