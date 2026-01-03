@@ -444,9 +444,10 @@ class Lcd(abstract_lcd.Lcd):
             d = self.draw_selection_menu(items, title, auto_dismiss=True)
         else:
             taper = 2 if parameter.type == Parameter.Type.LOGARITHMIC else 1
+            unit_symbol = getattr(parameter, 'unit_symbol', None)
             d = Parameterdialog(self.pstack, parameter.name, current_value, parameter.minimum, parameter.maximum,
                                 width=270, height=130, auto_destroy=True, title=title, timeout=timeout,
-                                action=self.parameter_commit, object=parameter, taper=taper)
+                                action=self.parameter_commit, object=parameter, taper=taper, unit_symbol=unit_symbol)
             self.pstack.push_panel(d)
 
         self.w_parameter_dialogs[parameter.name] = d
@@ -597,7 +598,7 @@ class Lcd(abstract_lcd.Lcd):
 
         d = Parameterdialog(self.pstack, name, value, min, max,
                             width=270, height=130, auto_destroy=True, title=name, timeout=2.2,
-                            action=commit_callback, object=symbol, taper=1)
+                            action=commit_callback, object=symbol, taper=1, unit_symbol="dB")
         self.w_parameter_dialogs[symbol] = d
         self.pstack.push_panel(d)
         return d

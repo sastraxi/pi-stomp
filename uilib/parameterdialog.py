@@ -23,7 +23,7 @@ import traceback
 
 class Parameterdialog(Dialog):
     def __init__(self, stack, param_name, param_value, param_min, param_max,
-                 width, height, title, title_font=None, timeout=None, taper=1, **kwargs):
+                 width, height, title, title_font=None, timeout=None, taper=1, unit_symbol=None, **kwargs):
         self._init_attrs(Widget.INH_ATTRS, kwargs)
         super(Parameterdialog,self).__init__(width, height, title, title_font, **kwargs)
         self.stack = stack  # TODO very LAME to require the stack to be passed, ideally panel would be able to pop itself
@@ -31,6 +31,7 @@ class Parameterdialog(Dialog):
         self.param_value = param_value
         self.param_min = param_min
         self.param_max = param_max
+        self.unit_symbol = unit_symbol
 
         # adjustment amount per click
         self.parameter_tweak_amount = 8
@@ -70,8 +71,16 @@ class Parameterdialog(Dialog):
         y0 = 80
         x_offset = 10
         val_text = util.format_float(self.param_value)
+        if self.unit_symbol:
+            val_text = f"{val_text} {self.unit_symbol}"
+
+        # Calculate text width and centered position
+        font = Config().get_font('default')
+        text_width, text_height = get_text_size(val_text, font)
+        x_centered = (self.box.width - text_width) // 2
+
         if self.w_value is None:
-            self.w_value = TextWidget(box=Box.xywh(118, 20, 0, 0), text=val_text, parent=self,
+            self.w_value = TextWidget(box=Box.xywh(x_centered, 25, 0, 0), text=val_text, parent=self,
                        align=WidgetAlign.NONE, name='value')
             self.w_value.set_foreground('yellow')
             TextWidget(box=Box.xywh(0, y0, 0, 0), text=util.format_float(self.param_min), parent=self, outline=0,
@@ -79,7 +88,10 @@ class Parameterdialog(Dialog):
             TextWidget(box=Box.xywh(220, y0, 0, 0), text=util.format_float(self.param_max), parent=self, outline=0,
                        align=WidgetAlign.NONE, name='value')
         else:
+            # Update text and reposition to keep centered
             self.w_value.set_text(val_text)
+            # Manually update box position without breaking parent relationship
+            self.w_value.box = Box.xywh(x_centered, 25, 0, 0)
 
         # TODO would be nice to only redraw the lines that need changing
         x = 0

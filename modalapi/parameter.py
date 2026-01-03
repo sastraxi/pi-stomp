@@ -50,6 +50,10 @@ class Parameter:
         self.type = Type.DEFAULT
         self.enum_values = []
 
+        units_info = util.DICT_GET(plugin_info, 'units')
+        self.unit_symbol = util.DICT_GET(units_info, 'symbol') if units_info else None
+        self.unit_label = util.DICT_GET(units_info, 'label') if units_info else None
+
         properties = util.DICT_GET(plugin_info, TTL_PROPERTIES)
         if properties is not None and len(properties) > 0:
             if TTL_ENUMERATION in properties:
