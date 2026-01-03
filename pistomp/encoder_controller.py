@@ -60,11 +60,12 @@ class EncoderController(encoder.Encoder, controller.Controller):
 
     def refresh(self, direction: int) -> None:
         """Handle encoder rotation: calculate new value, send MIDI, notify handler."""
-        # If abs(direction) > 1, it's accumulated rotations (velocity implicit in accumulation)
         if abs(direction) > 1:
-            delta = direction  # Use accumulated count directly
+            delta = direction
         else:
             multiplier = self.velocity_tracker.add_rotation(direction)
+            if self.quantizer and self.quantizer.taper != 1.0:
+                multiplier = self._taper_adjusted_multiplier(multiplier, direction)
             delta = direction * multiplier
 
         if self.quantizer:
@@ -84,6 +85,25 @@ class EncoderController(encoder.Encoder, controller.Controller):
                 self.value_change_callback(new_value, self)
             else:
                 self.handler.encoder_value_changed(self.parameter, new_value)
+
+    def _taper_adjusted_multiplier(self, multiplier: int, direction: int) -> int:
+        """Scale multiplier to compensate for non-linear step sizes."""
+        current_step = self.quantizer.current_step
+        next_step = np.clip(current_step + direction, 0, self.quantizer.num_steps - 1)
+
+        current_value = self.quantizer.step_values[current_step]
+        next_value = self.quantizer.step_values[next_step]
+        step_size = abs(next_value - current_value)
+
+        param_range = self.parameter.maximum - self.parameter.minimum
+        linear_step_size = param_range / (self.quantizer.num_steps - 1)
+
+        if step_size < 0.0001:
+            return multiplier
+
+        ratio = linear_step_size / step_size
+        adjusted = int(multiplier * ratio)
+        return max(1, adjusted)
 
     def _value_to_midi(self, value: float) -> int:
         """Convert parameter value to MIDI CC value [0-127]."""

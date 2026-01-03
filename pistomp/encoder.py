@@ -49,11 +49,7 @@ class Encoder:
         d = self._process_gpios()
         if d != 0:
             with self._lock:
-                # Direction reversal cancels all accumulated rotations
-                if (self.direction > 0 and d < 0) or (self.direction < 0 and d > 0):
-                    self.direction = 0
-                else:
-                    self.direction += d
+                self.direction += d
 
     def __init__(self, d_pin, clk_pin, callback, type=None, id=None, **kw):
         self.d_pin = d_pin

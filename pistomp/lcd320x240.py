@@ -127,18 +127,21 @@ class Lcd(abstract_lcd.Lcd):
 
     def enc_step_widget(self, widget, direction):
         #traceback.print_stack()
-        # TODO check if widget is type
-        if direction > 0:
-            widget.input_event(InputEvent.RIGHT)
-        elif direction < 0:
-            widget.input_event(InputEvent.LEFT)
+        from uilib.parameterdialog import Parameterdialog
+        if isinstance(widget, Parameterdialog):
+            widget.parameter_value_change(direction)
+        else:
+            steps = abs(direction)
+            event = InputEvent.RIGHT if direction > 0 else InputEvent.LEFT
+            for _ in range(steps):
+                widget.input_event(event)
 
     def enc_step(self, d):
         #traceback.print_stack()
-        if d > 0:
-            self.pstack.input_event(InputEvent.RIGHT)
-        elif d < 0:
-            self.pstack.input_event(InputEvent.LEFT)
+        steps = abs(d)
+        event = InputEvent.RIGHT if d > 0 else InputEvent.LEFT
+        for _ in range(steps):
+            self.pstack.input_event(event)
 
     def enc_sw(self, v):
         if v == switchstate.Value.RELEASED:

@@ -41,9 +41,9 @@ class Parameterdialog(Dialog):
 
         # "graph" are the y-scaled values, "actual" are the actual non-scaled values
         self.taper = taper  # 1 linear, 2 or 3 good for logarithmic
-        self.points_per_actual = 4
-        self.num_points = 60  # Must be a multiple of points_per_actual
-        self.num_actual = int(self.num_points / self.points_per_actual)
+        self.num_actual = 256
+        self.num_points = 60
+        self.bar_width = 4
         self.actual_abscissa = np.linspace(0, self.num_actual, self.num_actual)
         self.graph_abscissa = np.linspace(1, self.num_points, self.num_points)
         self.actual_points = self._calc_graph_points(self.actual_abscissa, self.param_min, self.param_max)
@@ -68,7 +68,7 @@ class Parameterdialog(Dialog):
     def _draw_graph(self):
         # Use actual box dimensions for balanced margins
         margin = 10
-        graph_width = self.num_points * self.points_per_actual
+        graph_width = self.num_points * self.bar_width
         content_height = self.box.height
 
         # Position graph baseline with room for labels below
@@ -94,17 +94,17 @@ class Parameterdialog(Dialog):
         x = 0
         for i in self.graph_abscissa:
             i = int(i) - 1  # abscissa start at 1, arrays start at 0
-            a = int(np.ceil(i) / self.points_per_actual)
+            a = int(i * self.num_actual / self.num_points)
             p = self.actual_points[a]
             g = self.graph_points[i]
-            line_box = Box.xywh(x + x_offset, y0 - g, 1, g)
+            line_box = Box.xywh(x + x_offset, y0 - g, self.bar_width, g)
             w = Widget(box=line_box, parent=self, outline=1, sel_width=0, outline_radius=0,
                        align=WidgetAlign.NONE)
             if p <= self.param_value:
                 w.set_foreground('yellow')
             else:
                 w.set_foreground((100, 100, 240))
-            x = x + self.points_per_actual
+            x = x + self.bar_width
 
         self.refresh()
 
@@ -121,24 +121,47 @@ class Parameterdialog(Dialog):
         self.param_value = new_value
         self._draw_graph()
 
-    def parameter_value_change(self, direction):
+    def parameter_value_change(self, steps):
         self._reset_timeout_timer()
 
         value = float(self.param_value)
         i = self._find_nearest_element_index(self.actual_points, value)
-        new = i-1 if (direction != 1) else i+1
-        new_value = self.actual_points[new] if (0 <= new < self.num_actual) else value
+
+        if self.taper != 1.0 and abs(steps) > 1:
+            steps = self._taper_adjusted_steps(i, steps)
+
+        new = np.clip(i + steps, 0, self.num_actual - 1)
+        new_value = self.actual_points[new]
 
         if new_value > self.param_max:
             new_value = self.param_max
         if new_value < self.param_min:
             new_value = self.param_min
-        if new_value is value:
+        if new_value == value:
             return
         self.param_value = new_value
         if self.action is not None:
             self.action(self.object, new_value)
         self._draw_graph()
+
+    def _taper_adjusted_steps(self, current_index, steps):
+        """Scale step count to compensate for non-linear step sizes."""
+        direction = 1 if steps > 0 else -1
+        next_index = np.clip(current_index + direction, 0, self.num_actual - 1)
+
+        current_value = self.actual_points[current_index]
+        next_value = self.actual_points[next_index]
+        step_size = abs(next_value - current_value)
+
+        param_range = self.param_max - self.param_min
+        linear_step_size = param_range / (self.num_actual - 1)
+
+        if step_size < 0.0001:
+            return steps
+
+        ratio = linear_step_size / step_size
+        adjusted = int(abs(steps) * ratio)
+        return max(1, adjusted) * direction
 
     def input_event(self, event):
         if event == InputEvent.CLICK:

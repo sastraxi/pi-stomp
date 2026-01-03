@@ -17,17 +17,22 @@ import time
 import numpy as np
 
 
+def clamp(value, min_value, max_value):
+    return max(min_value, min(max_value, value))
+
+
 class VelocityTracker:
     """Tracks rotation timing and calculates velocity-based step multipliers."""
 
-    WINDOW_MS = 400
-    MIN_SAMPLES = 3
-    DECAY_FACTOR = 0.4
-    VELOCITY_DEAD_ZONE = 3.5
+    WINDOW_MS = 900
+    MIN_SAMPLES = 5
+    DECAY_FACTOR = 0.9
+    VELOCITY_DEAD_ZONE = 3.8
 
-    def __init__(self):
+    def __init__(self, max_velocity=12):
         self.samples = []
         self.last_direction = 0
+        self.max_velocity: int = max_velocity
 
     def add_rotation(self, direction: int) -> int:
         """Return step multiplier (1-32) based on rotation velocity."""
@@ -40,7 +45,7 @@ class VelocityTracker:
         self._prune_old_samples(now)
 
         velocity = self._calculate_velocity()
-        return self._velocity_to_multiplier(velocity)
+        return clamp(self._velocity_to_multiplier(velocity), 1, self.max_velocity)
 
     def _prune_old_samples(self, current_time: float):
         window_seconds = self.WINDOW_MS / 1000.0
@@ -70,5 +75,5 @@ class VelocityTracker:
 
     def _velocity_to_multiplier(self, velocity: float) -> int:
         velocity = max(0, velocity - self.VELOCITY_DEAD_ZONE)
-        multiplier = int((velocity**2.2) * 3)
-        return max(1, min(multiplier, 12))
+        multiplier = int((velocity**0.9) * 2)
+        return multiplier
