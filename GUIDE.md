@@ -356,6 +356,17 @@ GET  /get_bpm                            # Get current BPM
   - Trade-off: CPU overhead vs visual responsiveness
 - **Thread safety**: `lcd_ili9341.py` uses lock - avoid blocking in refresh path
 
+**Controller Architecture** (`pistomp/controller.py`):
+- **RoutingInfo**: Dataclass with `RoutingDestination` enum (VIRTUAL, EXTERNAL)
+  - Factory methods: `RoutingInfo.virtual()`, `RoutingInfo.external(port_name)`
+  - Controllers expose routing via `get_routing_info()` - no type checking needed
+- **DisplayInfo**: TypedDicts for LCD rendering (`AnalogDisplayInfo`, `FootswitchDisplayInfo`)
+  - Contains type, id, category, and optionally port_name/midi_cc for external routing
+  - Controllers expose display data via `get_display_info()`
+- **Separation of concerns**: Handler queries controllers, prepares display data, LCD consumes it
+  - No cross-layer imports (LCD doesn't import `ExternalMidiOut`)
+  - No isinstance checks outside controller layer
+
 ### Data Flow Examples
 
 **Expression Pedal Movement**:
@@ -426,6 +437,7 @@ poll_controls()
 - `pistomp/pistomptre.py` - v3 implementation
 
 **Controls**:
+- `pistomp/controller.py` - Base class, RoutingInfo/DisplayInfo data structures
 - `pistomp/footswitch.py` - Footswitch logic, longpress groups
 - `pistomp/encoder.py` - Rotary encoder decoding
 - `pistomp/encodermidicontrol.py` - Encoder with MIDI output

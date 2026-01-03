@@ -18,6 +18,7 @@ from rtmidi.midiconstants import CONTROL_CHANGE
 import common.util as util
 import pistomp.controller as controller
 import pistomp.encoder as encoder
+from pistomp.controller import AnalogDisplayInfo, RoutingDestination
 
 import logging
 
@@ -95,5 +96,21 @@ class EncoderMidiControl(encoder.Encoder, controller.Controller):
     def get_normalized_value(self) -> float:
         """Get current value normalized to [0.0, 1.0] for blend mode."""
         return self.midi_value / 127.0
+
+    def get_display_info(self) -> AnalogDisplayInfo:
+        """Get display information for LCD."""
+        routing = self.get_routing_info()
+
+        info: AnalogDisplayInfo = {
+            'type': self.type,
+            'id': self.id,
+            'category': None,  # Set during parameter binding
+        }
+
+        if routing.destination == RoutingDestination.EXTERNAL:
+            info['port_name'] = routing.port_name
+            info['midi_cc'] = self.midi_CC
+
+        return info
 
 

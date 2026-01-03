@@ -91,6 +91,9 @@ schema = {
               "midi_CC": {
                 "type": "integer"
               },
+              "midi_port": {
+                "type": "string"
+              },
               "preset": {
                 "oneOf": [
                   {
@@ -123,6 +126,9 @@ schema = {
               "midi_CC": {
                 "type": "integer"
               },
+              "midi_port": {
+                "type": "string"
+              },
               "threshold": {
                 "type": "integer",
                 "minimum": 0,
@@ -149,6 +155,9 @@ schema = {
               },
               "midi_CC": {
                 "type": "integer"
+              },
+              "midi_port": {
+                "type": "string"
               },
               "type": {
                 "enum": ["KNOB", "VOLUME"]

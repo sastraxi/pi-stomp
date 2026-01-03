@@ -17,6 +17,7 @@ import threading
 
 from functools import partial
 from gpiozero import Button   # TODO consider using Encoder class instead
+from pistomp.controller import AnalogDisplayInfo
 
 class Encoder:
 
@@ -100,3 +101,11 @@ class Encoder:
             d = self._process_gpios()
         if d != 0 and self.callback is not None:
             self.callback(d)
+
+    def get_display_info(self) -> AnalogDisplayInfo:
+        """Get display information for LCD."""
+        return {
+            'type': self.type,
+            'id': self.id,
+            'category': None,
+        }
