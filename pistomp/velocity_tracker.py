@@ -24,15 +24,21 @@ def clamp(value, min_value, max_value):
 class VelocityTracker:
     """Tracks rotation timing and calculates velocity-based step multipliers."""
 
-    WINDOW_MS = 900
-    MIN_SAMPLES = 5
-    DECAY_FACTOR = 0.9
-    VELOCITY_DEAD_ZONE = 3.8
+    WINDOW_MS = 600
+    MIN_SAMPLES = 4
+    DECAY_FACTOR = 0.4
+    VELOCITY_DEAD_ZONE = 6
+    SCALE_EXPONENT_MUTLIPLIER = 2.0
 
-    def __init__(self, max_velocity=12):
+    def __init__(self, max_velocity=12, step_scale: float = 1.0):
         self.samples = []
         self.last_direction = 0
         self.max_velocity: int = max_velocity
+        self.step_scale: float = step_scale
+
+    def set_step_scale(self, step_scale: float):
+        """Set the step scale for movement sensitivity."""
+        self.step_scale = step_scale
 
     def add_rotation(self, direction: int) -> int:
         """Return step multiplier (1-32) based on rotation velocity."""
@@ -53,9 +59,10 @@ class VelocityTracker:
         self.samples = [(ts, d) for ts, d in self.samples if ts >= cutoff_time]
 
     def _calculate_velocity(self) -> float:
-        if len(self.samples) < self.MIN_SAMPLES:
+        if not self.samples:
             return 0.0
 
+        multiplier = len(self.samples) / self.MIN_SAMPLES if len(self.samples) < self.MIN_SAMPLES else 1.0
         timestamps = np.array([ts for ts, _ in self.samples])
         diffs = np.diff(timestamps)
 
@@ -64,16 +71,17 @@ class VelocityTracker:
 
         n = len(diffs)
         weights = np.array([self.DECAY_FACTOR ** (n - 1 - i) for i in range(n)])
-        weights /= weights.sum()
+        # weights /= weights.sum()  # OLD: normalized weighted average
 
-        avg_interval = np.dot(diffs, weights)
+        weighted_sum = np.dot(diffs, weights)
 
-        if avg_interval < 0.001:
+        if weighted_sum < 0.001:
             return 100.0
 
-        return 1.0 / avg_interval
+        return multiplier / weighted_sum
 
     def _velocity_to_multiplier(self, velocity: float) -> int:
         velocity = max(0, velocity - self.VELOCITY_DEAD_ZONE)
-        multiplier = int((velocity**0.9) * 2)
+        exponent = 0.9 + self.SCALE_EXPONENT_MUTLIPLIER * (1.0 / self.step_scale)
+        multiplier = int((velocity**exponent) * 2)
         return multiplier

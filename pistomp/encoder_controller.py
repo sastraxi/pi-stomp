@@ -31,27 +31,46 @@ import numpy as np
 class EncoderController(encoder.Encoder, controller.Controller):
     """Encoder with velocity tracking and parameter quantization."""
 
-    def __init__(self, handler: Handler, d_pin: int, clk_pin: int, midi_CC: Optional[int],
-                 midi_channel: int, midiout: Any, type: Optional[str] = None, id: Optional[int] = None):
-        super(EncoderController, self).__init__(d_pin=d_pin, clk_pin=clk_pin, callback=self.refresh,
-                                                type=type, id=id,
-                                                midi_CC=midi_CC, midi_channel=midi_channel)
+    def __init__(
+        self,
+        handler: Handler,
+        d_pin: int,
+        clk_pin: int,
+        midi_CC: Optional[int],
+        midi_channel: int,
+        midiout: Any,
+        type: Optional[str] = None,
+        id: Optional[int] = None,
+    ):
+        super(EncoderController, self).__init__(
+            d_pin=d_pin,
+            clk_pin=clk_pin,
+            callback=self.refresh,
+            type=type,
+            id=id,
+            midi_CC=midi_CC,
+            midi_channel=midi_channel,
+        )
         self.handler = handler
         self.midiout = midiout
-        self.velocity_tracker = VelocityTracker()
         self.quantizer: Optional[ParameterQuantizer] = None
         self.value_change_callback: Optional[Any] = None
         self.midi_value = 64  # Start at middle value for MIDI Learn
+        self.velocity_tracker = VelocityTracker(step_scale=1)
         logging.debug(f"EncoderController init: id={id}, midi_CC={midi_CC}, midi_channel={midi_channel}")
 
     def bind_to_parameter(self, parameter: Parameter, taper: float = 1.0) -> None:
         """Initialize quantizer and sync to parameter's current value."""
         self.parameter = parameter
         num_steps = 128 if self.midi_CC else 256
+        step_scale = num_steps / 256
         self.quantizer = ParameterQuantizer(parameter.minimum, parameter.maximum, num_steps, taper)
         self.quantizer.set_value(parameter.value)
-        logging.debug(f"EncoderController bound to parameter {parameter.name}: "
-                     f"midi_CC={self.midi_CC}, num_steps={num_steps}, value={parameter.value}")
+        self.velocity_tracker.set_step_scale(step_scale)
+        logging.debug(
+            f"EncoderController bound to parameter {parameter.name}: "
+            f"midi_CC={self.midi_CC}, num_steps={num_steps}, step_scale={step_scale}, value={parameter.value}"
+        )
 
     def set_value(self, value: float) -> None:
         """Update quantizer position from parameter value."""
@@ -67,6 +86,10 @@ class EncoderController(encoder.Encoder, controller.Controller):
             if self.quantizer and self.quantizer.taper != 1.0:
                 multiplier = self._taper_adjusted_multiplier(multiplier, direction)
             delta = direction * multiplier
+
+        # if self.quantizer:
+        #     sign = 1 if delta > 0 else -1
+        #     delta = sign * max(1, int(abs(delta) * self.step_scale))
 
         if self.quantizer:
             new_value = self.quantizer.move_steps(delta)
@@ -107,8 +130,9 @@ class EncoderController(encoder.Encoder, controller.Controller):
 
     def _value_to_midi(self, value: float) -> int:
         """Convert parameter value to MIDI CC value [0-127]."""
-        midi_value = util.renormalize(value, self.parameter.minimum, self.parameter.maximum,
-                                      self.midi_min, self.midi_max)
+        midi_value = util.renormalize(
+            value, self.parameter.minimum, self.parameter.maximum, self.midi_min, self.midi_max
+        )
         return int(np.clip(midi_value, 0, 127))
 
     def get_normalized_value(self) -> float:

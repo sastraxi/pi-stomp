@@ -29,7 +29,7 @@ class ParameterQuantizer:
 
     def _compute_steps(self) -> np.ndarray:
         positions = np.linspace(0, 1, self.num_steps)
-        tapered_positions = positions ** self.taper
+        tapered_positions = positions**self.taper
         step_values = self.minimum + (self.maximum - self.minimum) * tapered_positions
         return step_values
 
@@ -40,11 +40,7 @@ class ParameterQuantizer:
 
     def move_steps(self, delta_steps: int) -> float:
         """Move by N steps and return the new parameter value."""
-        self.current_step = np.clip(
-            self.current_step + delta_steps,
-            0,
-            self.num_steps - 1
-        )
+        self.current_step = np.clip(self.current_step + delta_steps, 0, self.num_steps - 1)
         return self.step_values[self.current_step]
 
     def get_value(self) -> float:
