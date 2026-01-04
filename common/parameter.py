@@ -82,7 +82,7 @@ class Parameter:
              text = "%d" % round(float(value))
         else:
              text = util.format_float(value)
-        
+
         if self.unit_symbol:
             text = f"{text} {self.unit_symbol}"
         return text
