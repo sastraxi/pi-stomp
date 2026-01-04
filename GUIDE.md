@@ -293,6 +293,25 @@ Config merged and applied
 - Example: Change footswitch MIDI CC for specific pedalboard
 - Fields not specified keep default values
 
+### Parameter Persistence
+
+**Plugin Parameters** (`common/parameter.py`):
+- Source: LV2 TTL files in pedalboard bundles
+- Persisted: MOD-UI manages via pedalboard state (snapshots)
+- Read/Write: REST API (`/effect/parameter/pi_stomp_set`)
+- Never persisted by piStomp - delegated to MOD
+
+**Audio Parameters** (volume, input gain, EQ):
+- Source: ALSA mixer controls (audiocard-specific)
+- Persisted: `/var/lib/alsa/asound.state` (automatic via ALSA)
+- Read: `audiocard.get_volume_parameter(symbol)` → `amixer sget`
+- Write: `audiocard.set_volume_parameter(symbol, value)` → `amixer sset`
+- Symbols: `MASTER`, `CAPTURE_VOLUME`, `EQ_1`-`EQ_5` (defined per card)
+
+**System Settings** (VU calibration, bank selection):
+- Persisted: `/home/pistomp/data/settings.yml`
+- Read/Write: `settings.get_setting(key)` / `set_setting(key, value)`
+
 ### MOD Integration
 
 **HTTP REST API** to `localhost:80`:
@@ -348,9 +367,13 @@ GET  /get_bpm                            # Get current BPM
 - **Config Overlay**: Per-pedalboard override of MIDI CC, bypass, preset, color
 - **Physical**: GPIO-based (`gpioswitch.py`) or ADC-based (`analogswitch.py`)
 
-**Encoders** (`pistomp/encoder.py`, `pistomp/encodermidicontrol.py`):
+**Encoders** (`pistomp/encoder.py`, `pistomp/encoder_controller.py`):
 - **Base**: Quadrature decoding, GPIO interrupts, debounce
-- **MIDI Control**: Sends CC on rotation (v3 tweak encoders)
+- **EncoderController** (v3): Velocity tracking + parameter quantization
+  - VelocityTracker: Speed-based step multiplier (slow=1, fast=8 steps)
+  - ParameterQuantizer: Discrete steps (128 for MIDI, 256 for non-MIDI)
+  - Unified flow: rotation → velocity → quantize → commit
+- **Volume Encoder**: EncoderController bound to synthetic audio Parameter
 - **Buttons**: Configurable shortpress (callback + args) and longpress
 - **State Machines** (v1/v2 only): `TopEncoderMode`, `BotEncoderMode`, `UniversalEncoderMode`
 
@@ -461,7 +484,9 @@ poll_controls()
 - `pistomp/controller.py` - Base class, RoutingInfo/DisplayInfo data structures
 - `pistomp/footswitch.py` - Footswitch logic, longpress groups
 - `pistomp/encoder.py` - Rotary encoder decoding
-- `pistomp/encodermidicontrol.py` - Encoder with MIDI output
+- `pistomp/encoder_controller.py` - Encoder with velocity + quantization (v3)
+- `pistomp/velocity_tracker.py` - Speed-based step multiplier
+- `pistomp/parameter_quantizer.py` - Discrete step quantization
 - `pistomp/analogmidicontrol.py` - ADC-based MIDI controller
 
 **MIDI**:

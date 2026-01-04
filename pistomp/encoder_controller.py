@@ -20,12 +20,11 @@ import common.util as util
 import pistomp.controller as controller
 import pistomp.encoder as encoder
 from pistomp.handler import Handler
-from pistomp.velocity_tracker import VelocityTracker
+from pistomp.velocity_tracker import VelocityTracker, clamp
 from pistomp.parameter_quantizer import ParameterQuantizer
 from common.parameter import Parameter
 
 import logging
-import numpy as np
 
 
 class EncoderController(encoder.Encoder, controller.Controller):
@@ -88,10 +87,6 @@ class EncoderController(encoder.Encoder, controller.Controller):
                 multiplier = self._taper_adjusted_multiplier(multiplier, direction)
             delta = direction * multiplier
 
-        # if self.quantizer:
-        #     sign = 1 if delta > 0 else -1
-        #     delta = sign * max(1, int(abs(delta) * self.step_scale))
-
         if self.quantizer:
             new_value = self.quantizer.move_steps(delta)
             if self.midi_CC and self.parameter:
@@ -101,7 +96,7 @@ class EncoderController(encoder.Encoder, controller.Controller):
                 self.parameter.value = new_value
             logging.debug(f"Bound: steps={delta}, value={new_value}")
         else:
-            self.midi_value = np.clip(self.midi_value + delta, 0, 127)
+            self.midi_value = clamp(self.midi_value + delta, 0, 127)
             logging.debug(f"Unbound: delta={delta}, midi={self.midi_value}")
 
         if self.midi_CC:
@@ -118,7 +113,7 @@ class EncoderController(encoder.Encoder, controller.Controller):
     def _taper_adjusted_multiplier(self, multiplier: int, direction: int) -> int:
         """Scale multiplier to compensate for non-linear step sizes."""
         current_step = self.quantizer.current_step
-        next_step = np.clip(current_step + direction, 0, self.quantizer.num_steps - 1)
+        next_step = clamp(current_step + direction, 0, self.quantizer.num_steps - 1)
 
         current_value = self.quantizer.step_values[current_step]
         next_value = self.quantizer.step_values[next_step]
@@ -139,7 +134,7 @@ class EncoderController(encoder.Encoder, controller.Controller):
         midi_value = util.renormalize(
             value, self.parameter.minimum, self.parameter.maximum, self.midi_min, self.midi_max
         )
-        return int(np.clip(midi_value, 0, 127))
+        return int(clamp(midi_value, 0, 127))
 
     def get_normalized_value(self) -> float:
         """Get current value normalized to [0.0, 1.0] for blend mode."""

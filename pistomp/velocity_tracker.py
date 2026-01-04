@@ -14,7 +14,6 @@
 # along with pi-stomp.  If not, see <https://www.gnu.org/licenses/>.
 
 import time
-import numpy as np
 
 
 def clamp(value, min_value, max_value):
@@ -24,11 +23,11 @@ def clamp(value, min_value, max_value):
 class VelocityTracker:
     """Tracks rotation timing and calculates velocity-based step multipliers."""
 
-    WINDOW_MS = 600
-    MIN_SAMPLES = 4
-    DECAY_FACTOR = 0.4
-    VELOCITY_DEAD_ZONE = 6
-    SCALE_EXPONENT_MUTLIPLIER = 2.0
+    WINDOW_MS = 600  # Sliding window for rotation samples (tuned for responsive feel)
+    MIN_SAMPLES = 4  # Penalty for sparse data - velocity reduced until we have enough samples
+    DECAY_FACTOR = 0.4  # Exponential weight decay - recent rotations weighted higher
+    VELOCITY_DEAD_ZONE = 6  # Ignore slow velocities to prevent accidental fast jumps
+    SCALE_EXPONENT_MULTIPLIER = 2.0  # Scale velocity curve based on step resolution
 
     def __init__(self, max_velocity=12, step_scale: float = 1.0):
         self.samples = []
@@ -62,18 +61,19 @@ class VelocityTracker:
         if not self.samples:
             return 0.0
 
+        # Penalty for sparse data - reduces velocity until we have MIN_SAMPLES
         multiplier = len(self.samples) / self.MIN_SAMPLES if len(self.samples) < self.MIN_SAMPLES else 1.0
-        timestamps = np.array([ts for ts, _ in self.samples])
-        diffs = np.diff(timestamps)
+
+        # Calculate time deltas between consecutive rotations
+        timestamps = [ts for ts, _ in self.samples]
+        diffs = [timestamps[i+1] - timestamps[i] for i in range(len(timestamps) - 1)]
 
         if len(diffs) == 0:
             return 0.0
 
+        # Apply exponential decay weights (recent rotations weighted higher)
         n = len(diffs)
-        weights = np.array([self.DECAY_FACTOR ** (n - 1 - i) for i in range(n)])
-        # weights /= weights.sum()  # OLD: normalized weighted average
-
-        weighted_sum = np.dot(diffs, weights)
+        weighted_sum = sum(diffs[i] * (self.DECAY_FACTOR ** (n - 1 - i)) for i in range(n))
 
         if weighted_sum < 0.001:
             return 100.0
@@ -82,6 +82,6 @@ class VelocityTracker:
 
     def _velocity_to_multiplier(self, velocity: float) -> int:
         velocity = max(0, velocity - self.VELOCITY_DEAD_ZONE)
-        exponent = 0.9 + self.SCALE_EXPONENT_MUTLIPLIER * (1.0 / self.step_scale)
+        exponent = 0.9 + self.SCALE_EXPONENT_MULTIPLIER * (1.0 / self.step_scale)
         multiplier = int((velocity**exponent) * 2)
         return multiplier
