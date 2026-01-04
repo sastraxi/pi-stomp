@@ -600,7 +600,7 @@ class Modhandler(Handler):
 
         footswitch_plugins = []
         if self.current.pedalboard:
-            #logging.debug(self.current.pedalboard.to_json())
+            # Bind plugin parameters to controllers
             for plugin in self.current.pedalboard.plugins:
                 if plugin is None or plugin.parameters is None:
                     continue
@@ -610,45 +610,26 @@ class Modhandler(Handler):
                         if controller is not None:
                             routing = controller.get_routing_info()
 
-                            # Create synthetic parameter for external MIDI controllers (for display only)
+                            # External controllers shouldn't be bound to plugin parameters
                             if routing.destination == RoutingDestination.EXTERNAL:
-                                logging.debug(f"Creating synthetic parameter for external controller {param.binding} "
-                                            f"(routed to external port '{routing.port_name}')")
-
-                                # Create synthetic Parameter for LCD display (CC value 0-127)
-                                if isinstance(controller, EncoderController):
-                                    ext_info = {
-                                        Token.NAME: f"{routing.port_name} CC{controller.midi_CC}",
-                                        Token.SYMBOL: f"external_{controller.midi_CC}",  # Won't match any audio param
-                                        Token.RANGES: {
-                                            Token.MINIMUM: 0,
-                                            Token.MAXIMUM: 127
-                                        },
-                                        TTL_PROPERTIES: [TTL_INTEGER]
-                                    }
-                                    ext_param = Parameter(ext_info, controller.midi_value, None)  # instance_id=None
-                                    controller.bind_to_parameter(ext_param, taper=1)
-                                    logging.debug(f"Bound external controller to synthetic parameter: {ext_param.name}")
-
-                                # Add to LCD display with external port info
-                                if isinstance(controller, (AnalogMidiControl, EncoderMidiControl, EncoderController)):
-                                    display_info = controller.get_display_info()
-                                    display_info['category'] = 'External'
-                                    key = param.binding
-                                    self.current.analog_controllers[key] = display_info
+                                logging.warning(
+                                    f"Plugin parameter {plugin.name}:{param.name} is bound to external controller "
+                                    f"{param.binding} (routed to {routing.port_name}) - ignoring plugin binding"
+                                )
                                 continue
 
-                            # Bind controller to parameter (different logic for EncoderController)
+                            # Bind controller to parameter
                             if isinstance(controller, EncoderController):
                                 taper = 2 if param.type == Type.LOGARITHMIC else 1
                                 controller.bind_to_parameter(param, taper)
                             else:
-                                # EncoderMidiControl, AnalogMidiControl, Footswitch, etc.
                                 controller.parameter = param
                                 controller.set_value(param.value)
+
                             plugin.controllers.append(controller)
+
+                            # Add to display and track footswitches
                             if isinstance(controller, Footswitch):
-                                # TODO sort this list so selection orders correctly (sort on midi_CC?)
                                 plugin.has_footswitch = True
                                 footswitch_plugins.append(plugin)
                                 controller.set_category(plugin.category)
@@ -664,43 +645,37 @@ class Modhandler(Handler):
                                 self.current.analog_controllers[key] = display_info
 
             # Special case for volume control
-            # Doesn't seem quite right to add this here, but it's where all the mapped controls are bound
             for e in self.hardware.encoders:
                 if e.type == Token.VOLUME:
                     display_info = e.get_display_info()
                     self.current.analog_controllers[Token.VOLUME] = display_info
 
-        # Add external controllers to display list and bind synthetic parameters
-        # (for controllers with external routing but no plugin binding)
+        # Handle all external controllers (create synthetic parameters for display)
         for controller in self.hardware.controllers.values():
             routing = controller.get_routing_info()
             if routing.destination == RoutingDestination.EXTERNAL:
-                logging.debug(f"Found external controller: type={type(controller).__name__}, midi_CC={getattr(controller, 'midi_CC', None)}")
                 if isinstance(controller, (AnalogMidiControl, EncoderMidiControl, EncoderController)):
                     if hasattr(controller, 'midi_CC') and controller.midi_CC is not None:
-                        key = f"{controller.midi_channel}:{controller.midi_CC}"
-                        logging.debug(f"External controller key={key}, already in list={key in self.current.analog_controllers}")
-                        if key not in self.current.analog_controllers:
-                            # Create synthetic parameter for EncoderController (for dialog display)
-                            if isinstance(controller, EncoderController):
-                                logging.debug(f"EncoderController has parameter: {controller.parameter is not None}")
-                                if controller.parameter is None:
-                                    ext_info = {
-                                        Token.NAME: f"{routing.port_name} CC{controller.midi_CC}",
-                                        Token.SYMBOL: f"external_{controller.midi_CC}",
-                                        Token.RANGES: {
-                                            Token.MINIMUM: 0,
-                                            Token.MAXIMUM: 127
-                                        },
-                                        Token.TYPE: Type.INTEGER
-                                    }
-                                    ext_param = Parameter(ext_info, controller.midi_value, None)
-                                    controller.bind_to_parameter(ext_param, taper=1)
-                                    logging.debug(f"Bound external controller to synthetic parameter: {ext_param.name}")
+                        # Create synthetic parameter for EncoderController if not already bound
+                        if isinstance(controller, EncoderController) and controller.parameter is None:
+                            ext_info = {
+                                Token.NAME: f"{routing.port_name} CC{controller.midi_CC}",
+                                Token.SYMBOL: f"external_{controller.midi_CC}",
+                                Token.RANGES: {
+                                    Token.MINIMUM: 0,
+                                    Token.MAXIMUM: 127
+                                },
+                                TTL_PROPERTIES: [TTL_INTEGER]
+                            }
+                            ext_param = Parameter(ext_info, controller.midi_value, None)
+                            controller.bind_to_parameter(ext_param, taper=1)
+                            logging.debug(f"Bound external controller to synthetic parameter: {ext_param.name}")
 
-                            display_info = controller.get_display_info()
-                            display_info['category'] = 'External'
-                            self.current.analog_controllers[key] = display_info
+                        # Add to display
+                        key = f"{controller.midi_channel}:{controller.midi_CC}"
+                        display_info = controller.get_display_info()
+                        display_info['category'] = 'External'
+                        self.current.analog_controllers[key] = display_info
 
     def pedalboard_change(self, pedalboard=None):
         logging.info("Pedalboard change")
