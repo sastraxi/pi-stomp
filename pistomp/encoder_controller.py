@@ -22,7 +22,7 @@ import pistomp.encoder as encoder
 from pistomp.handler import Handler
 from pistomp.velocity_tracker import VelocityTracker
 from pistomp.parameter_quantizer import ParameterQuantizer
-from modalapi.parameter import Parameter
+from common.parameter import Parameter
 
 import logging
 import numpy as np
@@ -79,6 +79,7 @@ class EncoderController(encoder.Encoder, controller.Controller):
 
     def refresh(self, direction: int) -> None:
         """Handle encoder rotation: calculate new value, send MIDI, notify handler."""
+        logging.debug(f"EncoderController.refresh: id={self.id}, type={self.type}, direction={direction}, has_param={self.parameter is not None}")
         if abs(direction) > 1:
             delta = direction
         else:

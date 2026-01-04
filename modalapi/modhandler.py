@@ -29,16 +29,15 @@ from rtmidi.midiconstants import CONTROL_CHANGE
 
 import common.token as Token
 import common.util as util
-import common.parameter as Parameter
 import modalapi.pedalboard as Pedalboard
 import modalapi.wifi as Wifi
 import modalapi.external_midi as ExternalMidi
 import pistomp.settings as Settings
 from blend.snapshot import SnapshotManager
+from common.parameter import Parameter, Type
 from modalapi.websocket_bridge import AsyncWebSocketBridge
 from modalapi.ws_protocol import parse_message, LoadingEndMessage, PedalSnapshotMessage
 from modalapi.pedalboard_monitor import PedalboardMonitor
-from modalapi.parameter import Parameter, Type
 
 from pistomp.analogmidicontrol import AnalogMidiControl
 from pistomp.controller import RoutingDestination
@@ -503,6 +502,7 @@ class Modhandler(Handler):
 
         # Initialize the data and draw on LCD
         self.bind_current_pedalboard()
+        self.bind_volume_encoder()  # Recreate volume parameter for this pedalboard
         self.load_current_presets()
         self.lcd.link_data(self.pedalboard_list, self.current, self.hardware.footswitches)
         self.lcd.draw_main_panel()
@@ -588,12 +588,11 @@ class Modhandler(Handler):
         # The pedalboard data has already been loaded, but this will overlay
         # any real time settings
 
-        # Clear previous parameter bindings from all controllers
-        # Only clear if controller is NOT routed externally AND not a volume encoder
+        # Clear previous parameter bindings from all controllers except volume encoder
+        # (External encoders will get synthetic parameters later if not bound to plugin)
         for controller in self.hardware.controllers.values():
-            routing = controller.get_routing_info()
             is_volume = hasattr(controller, 'type') and controller.type == Token.VOLUME
-            if routing.destination == RoutingDestination.VIRTUAL and not is_volume:
+            if not is_volume:
                 controller.parameter = None
 
         # Clear analog controllers display data
@@ -676,24 +675,28 @@ class Modhandler(Handler):
         for controller in self.hardware.controllers.values():
             routing = controller.get_routing_info()
             if routing.destination == RoutingDestination.EXTERNAL:
+                logging.debug(f"Found external controller: type={type(controller).__name__}, midi_CC={getattr(controller, 'midi_CC', None)}")
                 if isinstance(controller, (AnalogMidiControl, EncoderMidiControl, EncoderController)):
                     if hasattr(controller, 'midi_CC') and controller.midi_CC is not None:
                         key = f"{controller.midi_channel}:{controller.midi_CC}"
+                        logging.debug(f"External controller key={key}, already in list={key in self.current.analog_controllers}")
                         if key not in self.current.analog_controllers:
                             # Create synthetic parameter for EncoderController (for dialog display)
-                            if isinstance(controller, EncoderController) and controller.parameter is None:
-                                ext_info = {
-                                    Token.NAME: f"{routing.port_name} CC{controller.midi_CC}",
-                                    Token.SYMBOL: f"external_{controller.midi_CC}",
-                                    Token.RANGES: {
-                                        Token.MINIMUM: 0,
-                                        Token.MAXIMUM: 127
-                                    },
-                                    Token.TYPE: Type.INTEGER
-                                }
-                                ext_param = Parameter(ext_info, controller.midi_value, None)
-                                controller.bind_to_parameter(ext_param, taper=1)
-                                logging.debug(f"Bound external controller to synthetic parameter: {ext_param.name}")
+                            if isinstance(controller, EncoderController):
+                                logging.debug(f"EncoderController has parameter: {controller.parameter is not None}")
+                                if controller.parameter is None:
+                                    ext_info = {
+                                        Token.NAME: f"{routing.port_name} CC{controller.midi_CC}",
+                                        Token.SYMBOL: f"external_{controller.midi_CC}",
+                                        Token.RANGES: {
+                                            Token.MINIMUM: 0,
+                                            Token.MAXIMUM: 127
+                                        },
+                                        Token.TYPE: Type.INTEGER
+                                    }
+                                    ext_param = Parameter(ext_info, controller.midi_value, None)
+                                    controller.bind_to_parameter(ext_param, taper=1)
+                                    logging.debug(f"Bound external controller to synthetic parameter: {ext_param.name}")
 
                             display_info = controller.get_display_info()
                             display_info['category'] = 'External'
