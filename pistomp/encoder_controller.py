@@ -93,9 +93,11 @@ class EncoderController(encoder.Encoder, controller.Controller):
 
         if self.quantizer:
             new_value = self.quantizer.move_steps(delta)
-            self.midi_value = self._value_to_midi(new_value)
+            if self.midi_CC:
+                # Only calculate MIDI value if we're going to send it
+                self.midi_value = self._value_to_midi(new_value)
             self.parameter.value = new_value
-            logging.debug(f"Bound: steps={delta}, value={new_value}, midi={self.midi_value}")
+            logging.debug(f"Bound: steps={delta}, value={new_value}")
         else:
             self.midi_value = np.clip(self.midi_value + delta, 0, 127)
             logging.debug(f"Unbound: delta={delta}, midi={self.midi_value}")
