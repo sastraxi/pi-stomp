@@ -583,7 +583,6 @@ class Modhandler(Handler):
                 # Set callback to update audio and display
                 def volume_change_callback(new_value, encoder):
                     self.audiocard.set_volume_parameter(self.audiocard.MASTER, new_value)
-                    encoder.parameter.value = new_value  # Update parameter for next read
                     # Display the dialog
                     self.lcd.draw_audio_parameter_dialog(
                         "Output Volume",
@@ -604,9 +603,11 @@ class Modhandler(Handler):
         # any real time settings
 
         # Clear previous parameter bindings from all controllers
-        # Only clear if controller is NOT routed externally (external controllers keep their dummy parameter)
+        # Only clear if controller is NOT routed externally AND not a volume encoder
         for controller in self.hardware.controllers.values():
-            if controller.get_routing_info().destination == RoutingDestination.VIRTUAL:
+            routing = controller.get_routing_info()
+            is_volume = hasattr(controller, 'type') and controller.type == Token.VOLUME
+            if routing.destination == RoutingDestination.VIRTUAL and not is_volume:
                 controller.parameter = None
 
         # Clear analog controllers display data
