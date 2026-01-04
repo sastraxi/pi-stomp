@@ -296,7 +296,7 @@ class Hardware:
                 midiout = self.midiout
 
             control = AnalogMidiControl.AnalogMidiControl(self.spi, adc_input, threshold, midi_cc, midi_channel,
-                                                          midiout, control_type, id, c)
+                                                          midiout, control_type, id)
 
             self.analog_controls.append(control)
             key = format("%d:%d" % (midi_channel, midi_cc))

@@ -579,21 +579,7 @@ class Modhandler(Handler):
                 volume_param = Parameter(info, value, None)
                 volume_param.unit_symbol = "dB"
                 enc.bind_to_parameter(volume_param, taper=1)
-
-                # Set callback to update audio and display
-                def volume_change_callback(new_value, encoder):
-                    self.audiocard.set_volume_parameter(self.audiocard.MASTER, new_value)
-                    # Display the dialog
-                    self.lcd.draw_audio_parameter_dialog(
-                        "Output Volume",
-                        self.audiocard.MASTER,
-                        new_value,
-                        -25.75,
-                        6.0,
-                        self.audio_parameter_commit
-                    )
-
-                enc.value_change_callback = volume_change_callback
+                # Uses normal encoder_value_changed flow (instance_id=None → audio_parameter_commit)
                 logging.info(f"Bound volume encoder to audio parameter: {volume_param.name}")
                 break
 
@@ -625,14 +611,30 @@ class Modhandler(Handler):
                         if controller is not None:
                             routing = controller.get_routing_info()
 
-                            # Skip binding if controller is routed to external MIDI port
+                            # Create synthetic parameter for external MIDI controllers (for display only)
                             if routing.destination == RoutingDestination.EXTERNAL:
-                                logging.debug(f"Skipping parameter binding for controller {param.binding} "
+                                logging.debug(f"Creating synthetic parameter for external controller {param.binding} "
                                             f"(routed to external port '{routing.port_name}')")
+
+                                # Create synthetic Parameter for LCD display (CC value 0-127)
+                                if isinstance(controller, EncoderController):
+                                    ext_info = {
+                                        Token.NAME: f"{routing.port_name} CC{controller.midi_CC}",
+                                        Token.SYMBOL: f"external_{controller.midi_CC}",  # Won't match any audio param
+                                        Token.RANGES: {
+                                            Token.MINIMUM: 0,
+                                            Token.MAXIMUM: 127
+                                        },
+                                        Token.TYPE: Type.INTEGER
+                                    }
+                                    ext_param = Parameter(ext_info, controller.midi_value, None)  # instance_id=None
+                                    controller.bind_to_parameter(ext_param, taper=1)
+                                    logging.debug(f"Bound external controller to synthetic parameter: {ext_param.name}")
+
                                 # Add to LCD display with external port info
                                 if isinstance(controller, (AnalogMidiControl, EncoderMidiControl, EncoderController)):
-                                    # Use binding key format (channel:cc) for external controls
                                     display_info = controller.get_display_info()
+                                    display_info['category'] = 'External'
                                     key = param.binding
                                     self.current.analog_controllers[key] = display_info
                                 continue
@@ -669,13 +671,30 @@ class Modhandler(Handler):
                     display_info = e.get_display_info()
                     self.current.analog_controllers[Token.VOLUME] = display_info
 
-        # Add external controllers to display list (if not already added by binding loop)
+        # Add external controllers to display list and bind synthetic parameters
+        # (for controllers with external routing but no plugin binding)
         for controller in self.hardware.controllers.values():
-            if controller.get_routing_info().destination == RoutingDestination.EXTERNAL:
+            routing = controller.get_routing_info()
+            if routing.destination == RoutingDestination.EXTERNAL:
                 if isinstance(controller, (AnalogMidiControl, EncoderMidiControl, EncoderController)):
                     if hasattr(controller, 'midi_CC') and controller.midi_CC is not None:
                         key = f"{controller.midi_channel}:{controller.midi_CC}"
                         if key not in self.current.analog_controllers:
+                            # Create synthetic parameter for EncoderController (for dialog display)
+                            if isinstance(controller, EncoderController) and controller.parameter is None:
+                                ext_info = {
+                                    Token.NAME: f"{routing.port_name} CC{controller.midi_CC}",
+                                    Token.SYMBOL: f"external_{controller.midi_CC}",
+                                    Token.RANGES: {
+                                        Token.MINIMUM: 0,
+                                        Token.MAXIMUM: 127
+                                    },
+                                    Token.TYPE: Type.INTEGER
+                                }
+                                ext_param = Parameter(ext_info, controller.midi_value, None)
+                                controller.bind_to_parameter(ext_param, taper=1)
+                                logging.debug(f"Bound external controller to synthetic parameter: {ext_param.name}")
+
                             display_info = controller.get_display_info()
                             display_info['category'] = 'External'
                             self.current.analog_controllers[key] = display_info
@@ -860,6 +879,9 @@ class Modhandler(Handler):
     def encoder_value_changed(self, param: Parameter, new_value: float) -> None:
         self.lcd.queue_parameter_update(param, new_value)
         if param.instance_id is None:
+            # External MIDI: already sent in encoder_controller.refresh(), just display
+            if param.symbol.startswith("external_"):
+                return
             # Audio parameter (volume, EQ, etc.)
             self.audio_parameter_commit(param.symbol, new_value)
         else:

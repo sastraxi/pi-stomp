@@ -32,7 +32,7 @@ def as_midi_value(adc_value: int):
 
 
 class AnalogMidiControl(analogcontrol.AnalogControl, controller.Controller):
-    def __init__(self, spi, adc_channel, tolerance, midi_CC, midi_channel, midiout, type, id=None, cfg={}, value_change_callback=None):
+    def __init__(self, spi, adc_channel, tolerance, midi_CC, midi_channel, midiout, type, id=None, value_change_callback=None):
         super(AnalogMidiControl, self).__init__(spi, adc_channel, tolerance)
         controller.Controller.__init__(self, midi_channel, midi_CC)
         self.midiout = midiout
@@ -42,7 +42,6 @@ class AnalogMidiControl(analogcontrol.AnalogControl, controller.Controller):
         self.id = id
         self.last_read = 0  # this keeps track of the last potentiometer value
         self.value = None
-        self.cfg = cfg
         self.value_change_callback = value_change_callback
 
     def set_midi_channel(self, midi_channel):
