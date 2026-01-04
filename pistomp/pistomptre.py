@@ -108,10 +108,12 @@ class Pistomptre(hardware.Hardware):
             midiout = self.midiout
 
         if type == Token.VOLUME:
+            # Volume encoder: EncoderController with callback (no MIDI, uses callback for audio control)
             enc = EncoderController.EncoderController(self.handler, d_pin=d_pin, clk_pin=clk_pin,
                                                       midi_channel=midi_channel, midi_CC=None,
                                                       midiout=midiout, type=type, id=id)
         else:
+            # Tweak encoders: EncoderController with MIDI for parameter control
             enc = EncoderController.EncoderController(self.handler, d_pin=d_pin, clk_pin=clk_pin,
                                                       midi_channel=midi_channel, midi_CC=midi_cc,
                                                       midiout=midiout, type=Token.KNOB, id=id)

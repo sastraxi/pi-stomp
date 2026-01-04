@@ -561,20 +561,40 @@ class Modhandler(Handler):
             self.active_blend_mode = None
 
     def bind_volume_encoder(self):
-        from modalapi.parameter import AudioParameter
         from pistomp.encoder_controller import EncoderController
+        import common.token as Token
 
         for enc in self.hardware.encoders:
             if enc.type == Token.VOLUME and isinstance(enc, EncoderController):
                 value = self.audiocard.get_volume_parameter(self.audiocard.MASTER)
-                volume_param = AudioParameter(
-                    name="Output Volume",
-                    symbol=self.audiocard.MASTER,
-                    minimum=-25.75,
-                    maximum=6.0,
-                    value=value
-                )
+                # Create Parameter object matching LCD's audio parameter pattern
+                info = {
+                    Token.NAME: "Output Volume",
+                    Token.SYMBOL: self.audiocard.MASTER,
+                    Token.RANGES: {
+                        Token.MINIMUM: -25.75,
+                        Token.MAXIMUM: 6.0
+                    }
+                }
+                volume_param = Parameter(info, value, None)
+                volume_param.unit_symbol = "dB"
                 enc.bind_to_parameter(volume_param, taper=1)
+
+                # Set callback to update audio and display
+                def volume_change_callback(new_value, encoder):
+                    self.audiocard.set_volume_parameter(self.audiocard.MASTER, new_value)
+                    encoder.parameter.value = new_value  # Update parameter for next read
+                    # Display the dialog
+                    self.lcd.draw_audio_parameter_dialog(
+                        "Output Volume",
+                        self.audiocard.MASTER,
+                        new_value,
+                        -25.75,
+                        6.0,
+                        self.audio_parameter_commit
+                    )
+
+                enc.value_change_callback = volume_change_callback
                 logging.info(f"Bound volume encoder to audio parameter: {volume_param.name}")
                 break
 

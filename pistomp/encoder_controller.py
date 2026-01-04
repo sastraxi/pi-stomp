@@ -93,10 +93,11 @@ class EncoderController(encoder.Encoder, controller.Controller):
 
         if self.quantizer:
             new_value = self.quantizer.move_steps(delta)
-            if self.midi_CC:
-                # Only calculate MIDI value if we're going to send it
+            if self.midi_CC and self.parameter:
+                # Only calculate MIDI value if we're going to send it and have a parameter
                 self.midi_value = self._value_to_midi(new_value)
-            self.parameter.value = new_value
+            if self.parameter:
+                self.parameter.value = new_value
             logging.debug(f"Bound: steps={delta}, value={new_value}")
         else:
             self.midi_value = np.clip(self.midi_value + delta, 0, 127)
@@ -107,8 +108,10 @@ class EncoderController(encoder.Encoder, controller.Controller):
 
         if self.quantizer:
             if self.value_change_callback:
+                # Callback mode (blend mode or volume control)
                 self.value_change_callback(new_value, self)
-            else:
+            elif self.parameter:
+                # Parameter mode (plugin parameters)
                 self.handler.encoder_value_changed(self.parameter, new_value)
 
     def _taper_adjusted_multiplier(self, multiplier: int, direction: int) -> int:
