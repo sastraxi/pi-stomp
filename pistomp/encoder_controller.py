@@ -144,3 +144,19 @@ class EncoderController(encoder.Encoder, controller.Controller):
     def read_rotary(self):
         """Poll encoder state (called from hardware polling loop)."""
         super().read_rotary()
+
+    def get_display_info(self) -> controller.AnalogDisplayInfo:
+        """Get display information for LCD (analog-controls pattern)."""
+        routing = self.get_routing_info()  # Inherited from Controller base class
+
+        info: controller.AnalogDisplayInfo = {
+            'type': self.type,
+            'id': self.id,
+            'category': None,  # Set during parameter binding
+        }
+
+        if routing.destination == controller.RoutingDestination.EXTERNAL:
+            info['port_name'] = routing.port_name
+            info['midi_cc'] = self.midi_CC
+
+        return info

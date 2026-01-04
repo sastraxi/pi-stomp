@@ -23,6 +23,7 @@ hardware:
   # adc_input: <integer>          The analog input to which the switch is connected (required)
   # ledstrip_position: <integer>  The position of the corresponding LED (optional)
   # midi_CC: <integer>            The MIDI CC message to be sent when switch is clicked (optional)
+  # midi_port: <port_name>        Route MIDI to external device instead of virtual port (optional)
   # longpress: <callback_name>    The name of a handler method to call when switch is long-pressed (optional)
   #                               longpress can be a list enclosed with []'s
   #
@@ -54,6 +55,7 @@ hardware:
   # id: <integer>                 The id and position on the screen (starting with 0 on the left)
   # type: <KNOB | EXPRESSION>     The control type, used to represent the control on the screen (optional)
   # midi_CC: <integer>            The MIDI CC message to be sent when the control is adjusted (optional)
+  # midi_port: <port_name>        Route MIDI to external device instead of virtual port (optional)
   #
   #analog_controllers:
   #  - adc_input: 5
@@ -67,6 +69,7 @@ hardware:
   # type: <KNOB | VOLUME>         The control type (default is KNOB, VOLUME controls output volume)
   # midi_CC: <integer>            The MIDI CC message to be sent when rotation is adjusted (optional)
   #                               cannot be used along with type=VOLUME
+  # midi_port: <port_name>        Route MIDI to external device instead of virtual port (optional)
   # longpress: <callback_name>    The name of a handler method to call when switch is long-pressed (optional)
   # shortpress: <callback_name>   The name of a handler method to call when switch is short-pressed (optional)
   #             or {callback: <name>, args: {key: value}}  for callbacks with arguments
@@ -125,6 +128,20 @@ hardware:
   #       messages:
   #         c4:
   #           - [0xC0, 0x05]        # Program Change 5 for this pedalboard only
+  #
+  # Routing controls to external MIDI devices:
+  # Controls can be routed to external MIDI ports using the midi_port field.
+  # Port name must match a port defined in external_midi.ports (case-insensitive).
+  # When routed externally, controls skip parameter binding and send directly to the device.
+  # LCD displays "<port>:<CC>" in light blue instead of parameter name.
+  #
+  # Example: Route expression pedal to Source Audio C4:
+  #   analog_controllers:
+  #     - adc_input: 5
+  #       id: 0
+  #       type: EXPRESSION
+  #       midi_CC: 1              # Send CC 1 to C4
+  #       midi_port: c4           # Route to c4 port (defined in external_midi.ports)
 
 # Blend Mode Configuration (Pedalboard-specific)
 # This feature interpolates between snapshots based on analog input position.

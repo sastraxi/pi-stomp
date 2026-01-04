@@ -18,7 +18,7 @@ import digitalio
 import logging
 import os
 import common.token as Token
-import modalapi.parameter as Parameter
+import common.parameter as Parameter
 import pistomp.category as Category
 import pistomp.lcd as abstract_lcd
 import pistomp.switchstate as switchstate
@@ -455,10 +455,9 @@ class Lcd(abstract_lcd.Lcd):
                       ("Off", self.parameter_commit_enum, (parameter, 0), current_value==0)]
             d = self.draw_selection_menu(items, title, auto_dismiss=True)
         else:
-            taper = 2 if parameter.type == Parameter.Type.LOGARITHMIC else 1
-            d = Parameterdialog(self.pstack, parameter.name, current_value, parameter.minimum, parameter.maximum,
+            d = Parameterdialog(self.pstack, parameter,
                                 width=270, height=130, auto_destroy=True, title=title, timeout=timeout,
-                                margin=8, action=self.parameter_commit, object=parameter, taper=taper)
+                                margin=8, action=self.parameter_commit, object=parameter)
             self.pstack.push_panel(d)
 
         self.w_parameter_dialogs[parameter.name] = d
@@ -623,10 +622,21 @@ class Lcd(abstract_lcd.Lcd):
         if d is not None and d.parent is not None:
             return d
 
-        d = Parameterdialog(self.pstack, name, value, min, max,
+        # Create dummy parameter for the dialog
+        info = {
+            Token.NAME: name,
+            Token.SYMBOL: symbol,
+            Token.RANGES: {
+                Token.MINIMUM: min,
+                Token.MAXIMUM: max
+            }
+        }
+        param = Parameter.Parameter(info, value, None)
+        param.unit_symbol = "dB"
+
+        d = Parameterdialog(self.pstack, param,
                             width=270, height=130, auto_destroy=True, title=name, timeout=2.2,
-                            margin=8,
-                            action=commit_callback, object=symbol, taper=1)
+                            margin=8, action=commit_callback, object=symbol)
         self.w_parameter_dialogs[symbol] = d
         self.pstack.push_panel(d)
         return d
@@ -635,7 +645,19 @@ class Lcd(abstract_lcd.Lcd):
         if value is None:
             value = 512  # 1024 / 2
         name = "VU Calibration"
-        d = Parameterdialog(self.pstack, name, value, 502, 522,
+        
+        # Create dummy parameter for the dialog
+        info = {
+            Token.NAME: name,
+            Token.SYMBOL: symbol,
+            Token.RANGES: {
+                Token.MINIMUM: 502,
+                Token.MAXIMUM: 522
+            }
+        }
+        param = Parameter.Parameter(info, value, None)
+
+        d = Parameterdialog(self.pstack, param,
                             width=270, height=130, auto_destroy=False, title=name, timeout=2.2,
                             margin=8,
                             action=commit_callback, object=symbol)
@@ -745,24 +767,37 @@ class Lcd(abstract_lcd.Lcd):
                 name = "none"
                 control_type = Token.EXPRESSION if i == 0 else Token.KNOB  # HACK cuz we don't know type of unmapped
                 color = Category.get_category_color(None)
-                text_color =color
+                text_color = color
             else:
                 # Mapped control or Volume
                 control_type = util.DICT_GET(v, Token.TYPE)
+
                 if control_type == Token.VOLUME:
                     name = "volume"
                     control_type = Token.KNOB
                     color = self.default_plugin_color
                     text_color = color
                 else:
-                    n = k.split(":")[1]
-                    name = self.shorten_name(n, text_per_control)
-                    color = util.DICT_GET(v, Token.COLOR)
-                    if color is None:
-                        # color not specified for control in config file
-                        category = util.DICT_GET(v, Token.CATEGORY)
-                        text_color = Category.get_category_color(category)
+                    # Check if external routing (port_name field present in display info)
+                    port_name = util.DICT_GET(v, 'port_name')
+
+                    if port_name:
+                        # External MIDI routing
+                        midi_cc = util.DICT_GET(v, 'midi_cc')
+                        name = f"{port_name}:{midi_cc}"
+                        name = self.shorten_name(name, text_per_control)
                         color = self.default_plugin_color
+                        text_color = (180, 180, 255)  # Light blue to indicate external routing
+                    else:
+                        # Normal parameter binding - key is "instance:parameter"
+                        key_parts = k.split(":")
+                        name = self.shorten_name(key_parts[1], text_per_control)
+                        color = util.DICT_GET(v, Token.COLOR)
+                        if color is None:
+                            # color not specified for control in config file
+                            category = util.DICT_GET(v, Token.CATEGORY)
+                            text_color = Category.get_category_color(category)
+                            color = self.default_plugin_color
 
             if control_type == Token.KNOB:
                 w = Icon(box=Box.xywh(x, y, 0, 0), text=name, text_color=text_color, parent=self.main_panel, outline=0)

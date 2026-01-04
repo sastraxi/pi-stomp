@@ -21,6 +21,7 @@ from rtmidi.midiconstants import CONTROL_CHANGE
 
 import common.token as Token
 import pistomp.controller as controller
+from pistomp.controller import FootswitchDisplayInfo
 import pistomp.analogswitch as analogswitch
 import pistomp.gpioswitch as gpioswitch
 import pistomp.switchstate as switchstate
@@ -271,3 +272,12 @@ class Footswitch(controller.Controller):
         self.set_category(None)
         self.preset_callback = None
         self.clear_relays()
+
+    def get_display_info(self) -> FootswitchDisplayInfo:
+        """Get display information for LCD."""
+        return {
+            'id': self.id,
+            'label': self.display_label,
+            'color': self.lcd_color,
+            'category': self.category,
+        }

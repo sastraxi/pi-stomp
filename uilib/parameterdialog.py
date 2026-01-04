@@ -16,32 +16,38 @@
 from uilib.dialog import *
 from uilib.text import *
 import common.util as util
+import common.parameter as Parameter
 
 import numpy as np
 import threading
 import traceback
 
 class Parameterdialog(Dialog):
-    def __init__(self, stack, param_name, param_value, param_min, param_max,
-                 width, height, title, title_font=None, timeout=None, taper=1, **kwargs):
+    def __init__(self, stack, parameter,
+                 width, height, title, title_font=None, timeout=None, **kwargs):
         self._init_attrs(Widget.INH_ATTRS, kwargs)
         super(Parameterdialog,self).__init__(width, height, title, title_font, **kwargs)
         self.stack = stack  # TODO very LAME to require the stack to be passed, ideally panel would be able to pop itself
-        self.param_name = param_name
-        self.param_value = param_value
-        self.param_min = param_min
-        self.param_max = param_max
+        self.parameter = parameter
+        
+        self.param_value = parameter.value
+        self.param_min = parameter.minimum
+        self.param_max = parameter.maximum
 
         # adjustment amount per click
-        self.parameter_tweak_amount = 8
+        if self.parameter.type in (Parameter.Type.INTEGER, Parameter.Type.ENUMERATION, Parameter.Type.TOGGLED):
+            self.parameter_tweak_amount = 1
+        else:
+            self.parameter_tweak_amount = 8
+
         self.tweak = util.renormalize_float(self.parameter_tweak_amount, 0, 127, self.param_min, self.param_max)
 
         self.timeout = timeout
         self.timer = None
 
         # "graph" are the y-scaled values, "actual" are the actual non-scaled values
-        self.taper = taper  # 1 linear, 2 or 3 good for logarithmic
-        self.num_actual = 256
+        self.taper = self.parameter.get_taper()  # Derive from parameter type
+        self.num_actual = 256  # High resolution for better stepping
         self.num_points = 60
         self.bar_width = 4
         self.actual_abscissa = np.linspace(0, self.num_actual, self.num_actual)
@@ -66,29 +72,32 @@ class Parameterdialog(Dialog):
         self._draw_graph()
 
     def _draw_graph(self):
-        # Use actual box dimensions for balanced margins
-        margin = 10
-        graph_width = self.num_points * self.bar_width
-        content_height = self.box.height
+        # TODO detailed dimensions, colors, etc. should not be defined in uilib
+        y0 = 80
+        x_offset = 10
 
-        # Position graph baseline with room for labels below
-        y0 = content_height - margin - 18  # 18px for label height + spacing
-        x_offset = margin
+        val_text = self.parameter.format(self.param_value)
+        min_text = self.parameter.format(self.param_min)
+        max_text = self.parameter.format(self.param_max)
 
-        val_text = util.format_float(self.param_value)
+        # Calculate text width and centered position
+        font = Config().get_font('default')
+        text_width, text_height = get_text_size(val_text, font)
+        x_centered = (self.box.width - text_width) // 2
+
         if self.w_value is None:
-            # Center value label horizontally
-            self.w_value = TextWidget(box=Box.xywh(self.box.width // 2 - 15, 15, 0, 0), text=val_text, parent=self,
+            self.w_value = TextWidget(box=Box.xywh(x_centered, 25, 0, 0), text=val_text, parent=self,
                        align=WidgetAlign.NONE, name='value')
             self.w_value.set_foreground('yellow')
-            # Min label at left edge with margin
-            TextWidget(box=Box.xywh(margin, y0, 0, 0), text=util.format_float(self.param_min), parent=self, outline=0,
+            TextWidget(box=Box.xywh(0, y0, 0, 0), text=min_text, parent=self, outline=0,
                        align=WidgetAlign.NONE, name='value')
-            # Max label at right edge with margin
-            TextWidget(box=Box.xywh(self.box.width - margin - 30, y0, 0, 0), text=util.format_float(self.param_max), parent=self, outline=0,
+            TextWidget(box=Box.xywh(220, y0, 0, 0), text=max_text, parent=self, outline=0,
                        align=WidgetAlign.NONE, name='value')
         else:
+            # Update text and reposition to keep centered
             self.w_value.set_text(val_text)
+            # Manually update box position without breaking parent relationship
+            self.w_value.box = Box.xywh(x_centered, 25, 0, 0)
 
         # TODO would be nice to only redraw the lines that need changing
         x = 0
@@ -121,24 +130,25 @@ class Parameterdialog(Dialog):
         self.param_value = new_value
         self._draw_graph()
 
-    def parameter_value_change(self, steps):
+    def parameter_value_change(self, direction):
         self._reset_timeout_timer()
 
-        value = float(self.param_value)
-        i = self._find_nearest_element_index(self.actual_points, value)
+        # Calculate new value
+        new_value = self.param_value + (direction * self.tweak)
 
-        if self.taper != 1.0 and abs(steps) > 1:
-            steps = self._taper_adjusted_steps(i, steps)
-
-        new = np.clip(i + steps, 0, self.num_actual - 1)
-        new_value = self.actual_points[new]
-
+        # Clamp
         if new_value > self.param_max:
             new_value = self.param_max
         if new_value < self.param_min:
             new_value = self.param_min
-        if new_value == value:
+
+        # Integer rounding
+        if self.parameter.type in (Parameter.Type.INTEGER, Parameter.Type.ENUMERATION, Parameter.Type.TOGGLED):
+            new_value = round(new_value)
+
+        if new_value == self.param_value:
             return
+
         self.param_value = new_value
         if self.action is not None:
             self.action(self.object, new_value)
@@ -176,27 +186,3 @@ class Parameterdialog(Dialog):
         if self.timer is not None:
             self.timer.cancel()
             self.timer = None
-
-    def _find_nearest_element_index(self, arr, target):
-        # binary search of closest value to target within the sorted array
-        left = 0
-        right = len(arr) - 1
-        nearest_index = None
-        min_diff = float('inf')
-
-        while left <= right:
-            mid = (left + right) // 2
-            diff = abs(arr[mid] - target)
-
-            if diff < min_diff:
-                min_diff = diff
-                nearest_index = mid
-
-            if arr[mid] == target:
-                return mid
-            elif arr[mid] < target:
-                left = mid + 1
-            else:
-                right = mid - 1
-
-        return nearest_index

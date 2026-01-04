@@ -46,7 +46,7 @@ from blend.types import (
     NormalizedStops,
     StopData,
 )
-from modalapi.parameter import Type as ParameterType
+from common.parameter import Type as ParameterType
 
 
 # Mapping of all interpolation function names

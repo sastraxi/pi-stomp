@@ -157,6 +157,7 @@ Shortpress accepts string (callback name) or object with `callback` and `args` (
 
 - Pedalboard load triggers MIDI messages to external devices (e.g., Source Audio C4)
 - Configured via `hardware.external_midi` in default config and per-pedalboard config.yml
+- **UI Integration**: routed controls get synthetic `Parameter` objects (INTEGER, 0-127) for LCD feedback.
 - See `setup/config_templates/default_config_pistomptre.yml` for example configuration
 
 ### Analog Control State Sync
@@ -365,6 +366,7 @@ GET  /get_bpm                            # Get current BPM
   - ILI9341 controller, 320×240 RGB, 24MHz SPI (`uilib/lcd_ili9341.py`)
   - Builder pattern constructs UI from pedalboard data
   - Event-driven updates via `link_data()`
+  - **ParameterDialog**: Driven by `Parameter` object (encapsulates formatting/taper)
 
 **LCD Performance**:
 - **Refresh rate**: 5Hz (200ms poll in `modalapistomp.py:156`)
@@ -374,6 +376,17 @@ GET  /get_bpm                            # Get current BPM
   - Single widget (~60×40): ~100Hz capable vs 5Hz panel refresh
   - Trade-off: CPU overhead vs visual responsiveness
 - **Thread safety**: `lcd_ili9341.py` uses lock - avoid blocking in refresh path
+
+**Controller Architecture** (`pistomp/controller.py`):
+- **RoutingInfo**: Dataclass with `RoutingDestination` enum (VIRTUAL, EXTERNAL)
+  - Factory methods: `RoutingInfo.virtual()`, `RoutingInfo.external(port_name)`
+  - Controllers expose routing via `get_routing_info()` - no type checking needed
+- **DisplayInfo**: TypedDicts for LCD rendering (`AnalogDisplayInfo`, `FootswitchDisplayInfo`)
+  - Contains type, id, category, and optionally port_name/midi_cc for external routing
+  - Controllers expose display data via `get_display_info()`
+- **Separation of concerns**: Handler queries controllers, prepares display data, LCD consumes it
+  - No cross-layer imports (LCD doesn't import `ExternalMidiOut`)
+  - No isinstance checks outside controller layer
 
 ### Data Flow Examples
 
@@ -445,6 +458,7 @@ poll_controls()
 - `pistomp/pistomptre.py` - v3 implementation
 
 **Controls**:
+- `pistomp/controller.py` - Base class, RoutingInfo/DisplayInfo data structures
 - `pistomp/footswitch.py` - Footswitch logic, longpress groups
 - `pistomp/encoder.py` - Rotary encoder decoding
 - `pistomp/encodermidicontrol.py` - Encoder with MIDI output
@@ -456,7 +470,7 @@ poll_controls()
 
 **MOD API**:
 - `modalapi/pedalboard.py` - LILV parser
-- `modalapi/parameter.py` - Parameter representation
+- `common/parameter.py` - Parameter representation & formatting
 - `modalapi/plugin.py` - Plugin representation
 - `modalapi/websocket_bridge.py` - Async WebSocket client
 - `modalapi/ws_protocol.py` - Typed message parsing
