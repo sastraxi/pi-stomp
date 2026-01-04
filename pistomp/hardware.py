@@ -25,6 +25,7 @@ import pistomp.footswitch as Footswitch
 import pistomp.taptempo as taptempo
 from modalapi.external_midi import ExternalMidiOut
 import common.parameter as Parameter
+from common.parameter import TTL_PROPERTIES, TTL_INTEGER
 
 from abc import abstractmethod
 
@@ -373,7 +374,7 @@ class Hardware:
                 Token.MINIMUM: 0,
                 Token.MAXIMUM: 127
             },
-            'properties': ['integer']
+            TTL_PROPERTIES: [TTL_INTEGER]
         }
         val = getattr(controller, 'midi_value', 0)
         return Parameter.Parameter(info, val, f"{midi_channel}:{midi_cc}", "External")

@@ -34,7 +34,7 @@ import modalapi.wifi as Wifi
 import modalapi.external_midi as ExternalMidi
 import pistomp.settings as Settings
 from blend.snapshot import SnapshotManager
-from common.parameter import Parameter, Type
+from common.parameter import Parameter, Type, TTL_PROPERTIES, TTL_INTEGER
 from modalapi.websocket_bridge import AsyncWebSocketBridge
 from modalapi.ws_protocol import parse_message, LoadingEndMessage, PedalSnapshotMessage
 from modalapi.pedalboard_monitor import PedalboardMonitor
@@ -624,7 +624,7 @@ class Modhandler(Handler):
                                             Token.MINIMUM: 0,
                                             Token.MAXIMUM: 127
                                         },
-                                        Token.TYPE: Type.INTEGER
+                                        TTL_PROPERTIES: [TTL_INTEGER]
                                     }
                                     ext_param = Parameter(ext_info, controller.midi_value, None)  # instance_id=None
                                     controller.bind_to_parameter(ext_param, taper=1)

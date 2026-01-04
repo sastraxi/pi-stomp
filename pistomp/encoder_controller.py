@@ -20,15 +20,26 @@ import common.util as util
 import pistomp.controller as controller
 import pistomp.encoder as encoder
 from pistomp.handler import Handler
-from pistomp.velocity_tracker import VelocityTracker, clamp
 from pistomp.parameter_quantizer import ParameterQuantizer
 from common.parameter import Parameter
 
 import logging
 
 
+def clamp(value, min_value, max_value):
+    return max(min_value, min(max_value, value))
+
+
 class EncoderController(encoder.Encoder, controller.Controller):
-    """Encoder with velocity tracking and parameter quantization."""
+    """Encoder with speed-based amplification and parameter quantization."""
+
+    # Speed thresholds (accumulated rotations in 10ms poll cycle)
+    FAST_THRESHOLD = 4      # 4+ rotations = very fast
+    MEDIUM_THRESHOLD = 2    # 2-3 rotations = fast
+    # Multipliers
+    FAST_MULTIPLIER = 8
+    MEDIUM_MULTIPLIER = 4
+    SLOW_MULTIPLIER = 1
 
     def __init__(
         self,
@@ -55,20 +66,17 @@ class EncoderController(encoder.Encoder, controller.Controller):
         self.quantizer: Optional[ParameterQuantizer] = None
         self.value_change_callback: Optional[Any] = None
         self.midi_value = 64  # Start at middle value for MIDI Learn
-        self.velocity_tracker = VelocityTracker(step_scale=1)
         logging.debug(f"EncoderController init: id={id}, midi_CC={midi_CC}, midi_channel={midi_channel}")
 
     def bind_to_parameter(self, parameter: Parameter, taper: float = 1.0) -> None:
         """Initialize quantizer and sync to parameter's current value."""
         self.parameter = parameter
         num_steps = 128 if self.midi_CC else 256
-        step_scale = num_steps / 256
         self.quantizer = ParameterQuantizer(parameter.minimum, parameter.maximum, num_steps, taper)
         self.quantizer.set_value(parameter.value)
-        self.velocity_tracker.set_step_scale(step_scale)
         logging.debug(
             f"EncoderController bound to parameter {parameter.name}: "
-            f"midi_CC={self.midi_CC}, num_steps={num_steps}, step_scale={step_scale}, value={parameter.value}"
+            f"midi_CC={self.midi_CC}, num_steps={num_steps}, value={parameter.value}"
         )
 
     def set_value(self, value: float) -> None:
@@ -77,20 +85,24 @@ class EncoderController(encoder.Encoder, controller.Controller):
             self.quantizer.set_value(value)
 
     def refresh(self, direction: int) -> None:
-        """Handle encoder rotation: calculate new value, send MIDI, notify handler."""
+        """Handle encoder rotation with speed-based amplification."""
         logging.debug(f"EncoderController.refresh: id={self.id}, type={self.type}, direction={direction}, has_param={self.parameter is not None}")
-        if abs(direction) > 1:
-            delta = direction
+
+        # Use accumulated count as speed indicator (accumulated in 10ms poll cycle)
+        abs_dir = abs(direction)
+        if abs_dir >= self.FAST_THRESHOLD:
+            multiplier = self.FAST_MULTIPLIER
+        elif abs_dir >= self.MEDIUM_THRESHOLD:
+            multiplier = self.MEDIUM_MULTIPLIER
         else:
-            multiplier = self.velocity_tracker.add_rotation(direction)
-            if self.quantizer and self.quantizer.taper != 1.0:
-                multiplier = self._taper_adjusted_multiplier(multiplier, direction)
-            delta = direction * multiplier
+            multiplier = self.SLOW_MULTIPLIER
+
+        delta = direction * multiplier
+        logging.debug(f"Speed: abs_dir={abs_dir}, multiplier={multiplier}, delta={delta}")
 
         if self.quantizer:
             new_value = self.quantizer.move_steps(delta)
             if self.midi_CC and self.parameter:
-                # Only calculate MIDI value if we're going to send it and have a parameter
                 self.midi_value = self._value_to_midi(new_value)
             if self.parameter:
                 self.parameter.value = new_value
@@ -104,30 +116,9 @@ class EncoderController(encoder.Encoder, controller.Controller):
 
         if self.quantizer:
             if self.value_change_callback:
-                # Callback mode (blend mode or volume control)
                 self.value_change_callback(new_value, self)
             elif self.parameter:
-                # Parameter mode (plugin parameters)
                 self.handler.encoder_value_changed(self.parameter, new_value)
-
-    def _taper_adjusted_multiplier(self, multiplier: int, direction: int) -> int:
-        """Scale multiplier to compensate for non-linear step sizes."""
-        current_step = self.quantizer.current_step
-        next_step = clamp(current_step + direction, 0, self.quantizer.num_steps - 1)
-
-        current_value = self.quantizer.step_values[current_step]
-        next_value = self.quantizer.step_values[next_step]
-        step_size = abs(next_value - current_value)
-
-        param_range = self.parameter.maximum - self.parameter.minimum
-        linear_step_size = param_range / (self.quantizer.num_steps - 1)
-
-        if step_size < 0.0001:
-            return multiplier
-
-        ratio = linear_step_size / step_size
-        adjusted = int(multiplier * ratio)
-        return max(1, adjusted)
 
     def _value_to_midi(self, value: float) -> int:
         """Convert parameter value to MIDI CC value [0-127]."""

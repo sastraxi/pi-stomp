@@ -369,10 +369,11 @@ GET  /get_bpm                            # Get current BPM
 
 **Encoders** (`pistomp/encoder.py`, `pistomp/encoder_controller.py`):
 - **Base**: Quadrature decoding, GPIO interrupts, debounce
-- **EncoderController** (v3): Velocity tracking + parameter quantization
-  - VelocityTracker: Speed-based step multiplier (slow=1, fast=8 steps)
+- **EncoderController** (v3): Speed-based amplification + parameter quantization
+  - Uses accumulator count as speed indicator (more rotations in 10ms = faster)
+  - Thresholds: 4+ rotations=8× steps, 2-3=4× steps, 1=1× step
   - ParameterQuantizer: Discrete steps (128 for MIDI, 256 for non-MIDI)
-  - Unified flow: rotation → velocity → quantize → commit
+  - Flow: rotation → accumulate → amplify → quantize → commit
 - **Volume Encoder**: EncoderController bound to synthetic audio Parameter
 - **Buttons**: Configurable shortpress (callback + args) and longpress
 - **State Machines** (v1/v2 only): `TopEncoderMode`, `BotEncoderMode`, `UniversalEncoderMode`
@@ -484,8 +485,7 @@ poll_controls()
 - `pistomp/controller.py` - Base class, RoutingInfo/DisplayInfo data structures
 - `pistomp/footswitch.py` - Footswitch logic, longpress groups
 - `pistomp/encoder.py` - Rotary encoder decoding
-- `pistomp/encoder_controller.py` - Encoder with velocity + quantization (v3)
-- `pistomp/velocity_tracker.py` - Speed-based step multiplier
+- `pistomp/encoder_controller.py` - Encoder with speed amplification + quantization (v3)
 - `pistomp/parameter_quantizer.py` - Discrete step quantization
 - `pistomp/analogmidicontrol.py` - ADC-based MIDI controller
 
