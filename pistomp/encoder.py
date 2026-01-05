@@ -17,6 +17,7 @@ import threading
 
 from functools import partial
 from gpiozero import Button   # TODO consider using Encoder class instead
+from pistomp.controller import AnalogDisplayInfo
 
 class Encoder:
 
@@ -88,15 +89,22 @@ class Encoder:
         return self.clk.value
 
     def read_rotary(self):
-        d = 0
+        accumulated = 0
         if self.direction != 0:
             with self._lock:
-                if self.direction > 0:
-                    d = 1
-                elif self.direction < 0:
-                    d = -1
-                self.direction -= d
+                accumulated = self.direction
+                self.direction = 0
         else:
-            d = self._process_gpios()
-        if d != 0 and self.callback is not None:
-            self.callback(d)
+            accumulated = self._process_gpios()
+
+        if accumulated != 0 and self.callback is not None:
+            # Call once with total accumulated rotations (skip intermediate values)
+            self.callback(accumulated)
+
+    def get_display_info(self) -> AnalogDisplayInfo:
+        """Get display information for LCD."""
+        return {
+            'type': self.type,
+            'id': self.id,
+            'category': None,
+        }

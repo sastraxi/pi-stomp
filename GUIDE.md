@@ -1,5 +1,24 @@
 # Guide for piStomp Development
 
+## Contributing Code
+
+**Code Style**:
+- Terse, minimal comments - docstrings for public methods only
+- Comment only when surprising or justifying an approach
+- Type hints everywhere - use actual types, not `Any`
+- No `TYPE_CHECKING` unless there's an actual circular import
+
+**Architecture**:
+- No unnecessary "defensive programming" - fail fast!
+- No premature branches - don't handle cases that don't exist yet
+- Question complexity - "why do we need this branch?" should have a clear answer
+- Read existing code before writing - understand patterns first
+
+**Development**:
+- Phase changes - don't try to do everything at once
+- Migrate incrementally - one subsystem at a time
+- Type system catches errors at development time, not runtime
+
 ## Remote Development
 
 **SSH Access**: `ssh pistomp@pistomp.local`
@@ -138,6 +157,7 @@ Shortpress accepts string (callback name) or object with `callback` and `args` (
 
 - Pedalboard load triggers MIDI messages to external devices (e.g., Source Audio C4)
 - Configured via `hardware.external_midi` in default config and per-pedalboard config.yml
+- **UI Integration**: routed controls get synthetic `Parameter` objects (INTEGER, 0-127) for LCD feedback.
 - See `setup/config_templates/default_config_pistomptre.yml` for example configuration
 
 ### Analog Control State Sync
@@ -273,6 +293,25 @@ Config merged and applied
 - Example: Change footswitch MIDI CC for specific pedalboard
 - Fields not specified keep default values
 
+### Parameter Persistence
+
+**Plugin Parameters** (`common/parameter.py`):
+- Source: LV2 TTL files in pedalboard bundles
+- Persisted: MOD-UI manages via pedalboard state (snapshots)
+- Read/Write: REST API (`/effect/parameter/pi_stomp_set`)
+- Never persisted by piStomp - delegated to MOD
+
+**Audio Parameters** (volume, input gain, EQ):
+- Source: ALSA mixer controls (audiocard-specific)
+- Persisted: `/var/lib/alsa/asound.state` (automatic via ALSA)
+- Read: `audiocard.get_volume_parameter(symbol)` → `amixer sget`
+- Write: `audiocard.set_volume_parameter(symbol, value)` → `amixer sset`
+- Symbols: `MASTER`, `CAPTURE_VOLUME`, `EQ_1`-`EQ_5` (defined per card)
+
+**System Settings** (VU calibration, bank selection):
+- Persisted: `/home/pistomp/data/settings.yml`
+- Read/Write: `settings.get_setting(key)` / `set_setting(key, value)`
+
 ### MOD Integration
 
 **HTTP REST API** to `localhost:80`:
@@ -328,9 +367,14 @@ GET  /get_bpm                            # Get current BPM
 - **Config Overlay**: Per-pedalboard override of MIDI CC, bypass, preset, color
 - **Physical**: GPIO-based (`gpioswitch.py`) or ADC-based (`analogswitch.py`)
 
-**Encoders** (`pistomp/encoder.py`, `pistomp/encodermidicontrol.py`):
+**Encoders** (`pistomp/encoder.py`, `pistomp/encoder_controller.py`):
 - **Base**: Quadrature decoding, GPIO interrupts, debounce
-- **MIDI Control**: Sends CC on rotation (v3 tweak encoders)
+- **EncoderController** (v3): Speed-based amplification + parameter quantization
+  - Uses accumulator count as speed indicator (more rotations in 10ms = faster)
+  - Thresholds: 4+ rotations=8× steps, 2-3=4× steps, 1=1× step
+  - ParameterQuantizer: Discrete steps (128 for MIDI, 256 for non-MIDI)
+  - Flow: rotation → accumulate → amplify → quantize → commit
+- **Volume Encoder**: EncoderController bound to synthetic audio Parameter
 - **Buttons**: Configurable shortpress (callback + args) and longpress
 - **State Machines** (v1/v2 only): `TopEncoderMode`, `BotEncoderMode`, `UniversalEncoderMode`
 
@@ -343,9 +387,10 @@ GET  /get_bpm                            # Get current BPM
 **LCD System**:
 - **v1**: `lcdgfx.py` - Monochrome text display
 - **v2/v3**: `lcd320x240.py` - Color GUI with widget-based UI library (`uilib/`)
-  - ILI9341 controller, 320×240 RGB, 24MHz SPI (`uilib/lcd_ili9341.py`)
+  - ILI9341 controller, 320×240 RGB, configurable SPI speed (`uilib/lcd_ili9341.py`)
   - Builder pattern constructs UI from pedalboard data
   - Event-driven updates via `link_data()`
+  - **ParameterDialog**: Driven by `Parameter` object (encapsulates formatting/taper)
 
 **Control Progress Visualization**:
 - Real-time progress bars for analog controls and encoders (v2/v3)
@@ -355,13 +400,27 @@ GET  /get_bpm                            # Get current BPM
 - Icon boxes sized to full column width/height for visual consistency
 
 **LCD Performance**:
-- **Refresh rate**: 5Hz (200ms poll in `modalapistomp.py:156`)
-- **Partial updates supported**: `widget.refresh()` updates bounding box only
-- **Current pattern**: `panel.refresh()` redraws entire panel (320×170 or 320×64)
-- **Optimization**: Call `widget.refresh()` for small changes (footswitch, parameter value)
-  - Single widget (~60×40): ~100Hz capable vs 5Hz panel refresh
-  - Trade-off: CPU overhead vs visual responsiveness
+- **SPI Speed**: User-configurable via System Menu → LCD Speed (restarts service)
+  - 24 MHz (ILI9341 spec, safe) → 80ms full refresh
+  - 48 MHz → 40ms full refresh
+  - 56 MHz → 30ms full refresh
+  - 80 MHz → 24ms full refresh
+- **Polling**: Adapts automatically to SPI speed (`lcd.poll_divisor`)
+- **Optimization**: Use `widget.refresh()` for low-latency updates (parameter value, footswitch state)
+  - Full panel refresh still too slow for real-time - partial updates critical
+  - Widget-only refresh: <10ms even at slow speeds
 - **Thread safety**: `lcd_ili9341.py` uses lock - avoid blocking in refresh path
+
+**Controller Architecture** (`pistomp/controller.py`):
+- **RoutingInfo**: Dataclass with `RoutingDestination` enum (VIRTUAL, EXTERNAL)
+  - Factory methods: `RoutingInfo.virtual()`, `RoutingInfo.external(port_name)`
+  - Controllers expose routing via `get_routing_info()` - no type checking needed
+- **DisplayInfo**: TypedDicts for LCD rendering (`AnalogDisplayInfo`, `FootswitchDisplayInfo`)
+  - Contains type, id, category, and optionally port_name/midi_cc for external routing
+  - Controllers expose display data via `get_display_info()`
+- **Separation of concerns**: Handler queries controllers, prepares display data, LCD consumes it
+  - No cross-layer imports (LCD doesn't import `ExternalMidiOut`)
+  - No isinstance checks outside controller layer
 
 ### Data Flow Examples
 
@@ -433,9 +492,11 @@ poll_controls()
 - `pistomp/pistomptre.py` - v3 implementation
 
 **Controls**:
+- `pistomp/controller.py` - Base class, RoutingInfo/DisplayInfo data structures
 - `pistomp/footswitch.py` - Footswitch logic, longpress groups
 - `pistomp/encoder.py` - Rotary encoder decoding
-- `pistomp/encodermidicontrol.py` - Encoder with MIDI output
+- `pistomp/encoder_controller.py` - Encoder with speed amplification + quantization (v3)
+- `pistomp/parameter_quantizer.py` - Discrete step quantization
 - `pistomp/analogmidicontrol.py` - ADC-based MIDI controller
 
 **MIDI**:
@@ -444,7 +505,7 @@ poll_controls()
 
 **MOD API**:
 - `modalapi/pedalboard.py` - LILV parser
-- `modalapi/parameter.py` - Parameter representation
+- `common/parameter.py` - Parameter representation & formatting
 - `modalapi/plugin.py` - Plugin representation
 - `modalapi/websocket_bridge.py` - Async WebSocket client
 - `modalapi/ws_protocol.py` - Typed message parsing

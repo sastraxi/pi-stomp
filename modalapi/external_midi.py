@@ -21,10 +21,60 @@ import time
 from typing import TypedDict
 
 import rtmidi
-
+from rtmidi import MidiOut as RtMidiOut
 
 # Type alias for MIDI message (list of bytes)
 MidiMessage = list[int]
+
+
+class ExternalMidiOut:
+    """
+    Wrapper around external MIDI port that implements the same interface as
+    the virtual port's midiout. Allows controls to send MIDI to external devices
+    transparently, with automatic fallback to virtual port if device unavailable.
+    """
+
+    def __init__(
+        self, external_midi_manager: ExternalMidiManager, port_name: str, midi_channel: int, fallback_midiout: RtMidiOut
+    ):
+        """
+        Initialize external MIDI output wrapper.
+
+        Args:
+            external_midi_manager: Reference to ExternalMidiManager.
+            port_name: Name of external MIDI port from config.
+            midi_channel: MIDI channel (0-15).
+            fallback_midiout: Virtual port midiout to use if external unavailable.
+        """
+        self.external_midi = external_midi_manager
+        self.port_name = port_name
+        self.channel = midi_channel
+        self.fallback = fallback_midiout
+
+    def send_message(self, message: MidiMessage) -> None:
+        """
+        Send MIDI message to external port, falling back to virtual port if unavailable.
+
+        Args:
+            message: MIDI message as [status_byte, data1, data2, ...]
+        """
+        if len(message) < 3:
+            # Not a CC message we can route, just use fallback
+            self.fallback.send_message(message)
+            return
+
+        # Extract CC and value from message
+        # Status byte format: 0xBn where n is channel (already included)
+        cc = message[1]
+        value = message[2]
+
+        # Try to send to external port
+        success = self.external_midi.send_cc(self.port_name, self.channel, cc, value)
+
+        if not success:
+            # External port unavailable, fallback to virtual port
+            logging.debug(f"External port {self.port_name} unavailable, using virtual port")
+            self.fallback.send_message(message)
 
 
 class PortConfig(TypedDict, total=False):
@@ -259,6 +309,64 @@ class ExternalMidiManager:
 
             except Exception as e:
                 logging.error(f"Failed to send MIDI message to {port_name}: {e}")
+
+    def send_cc(self, port_name: str, channel: int, cc: int, value: int) -> bool:
+        """
+        Send a single MIDI CC message to an external port.
+        Used by controls (footswitches, encoders, expression pedals) when
+        configured to route to external MIDI devices.
+
+        Args:
+            port_name: Name of port configuration from config file.
+            channel: MIDI channel (0-15).
+            cc: MIDI CC number (0-127).
+            value: MIDI CC value (0-127).
+
+        Returns:
+            True if message was sent successfully, False if port unavailable (caller should fallback).
+
+        Raises:
+            RuntimeError: If port_name not in config (config validation failed at startup).
+        """
+        if not self.enabled:
+            logging.debug(f"External MIDI disabled, falling back to virtual port")
+            return False
+
+        # Port name must exist in config (should have been validated at startup)
+        if port_name not in self.port_configs:
+            raise RuntimeError(
+                f"Port '{port_name}' not found in external_midi config. "
+                f"Available ports: {list(self.port_configs.keys())}. "
+                f"This should have been caught during config validation."
+            )
+
+        # Validate MIDI values (programming errors)
+        if not (0 <= channel <= 15):
+            raise ValueError(f"Invalid MIDI channel {channel} (must be 0-15)")
+        if not (0 <= cc <= 127):
+            raise ValueError(f"Invalid MIDI CC {cc} (must be 0-127)")
+        if not (0 <= value <= 127):
+            raise ValueError(f"Invalid MIDI value {value} (must be 0-127)")
+
+        # Lazy initialization of port (may fail if device not connected)
+        midi_out = self._init_port(port_name)
+        if midi_out is None:
+            # Port not available - caller should fallback to virtual port
+            logging.debug(f"Port {port_name} not available, caller will fallback to virtual port")
+            return False
+
+        # Construct and send MIDI message
+        # Status byte: 0xB0 (CC) | channel
+        status = 0xB0 | channel
+        message = [status, cc, value]
+
+        try:
+            midi_out.send_message(message)
+            logging.debug(f"Sent CC to {port_name}: channel={channel} cc={cc} value={value}")
+            return True
+        except Exception as e:
+            logging.error(f"Failed to send CC to {port_name}: {e}")
+            return False
 
     def send_messages_for_pedalboard(self) -> bool:
         """

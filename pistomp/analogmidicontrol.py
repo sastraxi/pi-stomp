@@ -20,6 +20,8 @@ from rtmidi.midiconstants import CONTROL_CHANGE
 
 import common.util as util
 import pistomp.analogcontrol as analogcontrol
+import pistomp.controller as controller
+from pistomp.controller import AnalogDisplayInfo, RoutingDestination
 
 import logging
 
@@ -29,19 +31,17 @@ def as_midi_value(adc_value: int):
     return util.renormalize(adc_value, 0, 1023, 0, 127)
 
 
-class AnalogMidiControl(analogcontrol.AnalogControl):
-    def __init__(self, spi, adc_channel, tolerance, midi_CC, midi_channel, midiout, type, id=None, cfg={}, value_change_callback=None):
+class AnalogMidiControl(analogcontrol.AnalogControl, controller.Controller):
+    def __init__(self, spi, adc_channel, tolerance, midi_CC, midi_channel, midiout, type, id=None, value_change_callback=None):
         super(AnalogMidiControl, self).__init__(spi, adc_channel, tolerance)
-        self.midi_CC = midi_CC
+        controller.Controller.__init__(self, midi_channel, midi_CC)
         self.midiout = midiout
-        self.midi_channel = midi_channel
 
         # Parent member overrides
         self.type = type
         self.id = id
         self.last_read = 0  # this keeps track of the last potentiometer value
         self.value = None
-        self.cfg = cfg
         self.value_change_callback = value_change_callback
 
     def set_midi_channel(self, midi_channel):
@@ -97,3 +97,19 @@ class AnalogMidiControl(analogcontrol.AnalogControl):
 
             # save the potentiometer reading for the next loop
             self.last_read = value
+
+    def get_display_info(self) -> AnalogDisplayInfo:
+        """Get display information for LCD."""
+        routing = self.get_routing_info()
+
+        info: AnalogDisplayInfo = {
+            'type': self.type,
+            'id': self.id,
+            'category': None,  # Set during parameter binding
+        }
+
+        if routing.destination == RoutingDestination.EXTERNAL:
+            info['port_name'] = routing.port_name
+            info['midi_cc'] = self.midi_CC
+
+        return info
