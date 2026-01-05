@@ -30,13 +30,14 @@ import argparse
 import os
 import time
 
+from rtmidi.midiutil import open_midioutput
+
 import pistomp.audiocardfactory as Audiocardfactory
 import pistomp.config as config
 import pistomp.generichost as Generichost
 import pistomp.testhost as Testhost
 import pistomp.handlerfactory as Handlerfactory
 import pistomp.hardwarefactory as Hardwarefactory
-import pistomp.virtualmidiport as VirtualMidiPort
 
 
 def main():
@@ -69,17 +70,20 @@ def main():
     # Audio Card Config - doing this early so audio passes ASAP
     factory = Audiocardfactory.Audiocardfactory(cwd)
     audiocard = factory.create()
-    audiocard.restore()
+    audiocard.restore() 
 
-    # MIDI initialization - Create virtual MIDI port
-    # This creates "piStomp-MIDI" ALSA virtual port which JACK bridges automatically.
-    # In separated mode, mod-host auto-connects to this port for MIDI Learn.
+    # MIDI initialization
+    # Prompts user for MIDI input port, unless a valid port number or name
+    # is given as the first argument on the command line.
+    # API backend defaults to ALSA on Linux.
+    # TODO discover and use the thru port (seems to be 14:0 on my system)
+    # shouldn't need to aconnect, just send msgs directly to the thru port
+    port = 0 # TODO get this (the Midi Through port) programmatically
+    #port = sys.argv[1] if len(sys.argv) > 1 else None
     try:
-        virtual_port = VirtualMidiPort.VirtualMidiPort("piStomp-MIDI", timeout_sec=2.0)
-        midiout = virtual_port.get_midiout()
-    except RuntimeError as e:
-        logging.error(f"Failed to create virtual MIDI port: {e}")
-        sys.exit(1)
+        midiout, port_name = open_midioutput(port)
+    except (EOFError, KeyboardInterrupt):
+        sys.exit()
 
     # Handler object
     handler = None
@@ -99,7 +103,6 @@ def main():
             sys.exit()
 
         # Initialize hardware (Footswitches, Encoders, Analog inputs, etc.)
-        # midiout sends directly to piStomp-MIDI virtual port (no wrapper needed)
         factory = Hardwarefactory.Hardwarefactory()
         hw = factory.create(cfg, handler, midiout)
         handler.add_hardware(hw)
@@ -167,7 +170,7 @@ def main():
         logging.info('keyboard interrupt')
     finally:
         logging.info("Exit.")
-        virtual_port.cleanup()
+        midiout.close_port()
         handler.cleanup()
         del handler
         logging.info("Completed cleanup")
