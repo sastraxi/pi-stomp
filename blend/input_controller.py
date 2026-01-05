@@ -114,6 +114,63 @@ class InputController:
         """Reset state tracking (call on re-initialization)."""
         self.current_segment_idx = 0
 
+    def sync_current_position(self) -> None:
+        """
+        Force update of ALL parameters based on current input position.
+
+        Called on activation to establish initial parameter state when
+        blend snapshot is empty. Sends ALL parameters (differing + non-differing)
+        to overwrite any stale values from the previous snapshot.
+
+        For differing parameters: interpolates based on current pedal position
+        For non-differing parameters: uses constant value from first stop
+        """
+        if not self.controlled_input:
+            logging.warning("Cannot sync - no controlled input attached")
+            return
+
+        # Get current position
+        from pistomp.encoder_controller import EncoderController
+        if isinstance(self.controlled_input, EncoderController):
+            raw_value = self.controlled_input.midi_value  # 0-127
+            percentage = self.controlled_input.get_normalized_value()
+        else:
+            # Expression pedal - read ADC
+            raw_value = self.controlled_input.last_read  # 0-1023
+            percentage = raw_value / 1023.0
+
+        # Find segment for interpolation
+        segment_idx = self._find_segment(percentage)
+        lower = self.stops[segment_idx]
+        upper = self.stops[segment_idx + 1]
+        segment_range = upper.position - lower.position
+
+        if segment_range > 0:
+            local_pct = (percentage - lower.position) / segment_range
+            local_pct = max(0.0, min(1.0, local_pct))
+        else:
+            local_pct = 0.0
+
+        # Send differing parameters (interpolated)
+        diff_map = self.segment_diff_maps[segment_idx]
+        for instance_id, params in diff_map.items():
+            for symbol, param_data in params.items():
+                float_value = self.interpolation_func(local_pct, param_data)
+                self.parameter_setter.send_parameter(instance_id, symbol, float_value)
+
+        # Send non-differing parameters (constant from first stop)
+        # These are in first stop but NOT in any diff map
+        first_stop_state = self.stops[0].state
+        for instance_id, params in first_stop_state.items():
+            for symbol, value in params.items():
+                # Skip if already sent as differing parameter
+                if instance_id in diff_map and symbol in diff_map[instance_id]:
+                    continue
+                # Send constant value
+                self.parameter_setter.send_parameter(instance_id, symbol, value)
+
+        logging.info(f"Synced blend mode to position {percentage:.3f} (segment {segment_idx})")
+
     def handle_value_change(self, raw_value: int, control: BlendInputProtocol) -> None:
         """
         Handle analog input movement (CRITICAL PATH - optimized for 10ms polling).
