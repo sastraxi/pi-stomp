@@ -25,7 +25,7 @@ from blend.types import (
     ParameterTypeGetter,
     SnapshotStateDict,
 )
-from modalapi.parameter import Type as ParameterType
+from common.parameter import Type as ParameterType
 
 
 class BlendStop:

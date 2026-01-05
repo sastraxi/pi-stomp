@@ -18,7 +18,7 @@ import digitalio
 import logging
 import os
 import common.token as Token
-import modalapi.parameter as Parameter
+import common.parameter as Parameter
 import pistomp.category as Category
 import pistomp.lcd as abstract_lcd
 import pistomp.switchstate as switchstate
@@ -35,23 +35,33 @@ from blend.manager import BlendMode
 # import traceback
 
 
+# Parameter dialog auto-dismiss timeout (seconds)
+PARAMETER_DIALOG_TIMEOUT = 1.0
+
 class Lcd(abstract_lcd.Lcd):
-    def __init__(self, cwd, handler=None, flip=False):
+
+    def __init__(self, cwd, handler=None, flip=False, spi_speed_mhz=24):
         self.cwd = cwd
         self.imagedir = os.path.join(cwd, "images")
         Config(os.path.join(cwd, "ui", "config.json"))
         self.handler = handler
         self.flip = flip
+        self.spi_speed_mhz = spi_speed_mhz
+
+        # Calculate optimal polling divisor based on LCD speed
+        # 24MHz: 78ms/frame → poll every 80ms (divisor=8)
+        # 48MHz: 39ms/frame → poll every 40ms (divisor=4)
+        # 56MHz: 34ms/frame → poll every 30ms (divisor=3)
+        frame_time_ms = (56.0 / spi_speed_mhz) * 33.6
+        self.poll_divisor = max(1, round(frame_time_ms / 10.0))
 
         # TODO would be good to decouple the actual LCD hardware.  This file should work for any 320x240 display
-        display = LcdIli9341(
-            board.SPI(),
-            digitalio.DigitalInOut(board.CE0),
-            digitalio.DigitalInOut(board.D6),
-            digitalio.DigitalInOut(board.D5),
-            24000000,
-            flip,
-        )
+        display = LcdIli9341(board.SPI(),
+                             digitalio.DigitalInOut(board.CE0),
+                             digitalio.DigitalInOut(board.D6),
+                             digitalio.DigitalInOut(board.D5),
+                             spi_speed_mhz * 1_000_000,
+                             flip)
 
         # Colors
         self.background = (0, 0, 0)
@@ -122,6 +132,9 @@ class Lcd(abstract_lcd.Lcd):
         self.footswitch_panel = Panel(box=Box.xywh(0, 176, self.display_width, 64))
         self.pstack.push_panel(self.footswitch_panel)
 
+        # render token queue (frame dropping for responsiveness)
+        self.render_token: tuple[Parameter.Parameter, float] | None = None
+
         self.pedalboards = {}
 
         self.splash_show(True)
@@ -131,19 +144,22 @@ class Lcd(abstract_lcd.Lcd):
     #
 
     def enc_step_widget(self, widget, direction):
-        # traceback.print_stack()
-        # TODO check if widget is type
-        if direction > 0:
-            widget.input_event(InputEvent.RIGHT)
-        elif direction < 0:
-            widget.input_event(InputEvent.LEFT)
+        #traceback.print_stack()
+        from uilib.parameterdialog import Parameterdialog
+        if isinstance(widget, Parameterdialog):
+            widget.parameter_value_change(direction)
+        else:
+            steps = abs(direction)
+            event = InputEvent.RIGHT if direction > 0 else InputEvent.LEFT
+            for _ in range(steps):
+                widget.input_event(event)
 
     def enc_step(self, d):
-        # traceback.print_stack()
-        if d > 0:
-            self.pstack.input_event(InputEvent.RIGHT)
-        elif d < 0:
-            self.pstack.input_event(InputEvent.LEFT)
+        #traceback.print_stack()
+        steps = abs(d)
+        event = InputEvent.RIGHT if d > 0 else InputEvent.LEFT
+        for _ in range(steps):
+            self.pstack.input_event(event)
 
     def enc_sw(self, v):
         if v == switchstate.Value.RELEASED:
@@ -173,6 +189,12 @@ class Lcd(abstract_lcd.Lcd):
         # self.main_panel.refresh()
 
     def poll_updates(self):
+        # Dequeue and render latest parameter update (if any)
+        if self.render_token:
+            param, value = self.render_token
+            self.render_token = None
+            self._render_parameter_update(param, value)
+
         self.pstack.poll_updates()
 
         # Tick text widgets (scrolling animation if needed)
@@ -627,7 +649,7 @@ class Lcd(abstract_lcd.Lcd):
             return d
 
         # Create a new dialog
-        title = parameter.instance_id + ":" + parameter.name
+        title = parameter.name if parameter.instance_id is None else parameter.instance_id + ":" + parameter.name
         current_value = parameter.value
         if parameter.type == Parameter.Type.ENUMERATION:
             items = []
@@ -642,26 +664,29 @@ class Lcd(abstract_lcd.Lcd):
             ]
             d = self.draw_selection_menu(items, title, auto_dismiss=True)
         else:
-            taper = 2 if parameter.type == Parameter.Type.LOGARITHMIC else 1
-            d = Parameterdialog(
-                self.pstack,
-                parameter.name,
-                current_value,
-                parameter.minimum,
-                parameter.maximum,
-                width=270,
-                height=130,
-                auto_destroy=True,
-                title=title,
-                timeout=timeout,
-                action=self.parameter_commit,
-                object=parameter,
-                taper=taper,
-            )
+            d = Parameterdialog(self.pstack, parameter,
+                                width=270, height=130, auto_destroy=True, title=title, timeout=timeout,
+                                margin=8, action=self.parameter_commit, object=parameter)
             self.pstack.push_panel(d)
 
         self.w_parameter_dialogs[parameter.name] = d
         return d  # return the dialog so the parameter can be modified using the tweak knob
+
+    def queue_parameter_update(self, parameter: Parameter.Parameter, value: float) -> None:
+        """Queue parameter update for next LCD poll (frame dropping for responsiveness)."""
+        self.render_token = (parameter, value)
+
+    def _render_parameter_update(self, parameter: Parameter.Parameter, value: float) -> None:
+        """Render queued parameter update (called from poll_updates)."""
+        d = self.draw_parameter_dialog(parameter, timeout=PARAMETER_DIALOG_TIMEOUT)
+        if d:
+            d.update_value(value)
+
+    def display_parameter_value(self, parameter: Parameter.Parameter, value: float) -> None:
+        """Update parameter dialog with new value (controller already calculated it)."""
+        d = self.draw_parameter_dialog(parameter, timeout=PARAMETER_DIALOG_TIMEOUT)
+        if d:
+            d.update_value(value)
 
     def parameter_commit(self, parameter, value):
         self.handler.parameter_value_commit(parameter, value)
@@ -752,14 +777,13 @@ class Lcd(abstract_lcd.Lcd):
     # System Menu
     #
     def draw_system_menu(self, event, widget):
-        items = [
-            ("System info", self.draw_system_info_dialog, None),
-            ("System shutdown", self.handler.system_menu_shutdown, None),
-            ("System reboot", self.handler.system_menu_reboot, None),
-            ("Restart sound engine", self.handler.system_menu_restart_sound, None),
-            ("Bank Select >", self.draw_bank_menu, None),
-            ("Pedalboard Management >", self.draw_pedalboard_mgmt_menu, None),
-        ]
+        items = [("System info", self.draw_system_info_dialog, None),
+                 ("System shutdown", self.handler.system_menu_shutdown, None),
+                 ("System reboot",  self.handler.system_menu_reboot, None),
+                 ("Restart sound engine", self.handler.system_menu_restart_sound, None),
+                 ("Bank Select >", self.draw_bank_menu, None),
+                 ("LCD Speed >", self.draw_lcd_speed_menu, None),
+                 ("Pedalboard Management >", self.draw_pedalboard_mgmt_menu, None)]
         self.draw_selection_menu(items, "System Menu")
 
     def draw_pedalboard_mgmt_menu(self, arg):
@@ -795,6 +819,21 @@ class Lcd(abstract_lcd.Lcd):
         d = MessageDialog(self.pstack, msg, title="System Info", width=300, height=130)
         self.pstack.push_panel(d)
 
+    def draw_lcd_speed_menu(self, event):
+        current_speed = self.spi_speed_mhz
+        items = [
+            ("24 MHz (Safe)", self.handler.set_lcd_speed, 24, current_speed==24),
+            ("48 MHz", self.handler.set_lcd_speed, 48, current_speed==48),
+            ("56 MHz", self.handler.set_lcd_speed, 56, current_speed==56),
+            ("80 MHz", self.handler.set_lcd_speed, 80, current_speed==80),
+        ]
+        self.draw_selection_menu(items, "LCD SPI Speed", auto_dismiss=False)
+
+    def show_lcd_speed_message(self, speed_mhz):
+        msg = f"LCD speed set to {speed_mhz} MHz.\n\nRestarting service..."
+        d = MessageDialog(self.pstack, msg, title="LCD Speed", width=280, height=140)
+        self.pstack.push_panel(d)
+
     def draw_bank_menu(self, event):
         current_bank = self.handler.get_bank()
         items = [("None (All pedalboards)", self.handler.set_bank, None, current_bank == None)]
@@ -826,21 +865,21 @@ class Lcd(abstract_lcd.Lcd):
         if d is not None and d.parent is not None:
             return d
 
-        d = Parameterdialog(
-            self.pstack,
-            name,
-            value,
-            min,
-            max,
-            width=270,
-            height=130,
-            auto_destroy=True,
-            title=name,
-            timeout=2.2,
-            action=commit_callback,
-            object=symbol,
-            taper=1,
-        )
+        # Create dummy parameter for the dialog
+        info = {
+            Token.NAME: name,
+            Token.SYMBOL: symbol,
+            Token.RANGES: {
+                Token.MINIMUM: min,
+                Token.MAXIMUM: max
+            }
+        }
+        param = Parameter.Parameter(info, value, None)
+        param.unit_symbol = "dB"
+
+        d = Parameterdialog(self.pstack, param,
+                            width=270, height=130, auto_destroy=True, title=name, timeout=PARAMETER_DIALOG_TIMEOUT,
+                            margin=8, action=commit_callback, object=symbol)
         self.w_parameter_dialogs[symbol] = d
         self.pstack.push_panel(d)
         return d
@@ -849,20 +888,22 @@ class Lcd(abstract_lcd.Lcd):
         if value is None:
             value = 512  # 1024 / 2
         name = "VU Calibration"
-        d = Parameterdialog(
-            self.pstack,
-            name,
-            value,
-            502,
-            522,
-            width=270,
-            height=130,
-            auto_destroy=False,
-            title=name,
-            timeout=2.2,
-            action=commit_callback,
-            object=symbol,
-        )
+        
+        # Create dummy parameter for the dialog
+        info = {
+            Token.NAME: name,
+            Token.SYMBOL: symbol,
+            Token.RANGES: {
+                Token.MINIMUM: 0,
+                Token.MAXIMUM: 1023
+            }
+        }
+        param = Parameter.Parameter(info, value, None)
+
+        d = Parameterdialog(self.pstack, param,
+                            width=270, height=130, auto_destroy=False, title=name, timeout=PARAMETER_DIALOG_TIMEOUT,
+                            margin=8,
+                            action=commit_callback, object=symbol)
         self.pstack.push_panel(d)
         return d
 
@@ -1018,20 +1059,33 @@ class Lcd(abstract_lcd.Lcd):
             else:
                 # Mapped control or Volume
                 control_type = util.DICT_GET(v, Token.TYPE)
+
                 if control_type == Token.VOLUME:
                     name = "volume"
                     control_type = Token.KNOB
                     color = self.default_plugin_color
                     text_color = color
                 else:
-                    n = k.split(":")[1]
-                    name = self.shorten_name(n, text_per_control)
-                    color = util.DICT_GET(v, Token.COLOR)
-                    if color is None:
-                        # color not specified for control in config file
-                        category = util.DICT_GET(v, Token.CATEGORY)
-                        text_color = Category.get_category_color(category)
+                    # Check if external routing (port_name field present in display info)
+                    port_name = util.DICT_GET(v, 'port_name')
+
+                    if port_name:
+                        # External MIDI routing
+                        midi_cc = util.DICT_GET(v, 'midi_cc')
+                        name = f"{port_name}:{midi_cc}"
+                        name = self.shorten_name(name, text_per_control)
                         color = self.default_plugin_color
+                        text_color = (180, 180, 255)  # Light blue to indicate external routing
+                    else:
+                        # Normal parameter binding - key is "instance:parameter"
+                        key_parts = k.split(":")
+                        name = self.shorten_name(key_parts[1], text_per_control)
+                        color = util.DICT_GET(v, Token.COLOR)
+                        if color is None:
+                            # color not specified for control in config file
+                            category = util.DICT_GET(v, Token.CATEGORY)
+                            text_color = Category.get_category_color(category)
+                            color = self.default_plugin_color
 
             # Override color for BlendMode to show it's active (same as volume)
             if isinstance(icon_object, BlendMode):

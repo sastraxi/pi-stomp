@@ -152,7 +152,8 @@ def main():
             period += 1
             if period % 2 == 0:
                 handler.poll_indicators()
-            if period % 20 == 0:
+            # LCD polling frequency adapts to SPI speed (24MHz→80ms, 48MHz→40ms, 56MHz→30ms)
+            if period % handler.lcd.poll_divisor == 0:
                 handler.poll_lcd_updates()
                 handler.poll_modui_changes()
             if period % 200 == 0:
