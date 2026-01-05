@@ -50,6 +50,10 @@ class Parameter:
         self.type = Type.DEFAULT
         self.enum_values = []
 
+        units_info = util.DICT_GET(plugin_info, 'units')
+        self.unit_symbol = util.DICT_GET(units_info, 'symbol') if units_info else None
+        self.unit_label = util.DICT_GET(units_info, 'label') if units_info else None
+
         properties = util.DICT_GET(plugin_info, TTL_PROPERTIES)
         if properties is not None and len(properties) > 0:
             if TTL_ENUMERATION in properties:
@@ -70,7 +74,35 @@ class Parameter:
             ret.append((util.DICT_GET(v,'label'), util.DICT_GET(v,'value')))
         return ret
 
+    def get_taper(self):
+        return 2 if self.type == Type.LOGARITHMIC else 1
+
+    def format(self, value):
+        if self.type == Type.INTEGER or self.type == Type.TOGGLED or self.type == Type.ENUMERATION:
+             text = "%d" % round(float(value))
+        else:
+             text = util.format_float(value)
+
+        if self.unit_symbol:
+            text = f"{text} {self.unit_symbol}"
+        return text
+
     def to_json(self):
         return json.dumps(self, default=lambda o: o.__dict__, sort_keys=True, indent=4)
+
+
+class AudioParameter:
+    """Lightweight parameter wrapper for audiocard controls (volume, EQ, etc.)."""
+
+    def __init__(self, name: str, symbol: str, minimum: float, maximum: float, value: float, binding: int = None):
+        self.name = name
+        self.symbol = symbol
+        self.minimum = minimum
+        self.maximum = maximum
+        self.value = value
+        self.binding = binding
+        self.instance_id = None  # Marker: audio parameters don't have instance_id
+        self.type = Type.DEFAULT
+        self.enum_values = []
 
 

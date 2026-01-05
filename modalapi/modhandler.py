@@ -34,11 +34,14 @@ import modalapi.wifi as Wifi
 import modalapi.external_midi as ExternalMidi
 import pistomp.settings as Settings
 from blend.snapshot import SnapshotManager
+from common.parameter import Parameter, Type, TTL_PROPERTIES, TTL_INTEGER
 from modalapi.websocket_bridge import AsyncWebSocketBridge
 from modalapi.ws_protocol import parse_message, LoadingEndMessage, PedalSnapshotMessage
 from modalapi.pedalboard_monitor import PedalboardMonitor
 
 from pistomp.analogmidicontrol import AnalogMidiControl
+from pistomp.controller import RoutingDestination
+from pistomp.encoder_controller import EncoderController
 from pistomp.encodermidicontrol import EncoderMidiControl
 from pistomp.footswitch import Footswitch
 
@@ -168,6 +171,8 @@ class Modhandler(Handler):
         self.hardware = hardware
         # Pass external MIDI manager to hardware for config updates
         hardware.external_midi = self.external_midi
+        # Bind volume encoder to audio parameter
+        self.bind_volume_encoder()
 
     def add_lcd(self, lcd):
         self.lcd = lcd
@@ -419,6 +424,15 @@ class Modhandler(Handler):
         self.current_bank = bank_name
         self.settings.set_setting(Token.BANK, bank_name)
 
+    def set_lcd_speed(self, speed_mhz):
+        self.settings.set_setting('lcd.spi_speed_mhz', speed_mhz)
+        self.lcd.show_lcd_speed_message(speed_mhz)
+        # Exit cleanly - systemd will restart with new LCD speed
+        import time
+        import sys
+        time.sleep(1.5)  # Show message briefly
+        sys.exit(0)
+
     #
     # Pedalboard Stuff
     #
@@ -501,6 +515,7 @@ class Modhandler(Handler):
 
         # Initialize the data and draw on LCD
         self.bind_current_pedalboard()
+        self.bind_volume_encoder()  # Recreate volume parameter for this pedalboard
         self.load_current_presets()
         self.lcd.link_data(self.pedalboard_list, self.current, self.hardware.footswitches)
         self.lcd.draw_main_panel()
@@ -561,13 +576,47 @@ class Modhandler(Handler):
             self.blend_modes = {}
             self.active_blend_mode = None
 
+    def bind_volume_encoder(self):
+        from pistomp.encoder_controller import EncoderController
+        import common.token as Token
+
+        for enc in self.hardware.encoders:
+            if enc.type == Token.VOLUME and isinstance(enc, EncoderController):
+                value = self.audiocard.get_volume_parameter(self.audiocard.MASTER)
+                # Create Parameter object matching LCD's audio parameter pattern
+                info = {
+                    Token.NAME: "Output Volume",
+                    Token.SYMBOL: self.audiocard.MASTER,
+                    Token.RANGES: {
+                        Token.MINIMUM: -25.75,
+                        Token.MAXIMUM: 6.0
+                    }
+                }
+                volume_param = Parameter(info, value, None)
+                volume_param.unit_symbol = "dB"
+                enc.bind_to_parameter(volume_param, taper=1)
+                # Uses normal encoder_value_changed flow (instance_id=None → audio_parameter_commit)
+                logging.info(f"Bound volume encoder to audio parameter: {volume_param.name}")
+                break
+
     def bind_current_pedalboard(self):
         # "current" being the pedalboard mod-host says is current
         # The pedalboard data has already been loaded, but this will overlay
         # any real time settings
+
+        # Clear previous parameter bindings from all controllers except volume encoder
+        # (External encoders will get synthetic parameters later if not bound to plugin)
+        for controller in self.hardware.controllers.values():
+            is_volume = hasattr(controller, 'type') and controller.type == Token.VOLUME
+            if not is_volume:
+                controller.parameter = None
+
+        # Clear analog controllers display data
+        self.current.analog_controllers = {}
+
         footswitch_plugins = []
         if self.current.pedalboard:
-            #logging.debug(self.current.pedalboard.to_json())
+            # Bind plugin parameters to controllers
             for plugin in self.current.pedalboard.plugins:
                 if plugin is None or plugin.parameters is None:
                     continue
@@ -575,39 +624,74 @@ class Modhandler(Handler):
                     if param.binding is not None:
                         controller = self.hardware.controllers.get(param.binding)
                         if controller is not None:
-                            # TODO possibly use a setter instead of accessing var directly
-                            # What if multiple params could map to the same controller?
-                            controller.parameter = param
-                            controller.set_value(param.value)
+                            routing = controller.get_routing_info()
+
+                            # External controllers shouldn't be bound to plugin parameters
+                            if routing.destination == RoutingDestination.EXTERNAL:
+                                logging.warning(
+                                    f"Plugin parameter {plugin.name}:{param.name} is bound to external controller "
+                                    f"{param.binding} (routed to {routing.port_name}) - ignoring plugin binding"
+                                )
+                                continue
+
+                            # Bind controller to parameter
+                            if isinstance(controller, EncoderController):
+                                taper = 2 if param.type == Type.LOGARITHMIC else 1
+                                controller.bind_to_parameter(param, taper)
+                            else:
+                                controller.parameter = param
+                                controller.set_value(param.value)
+
                             plugin.controllers.append(controller)
+
+                            # Add to display and track footswitches
                             if isinstance(controller, Footswitch):
-                                # TODO sort this list so selection orders correctly (sort on midi_CC?)
                                 plugin.has_footswitch = True
                                 footswitch_plugins.append(plugin)
                                 controller.set_category(plugin.category)
                             elif isinstance(controller, AnalogMidiControl):
                                 key = "%s:%s" % (plugin.instance_id, param.name)
-                                controller.cfg[Token.CATEGORY] = plugin.category  # somewhat LAME adding to cfg dict
-                                controller.cfg[Token.TYPE] = controller.type
-                                controller.cfg[Token.ID] = controller.id
-                                self.current.analog_controllers[key] = controller.cfg
-                            elif isinstance(controller, EncoderMidiControl):
+                                display_info = controller.get_display_info()
+                                display_info['category'] = plugin.category
+                                self.current.analog_controllers[key] = display_info
+                            elif isinstance(controller, (EncoderMidiControl, EncoderController)):
                                 key = "%s:%s" % (plugin.instance_id, param.name)
-                                controller.cfg[Token.CATEGORY] = plugin.category  # somewhat LAME adding to cfg dict
-                                controller.cfg[Token.TYPE] = controller.type
-                                controller.cfg[Token.ID] = controller.id
-                                self.current.analog_controllers[key] = controller.cfg
+                                display_info = controller.get_display_info()
+                                display_info['category'] = plugin.category
+                                self.current.analog_controllers[key] = display_info
 
-            # LAME special case for volume control
-            # Doesn't seem quite right to add this here, but it's where all the mapped controls are bound
+            # Special case for volume control
             for e in self.hardware.encoders:
                 if e.type == Token.VOLUME:
-                    cfg = {
-                        Token.CATEGORY : None,
-                        Token.TYPE : e.type,
-                        Token.ID : e.id
-                    }
-                    self.current.analog_controllers[Token.VOLUME] = cfg
+                    display_info = e.get_display_info()
+                    self.current.analog_controllers[Token.VOLUME] = display_info
+
+        # Handle all external controllers (create synthetic parameters for display)
+        for controller in self.hardware.controllers.values():
+            routing = controller.get_routing_info()
+            if routing.destination == RoutingDestination.EXTERNAL:
+                if isinstance(controller, (AnalogMidiControl, EncoderMidiControl, EncoderController)):
+                    if hasattr(controller, 'midi_CC') and controller.midi_CC is not None:
+                        # Create synthetic parameter for EncoderController if not already bound
+                        if isinstance(controller, EncoderController) and controller.parameter is None:
+                            ext_info = {
+                                Token.NAME: f"{routing.port_name} CC{controller.midi_CC}",
+                                Token.SYMBOL: f"external_{controller.midi_CC}",
+                                Token.RANGES: {
+                                    Token.MINIMUM: 0,
+                                    Token.MAXIMUM: 127
+                                },
+                                TTL_PROPERTIES: [TTL_INTEGER]
+                            }
+                            ext_param = Parameter(ext_info, controller.midi_value, None)
+                            controller.bind_to_parameter(ext_param, taper=1)
+                            logging.debug(f"Bound external controller to synthetic parameter: {ext_param.name}")
+
+                        # Add to display
+                        key = f"{controller.midi_channel}:{controller.midi_CC}"
+                        display_info = controller.get_display_info()
+                        display_info['category'] = 'External'
+                        self.current.analog_controllers[key] = display_info
 
     def pedalboard_change(self, pedalboard=None):
         logging.info("Pedalboard change")
@@ -785,6 +869,18 @@ class Modhandler(Handler):
             d = self.lcd.draw_parameter_dialog(param)
             if d:
                 self.lcd.enc_step_widget(d, direction)
+
+    def encoder_value_changed(self, param: Parameter, new_value: float) -> None:
+        self.lcd.queue_parameter_update(param, new_value)
+        if param.instance_id is None:
+            # External MIDI: already sent in encoder_controller.refresh(), just display
+            if param.symbol.startswith("external_"):
+                return
+            # Audio parameter (volume, EQ, etc.)
+            self.audio_parameter_commit(param.symbol, new_value)
+        else:
+            # Plugin parameter
+            self.parameter_value_commit(param, new_value)
 
     #
     # System Menu

@@ -23,6 +23,9 @@ import common.util as Util
 import pistomp.analogmidicontrol as AnalogMidiControl
 import pistomp.footswitch as Footswitch
 import pistomp.taptempo as taptempo
+from modalapi.external_midi import ExternalMidiOut
+import common.parameter as Parameter
+from common.parameter import TTL_PROPERTIES, TTL_INTEGER
 
 from abc import abstractmethod
 
@@ -127,11 +130,15 @@ class Hardware:
         # External MIDI configuration
         self.__init_external_midi_default()
 
+        # Encoder and analog controller configuration (update midiout for external routing)
+        self.__init_encoders_and_analog(self.cfg)
+
         # Pedalboard specific config
         if cfg is not None:
             self.__init_midi(cfg)
             self.__init_footswitches(cfg)
             self.__init_external_midi(cfg)
+            self.__init_encoders_and_analog(cfg)
 
     @abstractmethod
     def init_analog_controls(self):
@@ -220,16 +227,28 @@ class Hardware:
             if taptempo:
                 taptempo.set_callback(self.handler.get_callback(tap_tempo_callback))
 
+            # Configure external MIDI routing if specified
+            midi_port = Util.DICT_GET(f, "midi_port")
+            if midi_port:
+                midi_port = self.__validate_midi_port(midi_port)
+
+            # Create appropriate midiout (wrapper for external, or virtual port)
+            if midi_port:
+                midiout = ExternalMidiOut(self.external_midi, midi_port, midi_channel, self.midiout)
+                logging.info(f"Footswitch {idx} routing MIDI CC {midi_cc} to external port '{midi_port}'")
+            else:
+                midiout = self.midiout
+
             if adc_input is not None:
                 fs = Footswitch.Footswitch(id if id else idx, gpio_output, pixel, midi_cc, midi_channel,
-                                           self.midiout, refresh_callback=self.refresh_callback,
+                                           midiout, refresh_callback=self.refresh_callback,
                                            adc_input=adc_input, spi=self.spi,
                                            taptempo = taptempo)
                 logging.debug("Created Footswitch on ADC input: %d, Midi Chan: %d, CC: %s" %
                               (adc_input, midi_channel, midi_cc))
             elif gpio_input is not None:
                 fs = Footswitch.Footswitch(id if id else idx, gpio_output, pixel, midi_cc, midi_channel,
-                                           self.midiout, refresh_callback=self.refresh_callback,
+                                           midiout, refresh_callback=self.refresh_callback,
                                            gpio_input=gpio_input,
                                            taptempo = taptempo)
                 logging.debug("Created Footswitch on GPIO input: %d, Midi Chan: %d, CC: %s" %
@@ -265,15 +284,28 @@ class Hardware:
             if threshold is None:
                 threshold = 16  # Default, 1024 is full scale
 
+            # Configure external MIDI routing if specified
+            midi_port = Util.DICT_GET(c, "midi_port")
+            if midi_port:
+                midi_port = self.__validate_midi_port(midi_port)
+
+            # Create appropriate midiout (wrapper for external, or virtual port)
+            if midi_port:
+                midiout = ExternalMidiOut(self.external_midi, midi_port, midi_channel, self.midiout)
+                logging.info(f"Analog control {id} routing MIDI CC {midi_cc} to external port '{midi_port}'")
+            else:
+                midiout = self.midiout
+
             control = AnalogMidiControl.AnalogMidiControl(self.spi, adc_input, threshold, midi_cc, midi_channel,
-                                                          self.midiout, control_type, id, c)
+                                                          midiout, control_type, id)
+
             self.analog_controls.append(control)
             key = format("%d:%d" % (midi_channel, midi_cc))
             self.controllers[key] = control
             logging.debug("Created AnalogMidiControl Input: %d, Midi Chan: %d, CC: %d" %
                           (adc_input, midi_channel, midi_cc))
 
-    def add_encoder(self, id, type, callback, longpress_callback, midi_channel, midi_cc):
+    def add_encoder(self, id, type, callback, longpress_callback, midi_channel, midi_cc, shortpress_config=None, midiout=None):
         # This should be implemented by hardware subclasses that support tweak encoders (Tre at least)
         pass
     def create_encoders(self, cfg):
@@ -298,8 +330,21 @@ class Hardware:
                 logging.error("Config file error.  Encoder specified without %s" % Token.ID)
                 continue
 
+            # Configure external MIDI routing if specified
+            midi_port = Util.DICT_GET(c, "midi_port")
+            if midi_port:
+                midi_port = self.__validate_midi_port(midi_port)
+
+            # Create appropriate midiout (wrapper for external, or virtual port)
+            if midi_port:
+                midiout = ExternalMidiOut(self.external_midi, midi_port, midi_channel, self.midiout)
+                logging.info(f"Encoder {id} routing MIDI CC {midi_cc} to external port '{midi_port}'")
+            else:
+                midiout = self.midiout
+
             control = self.add_encoder(id, type, None, longpress_callback, midi_channel, midi_cc,
-                                       shortpress_config=shortpress_config)
+                                       shortpress_config=shortpress_config, midiout=midiout)
+
             self.encoders.append(control)
 
             if midi_cc is not None:
@@ -319,6 +364,97 @@ class Hardware:
 
     def __init_midi_default(self):
         self.__init_midi(self.cfg)
+
+    def _create_external_parameter(self, controller, port_name, midi_channel, midi_cc):
+        name = f"{port_name}:{midi_cc}"
+        info = {
+            Token.NAME: name,
+            Token.SYMBOL: f"external_{port_name}_{midi_cc}",
+            Token.RANGES: {
+                Token.MINIMUM: 0,
+                Token.MAXIMUM: 127
+            },
+            TTL_PROPERTIES: [TTL_INTEGER]
+        }
+        val = getattr(controller, 'midi_value', 0)
+        return Parameter.Parameter(info, val, f"{midi_channel}:{midi_cc}", "External")
+
+    def __init_encoders_and_analog(self, cfg):
+        """Update midiout for encoders and analog controllers based on config"""
+        if cfg is None:
+            return
+
+        midi_channel = self.get_real_midi_channel(cfg)
+
+        # Update encoders
+        if Token.HARDWARE in cfg and Token.ENCODERS in cfg[Token.HARDWARE]:
+            cfg_encoders = cfg[Token.HARDWARE][Token.ENCODERS]
+            if cfg_encoders:
+                for enc_cfg in cfg_encoders:
+                    enc_id = Util.DICT_GET(enc_cfg, Token.ID)
+                    if enc_id is None:
+                        continue
+
+                    # Find the encoder with this ID
+                    encoder = next((e for e in self.encoders if e.id == enc_id), None)
+                    if encoder is None:
+                        continue
+
+                    # Check for midi_port and midi_CC config
+                    midi_port = Util.DICT_GET(enc_cfg, "midi_port")
+                    if midi_port:
+                        midi_port = self.__validate_midi_port(midi_port)
+
+                    midi_cc = Util.DICT_GET(enc_cfg, Token.MIDI_CC)
+
+                    # Update midi_CC if specified
+                    if midi_cc is not None and hasattr(encoder, 'midi_CC'):
+                        encoder.midi_CC = midi_cc
+
+                    # Update midiout and parameter
+                    if midi_port:
+                        encoder.midiout = ExternalMidiOut(self.external_midi, midi_port, midi_channel, self.midiout)
+                        logging.debug(f"Encoder {enc_id} routing CC {midi_cc if midi_cc else 'N/A'} to external port '{midi_port}'")
+                        encoder.parameter = self._create_external_parameter(encoder, midi_port, midi_channel, midi_cc)
+                    else:
+                        encoder.midiout = self.midiout
+                        encoder.parameter = None
+                        logging.debug(f"Encoder {enc_id} routing to virtual port")
+
+        # Update analog controllers
+        if Token.HARDWARE in cfg and Token.ANALOG_CONTROLLERS in cfg[Token.HARDWARE]:
+            cfg_analog = cfg[Token.HARDWARE][Token.ANALOG_CONTROLLERS]
+            if cfg_analog:
+                for analog_cfg in cfg_analog:
+                    analog_id = Util.DICT_GET(analog_cfg, Token.ID)
+                    if analog_id is None:
+                        continue
+
+                    # Find the analog controller with this ID
+                    analog = next((a for a in self.analog_controls if a.id == analog_id), None)
+                    if analog is None:
+                        continue
+
+                    # Check for midi_port and midi_CC config
+                    midi_port = Util.DICT_GET(analog_cfg, "midi_port")
+                    if midi_port:
+                        midi_port = self.__validate_midi_port(midi_port)
+
+                    midi_cc = Util.DICT_GET(analog_cfg, Token.MIDI_CC)
+
+                    # Update midi_CC if specified
+                    if midi_cc is not None and hasattr(analog, 'midi_CC'):
+                        analog.midi_CC = midi_cc
+
+                    # Update midiout and parameter
+                    if midi_port:
+                        analog.midiout = ExternalMidiOut(self.external_midi, midi_port, midi_channel, self.midiout)
+                        logging.debug(f"Analog controller {analog_id} routing CC {midi_cc if midi_cc else 'N/A'} to external port '{midi_port}'")
+                        analog.parameter = self._create_external_parameter(analog, midi_port, midi_channel, midi_cc)
+                    else:
+                        analog.midiout = self.midiout
+                        analog.parameter = None
+                        logging.debug(f"Analog controller {analog_id} routing to virtual port")
 
     def __init_midi(self, cfg):
         self.midi_channel = self.get_real_midi_channel(cfg)
@@ -341,6 +477,39 @@ class Hardware:
         ext_cfg = cfg[Token.HARDWARE].get("external_midi")
         if ext_cfg:
             self.external_midi.update_config(ext_cfg)
+
+    def __validate_midi_port(self, port_name):
+        """
+        Validate that a midi_port name exists in external_midi configuration.
+        Returns validated port name or None if invalid/unavailable.
+
+        Args:
+            port_name: Port name from control config, or None.
+
+        Returns:
+            port_name if valid, None otherwise.
+        """
+        if port_name is None:
+            return None
+
+        # Check if external MIDI is available and enabled
+        if not hasattr(self, 'external_midi') or self.external_midi is None:
+            logging.error(
+                f"Control configured with midi_port '{port_name}' but external_midi not initialized. "
+                f"Falling back to virtual port."
+            )
+            return None
+
+        # Check if port exists in config
+        if port_name not in self.external_midi.port_configs:
+            available = list(self.external_midi.port_configs.keys()) if self.external_midi.port_configs else []
+            logging.error(
+                f"Control configured with midi_port '{port_name}' but port not found in external_midi config. "
+                f"Available ports: {available}. Falling back to virtual port."
+            )
+            return None
+
+        return port_name
 
     def __init_footswitches_default(self):
         for fs in self.footswitches:
@@ -390,6 +559,12 @@ class Hardware:
                         fs.set_midi_CC(cc)
                         key = format("%d:%d" % (self.midi_channel, fs.midi_CC))
                         self.controllers[key] = fs   # TODO problem if this creates a new element?
+
+                # External MIDI routing (midi_port field)
+                # Note: We can't change midiout after control creation, so midi_port
+                # changes in pedalboard config won't take effect. The wrapper is set
+                # during initial creation and is immutable. This is intentional -
+                # external routing is a hardware-level concern, not a pedalboard concern.
 
                 # Preset Control
                 if Token.PRESET in f:

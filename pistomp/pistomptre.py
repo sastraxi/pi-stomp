@@ -21,7 +21,7 @@ import common.token as Token
 import common.util as Util
 import pistomp.encoder as Encoder
 import pistomp.encoderconfig as encoderconfig
-import pistomp.encodermidicontrol as EncoderMidiControl
+import pistomp.encoder_controller as EncoderController
 import pistomp.gpioswitch as gpioswitch
 import pistomp.hardware as hardware
 import pistomp.ledstrip as Ledstrip
@@ -89,10 +89,14 @@ class Pistomptre(hardware.Hardware):
         #self.reinit(None)  # TODO do we still need this?  Maybe after pb load?  mappings?
 
     def init_lcd(self):
-        self.handler.add_lcd(Lcd.Lcd(self.handler.homedir, self.handler, flip=False))
+        # LCD SPI speed: 24 MHz (spec), 56 MHz tested stable (opt-in via system menu)
+        spi_speed = self.handler.settings.get_setting('lcd.spi_speed_mhz')
+        if spi_speed is None:
+            spi_speed = 24  # Default to spec
+        self.handler.add_lcd(Lcd.Lcd(self.handler.homedir, self.handler, flip=False, spi_speed_mhz=spi_speed))
 
     def add_encoder(self, id, type, callback, longpress_callback, midi_channel, midi_cc,
-                    shortpress_config=None):
+                    shortpress_config=None, midiout=None):
         enc_pins = Util.DICT_GET(ENC, id)
         if enc_pins is None:
             logging.error("Cannot create encoder object for id:", id)
@@ -103,14 +107,20 @@ class Pistomptre(hardware.Hardware):
         clk_pin = Util.DICT_GET(enc_pins, 'CLK')
         sw_pin = Util.DICT_GET(enc_pins, 'SW')
 
+        # Use provided midiout or fallback to self.midiout
+        if midiout is None:
+            midiout = self.midiout
+
         if type == Token.VOLUME:
-            enc = Encoder.Encoder(d_pin, clk_pin, callback=self.handler.system_menu_headphone_volume,
-                                  type=type, id=id)
+            # Volume encoder: EncoderController with callback (no MIDI, uses callback for audio control)
+            enc = EncoderController.EncoderController(self.handler, d_pin=d_pin, clk_pin=clk_pin,
+                                                      midi_channel=midi_channel, midi_CC=None,
+                                                      midiout=midiout, type=type, id=id)
         else:
-            enc = EncoderMidiControl.EncoderMidiControl(self.handler, d_pin=d_pin, clk_pin=clk_pin,
-                                                        callback=callback,
-                                                        midi_channel=midi_channel, midi_CC=midi_cc,
-                                                        midiout=self.midiout, type=Token.KNOB, id=id)
+            # Tweak encoders: EncoderController with MIDI for parameter control
+            enc = EncoderController.EncoderController(self.handler, d_pin=d_pin, clk_pin=clk_pin,
+                                                      midi_channel=midi_channel, midi_CC=midi_cc,
+                                                      midiout=midiout, type=Token.KNOB, id=id)
 
         if sw_pin is not None:
             parsed = encoderconfig.parse_shortpress_config(shortpress_config)
