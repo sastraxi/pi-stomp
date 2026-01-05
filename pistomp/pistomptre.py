@@ -20,7 +20,6 @@ import pistomp.analogVU as AnalogVU
 import common.token as Token
 import common.util as Util
 import pistomp.encoder as Encoder
-import pistomp.encoderconfig as encoderconfig
 import pistomp.encoder_controller as EncoderController
 import pistomp.gpioswitch as gpioswitch
 import pistomp.hardware as hardware
@@ -95,8 +94,7 @@ class Pistomptre(hardware.Hardware):
             spi_speed = 24  # Default to spec
         self.handler.add_lcd(Lcd.Lcd(self.handler.homedir, self.handler, flip=False, spi_speed_mhz=spi_speed))
 
-    def add_encoder(self, id, type, callback, longpress_callback, midi_channel, midi_cc,
-                    shortpress_config=None, midiout=None):
+    def add_encoder(self, id, type, callback, longpress_callback, midi_channel, midi_cc, midiout=None):
         enc_pins = Util.DICT_GET(ENC, id)
         if enc_pins is None:
             logging.error("Cannot create encoder object for id:", id)
@@ -123,18 +121,9 @@ class Pistomptre(hardware.Hardware):
                                                       midiout=midiout, type=Token.KNOB, id=id)
 
         if sw_pin is not None:
-            parsed = encoderconfig.parse_shortpress_config(shortpress_config)
-            shortpress_callback = self.handler.get_callback(parsed.callback_name)
-            longpress_callback_obj = self.handler.get_callback(longpress_callback)
-
-            enc_sw = gpioswitch.GpioSwitch(
-                sw_pin,
-                midi_channel,
-                midi_cc,
-                callback=shortpress_callback,
-                callback_arg=parsed.callback_arg,
-                longpress_callback=longpress_callback_obj
-            )
+            longpress = self.handler.get_callback(longpress_callback)
+            enc_sw = gpioswitch.GpioSwitch(sw_pin, None, None, callback=self.handler.universal_encoder_sw,
+                                           longpress_callback=longpress)
             self.encoder_switches.append(enc_sw)
 
         return enc

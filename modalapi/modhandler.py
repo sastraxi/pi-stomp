@@ -25,7 +25,6 @@ import yaml
 from typing import Any
 
 from pathlib import Path
-from rtmidi.midiconstants import CONTROL_CHANGE
 
 import common.token as Token
 import common.util as util
@@ -129,7 +128,6 @@ class Modhandler(Handler):
                           "previous_snapshot": self.preset_decr_and_change,
                           "toggle_bypass": self.system_toggle_bypass,
                           "toggle_tap_tempo_enable": self.toggle_tap_tempo_enable,
-                          "send_midi_cc": self.send_midi_cc,
                           "universal_encoder_sw": self.universal_encoder_sw
         }
 
@@ -266,24 +264,6 @@ class Modhandler(Handler):
     def universal_encoder_sw(self, value, obj=None):
         if self.lcd is not None:
             self.lcd.enc_sw(value)
-
-    def send_midi_cc(self, state, cc):
-        """
-        Send MIDI CC message from encoder button press.
-
-        Config example:
-            shortpress:
-              callback: send_midi_cc
-              args: {cc: 72}
-        """
-        if self.hardware is None or self.hardware.midiout is None:
-            logging.warning("send_midi_cc: midiout not available")
-            return
-
-        midi_channel = self.hardware.midi_channel
-        cc_msg = [midi_channel | CONTROL_CHANGE, cc & 0x7F, 127]
-        logging.debug("send_midi_cc: sending %s" % cc_msg)
-        self.hardware.midiout.send_message(cc_msg)
 
     def _handle_blend_mode_snapshot_change(self, new_snapshot_index: int):
         """
