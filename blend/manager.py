@@ -176,8 +176,8 @@ class BlendMode:
         """
         Activate blend mode (attach to input).
 
-        Called when switching to this blend snapshot. Does NOT call sync_analog_controls()
-        to avoid WebSocket flood - the control will send its position naturally when moved.
+        Called when switching to this blend snapshot. Immediately syncs current
+        input position to set all parameters, since the blend snapshot is empty.
         """
         if not self.input_controller:
             raise RuntimeError("Cannot activate - blend mode not prepared")
@@ -192,6 +192,10 @@ class BlendMode:
             self.handler.hardware.encoders,
             input_id
         )
+
+        # Immediately sync current input position to set all parameters
+        # (blend snapshot is empty, so we need to establish initial state)
+        self.input_controller.sync_current_position()
 
         logging.info(f"Activated blend mode: '{self.config.get('name')}'")
 
