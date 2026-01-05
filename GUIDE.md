@@ -387,18 +387,21 @@ GET  /get_bpm                            # Get current BPM
 **LCD System**:
 - **v1**: `lcdgfx.py` - Monochrome text display
 - **v2/v3**: `lcd320x240.py` - Color GUI with widget-based UI library (`uilib/`)
-  - ILI9341 controller, 320×240 RGB, 24MHz SPI (`uilib/lcd_ili9341.py`)
+  - ILI9341 controller, 320×240 RGB, configurable SPI speed (`uilib/lcd_ili9341.py`)
   - Builder pattern constructs UI from pedalboard data
   - Event-driven updates via `link_data()`
   - **ParameterDialog**: Driven by `Parameter` object (encapsulates formatting/taper)
 
 **LCD Performance**:
-- **Refresh rate**: 5Hz (200ms poll in `modalapistomp.py:156`)
-- **Partial updates supported**: `widget.refresh()` updates bounding box only
-- **Current pattern**: `panel.refresh()` redraws entire panel (320×170 or 320×64)
-- **Optimization**: Call `widget.refresh()` for small changes (footswitch, parameter value)
-  - Single widget (~60×40): ~100Hz capable vs 5Hz panel refresh
-  - Trade-off: CPU overhead vs visual responsiveness
+- **SPI Speed**: User-configurable via System Menu → LCD Speed (restarts service)
+  - 24 MHz (ILI9341 spec, safe) → 80ms full refresh
+  - 48 MHz → 40ms full refresh
+  - 56 MHz → 30ms full refresh
+  - 80 MHz → 24ms full refresh
+- **Polling**: Adapts automatically to SPI speed (`lcd.poll_divisor`)
+- **Optimization**: Use `widget.refresh()` for low-latency updates (parameter value, footswitch state)
+  - Full panel refresh still too slow for real-time - partial updates critical
+  - Widget-only refresh: <10ms even at slow speeds
 - **Thread safety**: `lcd_ili9341.py` uses lock - avoid blocking in refresh path
 
 **Controller Architecture** (`pistomp/controller.py`):
