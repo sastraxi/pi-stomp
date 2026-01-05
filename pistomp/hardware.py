@@ -323,7 +323,6 @@ class Hardware:
             type = Util.DICT_GET(c, Token.TYPE)
             midi_cc = Util.DICT_GET(c, Token.MIDI_CC)
             longpress_callback = Util.DICT_GET(c, Token.LONGPRESS)
-            shortpress_config = Util.DICT_GET(c, Token.SHORTPRESS)
 
             if id is None:
                 logging.error("Config file error.  Encoder specified without %s" % Token.ID)
@@ -341,9 +340,7 @@ class Hardware:
             else:
                 midiout = self.midiout
 
-            control = self.add_encoder(id, type, None, longpress_callback, midi_channel, midi_cc,
-                                       shortpress_config=shortpress_config, midiout=midiout)
-
+            control = self.add_encoder(id, type, None, longpress_callback, midi_channel, midi_cc, midiout=midiout)
             self.encoders.append(control)
 
             if midi_cc is not None:
