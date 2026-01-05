@@ -964,6 +964,9 @@ class Lcd(abstract_lcd.Lcd):
 
     def update_clip_indicators(self, clip_left, clip_right):
         """Update clip indicator colors based on clipping state."""
+        if self.w_clip_left is None or self.w_clip_right is None:
+            return
+
         # Left channel
         if clip_left:
             self.w_clip_left.set_foreground((255, 0, 0))  # Red when clipping
