@@ -333,7 +333,8 @@ class Modhandler(Handler):
 
         elif isinstance(msg, OutputSetMessage):
             # Route to clipping monitor for meter plugin output monitoring
-            # logging.debug(f"Got output set message: {msg.instance_id} {msg.port_symbol} {msg.value}")
+            if "mono_1" in msg.instance_id or "mono_2" in msg.instance_id:
+                logging.info(f"TINYGAIN output_set: id='{msg.instance_id}' port='{msg.port_symbol}' value={msg.value}")
             if self.clipping_monitor is not None:
                 self.clipping_monitor.handle_output_set(msg.instance_id, msg.port_symbol, msg.value)
 
