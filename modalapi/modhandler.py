@@ -171,6 +171,8 @@ class Modhandler(Handler):
         self.hardware = hardware
         # Pass external MIDI manager to hardware for config updates
         hardware.external_midi = self.external_midi
+        if hardware.taptempo:
+            hardware.taptempo.external_midi = self.external_midi
         # Bind volume encoder to audio parameter
         self.bind_volume_encoder()
 

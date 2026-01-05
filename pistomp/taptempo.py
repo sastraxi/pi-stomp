@@ -25,6 +25,7 @@ class TapTempo:
         self.timestamps = deque()
         self.taptempo = 0
         self.callback = callback
+        self.external_midi = None
         self.enabled = False
 
     def __calc_tempo(self):
@@ -74,6 +75,10 @@ class TapTempo:
     def stamp(self, t):
         if not self.enabled:
             return
+
+        if self.external_midi:
+            self.external_midi.send_tap_tempo()
+
         self.timestamps.append(t)
         if len(self.timestamps) > TAP_TEMPO_SAMPLES:
             self.timestamps.popleft()

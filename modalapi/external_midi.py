@@ -78,32 +78,24 @@ class ExternalMidiOut:
 
 
 class PortConfig(TypedDict, total=False):
-    """Configuration for a MIDI port."""
-
     auto_detect: list[str]
     port_index: int
+    tap_tempo_cc: int
 
 
 class ExternalMidiConfig(TypedDict, total=False):
-    """External MIDI configuration (part of hardware config)."""
-
     enabled: bool
     send_delay_ms: int
     ports: dict[str, PortConfig]
-    messages: dict[str, list[MidiMessage]]  # port_name -> list of MIDI messages
+    messages: dict[str, list[MidiMessage]]
 
 
 class ExternalMidiManager:
     """
-    Manages external MIDI device synchronization.
-    Sends MIDI messages to external devices when pedalboards are loaded.
+    Manages external MIDI output ports and sending messages based on configuration.
     """
 
     def __init__(self):
-        """
-        Initialize the External MIDI Manager.
-        Configuration will be provided via update_config() method.
-        """
         self.midi_ports: dict[str, rtmidi.MidiOut | None] = {}
         self.port_configs: dict[str, PortConfig] = {}
         self.messages: dict[str, list[MidiMessage]] = {}
@@ -111,17 +103,6 @@ class ExternalMidiManager:
         self.send_delay_ms: int = 10
 
     def update_config(self, cfg: ExternalMidiConfig | None) -> None:
-        """
-        Update configuration incrementally (can be called multiple times).
-        Follows the same pattern as footswitch config - only updates fields that are present.
-
-        Called from hardware.reinit():
-        - First with default config (sets everything)
-        - Then with pedalboard config (overlays only what's specified)
-
-        Args:
-            cfg: External MIDI configuration from hardware config, or None to skip.
-        """
         if cfg is None:
             return
 
@@ -392,6 +373,28 @@ class ExternalMidiManager:
             self._send_messages(port_name, messages, self.send_delay_ms)
 
         return True
+
+    def send_tap_tempo(self):
+        """Send tap tempo trigger (CC value 127) to all ports with tap_tempo_cc configured."""
+        if not self.enabled:
+            return
+
+        ports_with_tap = [
+            (name, cfg["tap_tempo_cc"]) for name, cfg in self.port_configs.items() if "tap_tempo_cc" in cfg
+        ]
+        if not ports_with_tap:
+            return
+
+        for port_name, tap_cc in ports_with_tap:
+            midi_out = self._init_port(port_name)
+            if midi_out is None:
+                continue
+
+            try:
+                midi_out.send_message([0xB0, tap_cc, 127])
+                logging.debug(f"Sent tap tempo trigger to {port_name}: CC={tap_cc}")
+            except Exception as e:
+                logging.error(f"Failed to send tap tempo to {port_name}: {e}")
 
     def close(self):
         """

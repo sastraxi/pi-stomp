@@ -97,6 +97,7 @@ hardware:
   #   <port_name>:
   #     auto_detect: [<patterns>]   List of glob patterns to match port names (case-insensitive)
   #     port_index: <integer>       Manual port index (overrides auto_detect)
+  #     tap_tempo_cc: <integer>     MIDI CC for tap tempo triggers (0-127, optional)
   #
   # messages:                       MIDI messages to send for each port
   #   <port_name>:
@@ -110,8 +111,10 @@ hardware:
   #   ports:
   #     c4:
   #       auto_detect: ["*C4*", "*Source Audio*"]
+  #       tap_tempo_cc: 93          # Source Audio C4 tap tempo CC (default)
   #     hx_stomp:
   #       auto_detect: ["*HX Stomp*"]
+  #       tap_tempo_cc: 64          # HX Stomp tap tempo CC
   #   messages:
   #     c4:
   #       - [0xB0, 0x66, 0x00]      # CC 102 = 0 (bypass)
@@ -121,6 +124,11 @@ hardware:
   # MIDI message formats:
   #   Program Change: [0xCn, program]        where n = channel (0-F)
   #   Control Change: [0xBn, cc, value]      where n = channel (0-F)
+  #
+  # Tap Tempo:
+  #   When a footswitch with tap_tempo: set_mod_tap_tempo is pressed, a trigger
+  #   message (CC with value 127) is sent to all ports with tap_tempo_cc configured.
+  #   External devices calculate tempo from the timing of these trigger messages.
   #
   # Per-pedalboard override example (<pedalboard>.pedalboard/config.yml):
   #   hardware:

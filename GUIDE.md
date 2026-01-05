@@ -157,7 +157,9 @@ Shortpress accepts string (callback name) or object with `callback` and `args` (
 
 - Pedalboard load triggers MIDI messages to external devices (e.g., Source Audio C4)
 - Configured via `hardware.external_midi` in default config and per-pedalboard config.yml
-- **UI Integration**: routed controls get synthetic `Parameter` objects (INTEGER, 0-127) for LCD feedback.
+- **Tap Tempo**: Each tap sends trigger (CC value 127) to all ports with `tap_tempo_cc` configured
+- **UI Integration**: External controllers get synthetic `Parameter` objects (INTEGER, 0-127) for LCD feedback
+- External controllers cannot bind to plugin parameters (warns and ignores if configured)
 - See `setup/config_templates/default_config_pistomptre.yml` for example configuration
 
 ### Analog Control State Sync

@@ -228,6 +228,8 @@ class Mod(Handler):
         self.hardware = hardware
         # Pass external MIDI manager to hardware for config updates
         hardware.external_midi = self.external_midi
+        if hardware.taptempo:
+            hardware.taptempo.external_midi = self.external_midi
 
     def add_lcd(self, lcd):
         self.lcd = lcd
