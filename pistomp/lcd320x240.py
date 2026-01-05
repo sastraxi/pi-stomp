@@ -31,6 +31,9 @@ from pistomp.footswitch import Footswitch  # TODO would like to avoid this modul
 
 #import traceback
 
+# Parameter dialog auto-dismiss timeout (seconds)
+PARAMETER_DIALOG_TIMEOUT = 1.0
+
 class Lcd(abstract_lcd.Lcd):
 
     def __init__(self, cwd, handler=None, flip=False):
@@ -45,7 +48,7 @@ class Lcd(abstract_lcd.Lcd):
                              digitalio.DigitalInOut(board.CE0),
                              digitalio.DigitalInOut(board.D6),
                              digitalio.DigitalInOut(board.D5),
-                             48_000_000,
+                             56_000_000,  # Verified stable: 33.6ms per frame
                              flip)
 
         # Colors
@@ -469,13 +472,13 @@ class Lcd(abstract_lcd.Lcd):
 
     def _render_parameter_update(self, parameter: Parameter.Parameter, value: float) -> None:
         """Render queued parameter update (called from poll_updates)."""
-        d = self.draw_parameter_dialog(parameter, timeout=2)
+        d = self.draw_parameter_dialog(parameter, timeout=PARAMETER_DIALOG_TIMEOUT)
         if d:
             d.update_value(value)
 
     def display_parameter_value(self, parameter: Parameter.Parameter, value: float) -> None:
         """Update parameter dialog with new value (controller already calculated it)."""
-        d = self.draw_parameter_dialog(parameter, timeout=2)
+        d = self.draw_parameter_dialog(parameter, timeout=PARAMETER_DIALOG_TIMEOUT)
         if d:
             d.update_value(value)
 
@@ -635,7 +638,7 @@ class Lcd(abstract_lcd.Lcd):
         param.unit_symbol = "dB"
 
         d = Parameterdialog(self.pstack, param,
-                            width=270, height=130, auto_destroy=True, title=name, timeout=2.2,
+                            width=270, height=130, auto_destroy=True, title=name, timeout=PARAMETER_DIALOG_TIMEOUT,
                             margin=8, action=commit_callback, object=symbol)
         self.w_parameter_dialogs[symbol] = d
         self.pstack.push_panel(d)
@@ -658,7 +661,7 @@ class Lcd(abstract_lcd.Lcd):
         param = Parameter.Parameter(info, value, None)
 
         d = Parameterdialog(self.pstack, param,
-                            width=270, height=130, auto_destroy=False, title=name, timeout=2.2,
+                            width=270, height=130, auto_destroy=False, title=name, timeout=PARAMETER_DIALOG_TIMEOUT,
                             margin=8,
                             action=commit_callback, object=symbol)
         self.pstack.push_panel(d)
