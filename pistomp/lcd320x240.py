@@ -237,7 +237,7 @@ class Lcd(abstract_lcd.Lcd):
                     if snapshot_name and snapshot_name != icon.text:
                         icon.set_text(snapshot_name)
                 else:
-                    logger.warning("BlendMode icon has no associated input controller")
+                    logging.warning("BlendMode icon has no associated input controller")
 
             if midi_value is not None:
                 progress = midi_value / 127.0

@@ -184,7 +184,8 @@ class SnapshotManager:
         Sync blend snapshots with current configuration.
 
         Creates/recreates all blend snapshots defined in config. Each blend snapshot
-        is created from its first stop to prevent parameter drift.
+        contains ONLY parameters that differ between stops, preventing conflicts with
+        user edits to non-interpolated parameters.
 
         Args:
             bundle_path: Path to pedalboard bundle directory
@@ -215,55 +216,46 @@ class SnapshotManager:
                 logging.warning("Blend config missing 'name', skipping")
                 continue
 
-            # Remove existing snapshot with same name (for recreation)
+            # Check if blend snapshot already exists
             existing_idx = None
+            existing_snapshot = None
             for i, snapshot in enumerate(snapshots_data.get('snapshots', [])):
                 if snapshot.get('name') == snapshot_name:
                     existing_idx = i
+                    existing_snapshot = snapshot
                     break
 
-            if existing_idx is not None:
-                logging.debug(f"Removing old '{snapshot_name}' snapshot for recreation")
-                snapshots_data['snapshots'].pop(existing_idx)
-                snapshots_modified = True
-
-            # Get stops and find first one
+            # Get stops configuration for validation
             stops_config = blend_cfg.get('stops')
             if not stops_config:
                 logging.warning(f"Blend snapshot '{snapshot_name}' missing 'stops', skipping")
                 continue
 
-            # Normalize stops to dict format (handle list)
-            if isinstance(stops_config, list):
-                if len(stops_config) < 2:
-                    logging.warning(f"Blend snapshot '{snapshot_name}' needs at least 2 stops, skipping")
-                    continue
-                # List format: use first entry
-                first_identifier = stops_config[0]
-            elif isinstance(stops_config, dict):
-                if len(stops_config) < 2:
-                    logging.warning(f"Blend snapshot '{snapshot_name}' needs at least 2 stops, skipping")
-                    continue
-                # Dict format: find stop with lowest position
-                sorted_stops = sorted(stops_config.items(), key=lambda x: float(x[0]))
-                first_identifier = sorted_stops[0][1]
-            else:
-                logging.warning(f"Blend snapshot '{snapshot_name}' has invalid 'stops' format, skipping")
+            # Validate stops count
+            stop_count = len(stops_config)
+            if stop_count < 2:
+                logging.warning(f"Blend snapshot '{snapshot_name}' needs at least 2 stops, skipping")
                 continue
 
-            # Resolve first stop identifier to snapshot index
-            try:
-                first_stop_index = SnapshotManager.resolve_snapshot_identifier(snapshots_data, first_identifier)
-                first_stop_snapshot = snapshots_data['snapshots'][first_stop_index]
-            except (ValueError, IndexError) as e:
-                logging.warning(f"Failed to resolve first stop '{first_identifier}' for '{snapshot_name}': {e}")
-                continue
+            # Check if existing snapshot is already correct (empty)
+            if existing_snapshot is not None:
+                if not existing_snapshot.get('data'):
+                    # Already exists and is empty - no need to recreate
+                    logging.debug(f"Blend snapshot '{snapshot_name}' already exists and is empty (index {existing_idx})")
+                    snapshot_indices[snapshot_name] = existing_idx
+                    continue
+                else:
+                    # Exists but has stale data - remove it
+                    logging.info(f"Removing blend snapshot '{snapshot_name}' with stale data for recreation")
+                    snapshots_data['snapshots'].pop(existing_idx)
+                    snapshots_modified = True
 
-            # Create new blend snapshot by deep copying first stop
-            logging.info(f"Creating blend snapshot '{snapshot_name}' from '{first_stop_snapshot['name']}'")
+            # Create EMPTY blend snapshot - blend mode will set all parameters via WebSocket
+            # This avoids conflicts with MOD-UI's in-memory snapshot cache
+            logging.info(f"Creating empty blend snapshot '{snapshot_name}'")
             blend_snapshot: SnapshotData = {
                 'name': snapshot_name,
-                'data': copy.deepcopy(first_stop_snapshot['data'])
+                'data': {}  # Completely empty - no parameters at all
             }
 
             # Append new snapshot
@@ -272,7 +264,7 @@ class SnapshotManager:
             snapshot_indices[snapshot_name] = new_idx
             snapshots_modified = True
 
-            logging.info(f"Created blend snapshot '{snapshot_name}' at index {new_idx}")
+            logging.debug(f"Created blend snapshot '{snapshot_name}' at index {new_idx}")
 
         # Write updated snapshots if any changes were made
         if snapshots_modified:
