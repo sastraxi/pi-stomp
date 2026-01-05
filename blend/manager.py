@@ -95,22 +95,22 @@ class BlendMode:
         # Snapshot file monitoring (for detecting stop modifications)
         self.snapshots_file_timestamp: float = 0
 
-    def initialize(self) -> None:
+    def prepare(self) -> None:
         """
-        Initialize blend mode with pre-computation optimization.
+        Prepare blend mode (one-time setup when pedalboard loads).
 
         Pre-computes enriched diff maps for each segment at initialization
         to minimize work in the critical path (pedal movement).
 
-        Orchestrates initialization:
+        Steps:
         1. Validate config and resolve interpolation function
         2. Load and parse snapshots
         3. Create stops
         4. PRE-COMPUTE: Build enriched diff maps for each segment
         5. Initialize parameter setter
-        6. Initialize and attach pedal controller
+        6. Initialize input controller (but don't attach yet)
         """
-        logging.info("Initializing blend mode...")
+        logging.info("Preparing blend mode...")
 
         try:
             # Validate configuration and resolve interpolation function
@@ -154,7 +154,7 @@ class BlendMode:
             # Initialize parameter setter (uses shared WebSocket bridge from handler)
             self.parameter_setter = ParameterSetter(self.handler.ws_bridge)
 
-            # Initialize and attach input controller
+            # Initialize input controller (but don't attach yet)
             input_id = self.config.get("input_id")
             if input_id is None:
                 raise ValueError("Blend mode requires 'input_id' config")
@@ -166,19 +166,59 @@ class BlendMode:
                 self.parameter_setter,
             )
 
-            # Attach to analog input (expression pedal or encoder)
-            self.input_controller.attach_to_input(
-                self.handler.hardware.analog_controls, self.handler.hardware.encoders, input_id
-            )
-
-            # Sync current pedal position to trigger initial interpolation
-            self.handler.hardware.sync_analog_controls()
-
-            logging.info(f"Blend mode initialized with {len(self.stops)} stops")
+            logging.info(f"Blend mode prepared with {len(self.stops)} stops")
 
         except Exception as e:
-            logging.error(f"Failed to initialize blend mode: {e}")
+            logging.error(f"Failed to prepare blend mode: {e}")
             raise
+
+    def activate(self) -> None:
+        """
+        Activate blend mode (attach to input).
+
+        Called when switching to this blend snapshot. Does NOT call sync_analog_controls()
+        to avoid WebSocket flood - the control will send its position naturally when moved.
+        """
+        if not self.input_controller:
+            raise RuntimeError("Cannot activate - blend mode not prepared")
+
+        input_id = self.config.get("input_id")
+        if input_id is None:
+            raise ValueError("Blend mode requires 'input_id' config")
+
+        # Attach to analog input (expression pedal or encoder)
+        self.input_controller.attach_to_input(
+            self.handler.hardware.analog_controls,
+            self.handler.hardware.encoders,
+            input_id
+        )
+
+        logging.info(f"Activated blend mode: '{self.config.get('name')}'")
+
+    def deactivate(self) -> None:
+        """
+        Deactivate blend mode (detach from input).
+
+        Called when switching away from this blend snapshot. Keeps everything
+        prepared so it can be quickly re-activated.
+        """
+        if not self.input_controller:
+            return
+
+        # Clear any pending parameter updates to prevent stale messages
+        if self.handler.ws_bridge:
+            cleared = self.handler.ws_bridge.clear_queue()
+            if cleared > 0:
+                logging.debug(f"Cleared {cleared} pending WebSocket messages")
+
+        # Detach from input
+        self.input_controller.detach_from_input()
+
+        # Reset tracking state
+        if self.parameter_setter:
+            self.parameter_setter.reset_tracking()
+
+        logging.info(f"Deactivated blend mode: '{self.config.get('name')}'")
 
     def _normalize_stops_config(self, stops_config: dict[str, int | str] | list[str | int]) -> NormalizedStops:
         """
@@ -422,7 +462,7 @@ class BlendMode:
 
     def check_for_snapshot_changes(self) -> None:
         """
-        Check if snapshots.json has been modified and reinitialize if needed.
+        Check if snapshots.json has been modified and re-prepare if needed.
 
         This detects when stop snapshots are edited in MOD-UI, allowing
         blend mode to pick up the new parameter values without requiring
@@ -444,16 +484,32 @@ class BlendMode:
 
         # Check if file was modified
         if current_timestamp != self.snapshots_file_timestamp:
-            logging.info("Snapshots file modified, resyncing blend snapshot and reloading...")
+            logging.info("Snapshots file modified, resyncing blend snapshot and re-preparing...")
+
+            # Check if currently active
+            was_active = (self.input_controller and
+                         self.input_controller.controlled_input is not None)
+
+            # Deactivate if active
+            if was_active:
+                self.deactivate()
 
             # Re-sync the blend snapshot (recreates from updated stops)
-            SnapshotManager.sync_blend_snapshot(bundle_path, self.config, self.handler.root_uri)
+            SnapshotManager.sync_blend_snapshots(
+                bundle_path,
+                [self.config],
+                self.handler.root_uri
+            )
 
-            # Reinitialize: cleanup then initialize again
-            self.cleanup()
-            self.initialize()
+            # Re-prepare with new stop data (recomputes diff maps)
+            self.cleanup()  # Full cleanup
+            self.prepare()  # Re-prepare
+
+            # Reactivate if it was active
+            if was_active:
+                self.activate()
 
             # Update timestamp AFTER sync (sync writes the file, changing timestamp)
             self.snapshots_file_timestamp = SnapshotManager.get_snapshots_file_timestamp(bundle_path)
 
-            logging.info("Blend mode reloaded successfully")
+            logging.info("Blend mode re-prepared successfully")
