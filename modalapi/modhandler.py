@@ -268,16 +268,14 @@ class Modhandler(Handler):
         if self.active_blend_mode:
             old_name = self.active_blend_mode.config.get('name')
             if old_name != new_snapshot_name:
-                logging.info(f"Deactivating blend mode: '{old_name}'")
-                self.active_blend_mode.cleanup()
+                self.active_blend_mode.deactivate()
                 self.active_blend_mode = None
 
         # Activate new blend mode if switching to a blend snapshot
         if new_snapshot_name in self.blend_modes:
             self.active_blend_mode = self.blend_modes[new_snapshot_name]
-            logging.info(f"Activating blend mode: '{new_snapshot_name}'")
             try:
-                self.active_blend_mode.initialize()
+                self.active_blend_mode.activate()
             except Exception as e:
                 logging.error(f"Failed to activate blend mode '{new_snapshot_name}': {e}")
                 self.active_blend_mode = None
@@ -489,7 +487,7 @@ class Modhandler(Handler):
                 self.root_uri
             )
 
-            # Initialize BlendMode instances for each blend snapshot
+            # Create and prepare BlendMode instances for each blend snapshot
             from blend import BlendMode
             for blend_cfg in blend_configs:
                 snapshot_name = blend_cfg.get('name')
@@ -497,6 +495,7 @@ class Modhandler(Handler):
                     continue
 
                 blend_mode = BlendMode(self, blend_cfg)
+                blend_mode.prepare()  # One-time setup: compute diff maps, create controllers
                 self.blend_modes[snapshot_name] = blend_mode
                 logging.info(f"Prepared blend mode: '{snapshot_name}'")
 
@@ -508,11 +507,7 @@ class Modhandler(Handler):
                 if first_snapshot_idx is not None:
                     logging.info(f"Auto-switching to first blend snapshot: '{first_snapshot_name}' (index {first_snapshot_idx})")
                     self.preset_change(first_snapshot_idx)
-
-                    # Activate the first blend mode
-                    self.active_blend_mode = self.blend_modes[first_snapshot_name]
-                    self.active_blend_mode.initialize()
-                    logging.info(f"Activated blend mode: '{first_snapshot_name}'")
+                    # Note: preset_change calls _handle_blend_mode_snapshot_change which activates the blend mode
 
         except Exception as e:
             logging.error(f"Failed to prepare blend modes: {e}")
