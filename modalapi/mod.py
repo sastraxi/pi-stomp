@@ -29,7 +29,7 @@ import common.token as Token
 import common.util as util
 import pistomp.switchstate as switchstate
 import modalapi.pedalboard as Pedalboard
-import modalapi.parameter as Parameter
+import common.parameter as Parameter
 import modalapi.wifi as Wifi
 import modalapi.external_midi as ExternalMidi
 from blend.snapshot import SnapshotManager
@@ -38,6 +38,7 @@ from modalapi.ws_protocol import parse_message, LoadingEndMessage, PedalSnapshot
 from modalapi.pedalboard_monitor import PedalboardMonitor
 
 from pistomp.analogmidicontrol import AnalogMidiControl
+from pistomp.controller import RoutingDestination
 from pistomp.footswitch import Footswitch
 from pistomp.handler import Handler
 from pathlib import Path
@@ -698,6 +699,14 @@ class Mod(Handler):
         # "current" being the pedalboard mod-host says is current
         # The pedalboard data has already been loaded, but this will overlay
         # any real time settings
+
+        # Clear previous parameter bindings from all controllers
+        for controller in self.hardware.controllers.values():
+            controller.parameter = None
+
+        # Clear analog controllers display data
+        self.current.analog_controllers = {}
+
         footswitch_plugins = []
         if self.current.pedalboard:
             #logging.debug(self.current.pedalboard.to_json())
@@ -708,6 +717,20 @@ class Mod(Handler):
                     if param.binding is not None:
                         controller = self.hardware.controllers.get(param.binding)
                         if controller is not None:
+                            routing = controller.get_routing_info()
+
+                            # Skip binding if controller is routed to external MIDI port
+                            if routing.destination == RoutingDestination.EXTERNAL:
+                                logging.debug(f"Skipping parameter binding for controller {param.binding} "
+                                            f"(routed to external port '{routing.port_name}')")
+                                # Add to LCD display with external port info
+                                if isinstance(controller, AnalogMidiControl):
+                                    # Use binding key format (channel:cc) for external controls
+                                    display_info = controller.get_display_info()
+                                    key = param.binding
+                                    self.current.analog_controllers[key] = display_info
+                                continue
+
                             # TODO possibly use a setter instead of accessing var directly
                             # What if multiple params could map to the same controller?
                             controller.parameter = param
@@ -720,9 +743,9 @@ class Mod(Handler):
                                 controller.set_category(plugin.category)
                             elif isinstance(controller, AnalogMidiControl):
                                 key = "%s:%s" % (plugin.instance_id, param.name)
-                                controller.cfg[Token.CATEGORY] = plugin.category  # somewhat LAME adding to cfg dict
-                                controller.cfg[Token.TYPE] = controller.type
-                                self.current.analog_controllers[key] = controller.cfg
+                                display_info = controller.get_display_info()
+                                display_info['category'] = plugin.category
+                                self.current.analog_controllers[key] = display_info
 
             # Move Footswitch controlled plugins to the end of the list
             self.current.pedalboard.plugins = [elem for elem in self.current.pedalboard.plugins

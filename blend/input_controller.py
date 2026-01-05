@@ -91,10 +91,10 @@ class InputController:
         # Search encoders (tweak encoders)
         for encoder in encoders:
             if hasattr(encoder, "id") and encoder.id == input_id:
-                from pistomp.encodermidicontrol import EncoderMidiControl
-                if not isinstance(encoder, EncoderMidiControl):
+                from pistomp.encoder_controller import EncoderController
+                if not isinstance(encoder, EncoderController):
                     raise ValueError(
-                        f"Encoder {input_id} must be EncoderMidiControl (has MIDI support) for blend mode"
+                        f"Encoder {input_id} must be EncoderController for blend mode"
                     )
                 self.controlled_input = encoder
                 encoder.value_change_callback = self.handle_value_change
@@ -126,10 +126,9 @@ class InputController:
             control: The input control that triggered the callback
         """
         # Normalize value to [0.0, 1.0] based on input type
-        from pistomp.encodermidicontrol import EncoderMidiControl
-        if isinstance(control, EncoderMidiControl):
-            # Encoder: use accumulated MIDI value
-            percentage = control.midi_value / 127.0
+        from pistomp.encoder_controller import EncoderController
+        if isinstance(control, EncoderController):
+            percentage = control.get_normalized_value()
         else:
             # Expression pedal: use ADC value
             percentage = raw_value / 1023.0  # ADC is 10-bit
