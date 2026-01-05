@@ -52,6 +52,7 @@ class Parameterdialog(Dialog):
         self.graph_points  = self._calc_graph_points(self.graph_abscissa, 0, self.num_points)  # TODO
 
         self.w_value = None
+        self.w_bars = []  # Reusable bar widgets
         self._draw_contents()
 
     def _calc_graph_points(self, x, min, max):
@@ -94,10 +95,21 @@ class Parameterdialog(Dialog):
             # Manually update box position without breaking parent relationship
             self.w_value.box = Box.xywh(x_centered, 25, 0, 0)
 
-        # TODO would be nice to only redraw the lines that need changing
-        x = 0
-        for i in self.graph_abscissa:
-            i = int(i) - 1  # abscissa start at 1, arrays start at 0
+        # Create bar widgets on first call, reuse them afterward
+        if not self.w_bars:
+            x = 0
+            for i in self.graph_abscissa:
+                i = int(i) - 1  # abscissa start at 1, arrays start at 0
+                g = self.graph_points[i]
+                line_box = Box.xywh(x + x_offset, y0 - g, self.bar_width, g)
+                w = Widget(box=line_box, parent=self, outline=1, sel_width=0, outline_radius=0,
+                           align=WidgetAlign.NONE)
+                self.w_bars.append(w)
+                x = x + self.bar_width
+
+        # Just update colors (fast!)
+        for idx, i in enumerate(self.graph_abscissa):
+            i = int(i) - 1
             a = int(i * self.num_actual / self.num_points)
             p = self.actual_points[a]
             g = self.graph_points[i]
@@ -107,8 +119,7 @@ class Parameterdialog(Dialog):
             if p <= self.parameter.value:
                 w.set_foreground('yellow')
             else:
-                w.set_foreground((100, 100, 240))
-            x = x + self.bar_width
+                self.w_bars[idx].set_foreground((100, 100, 240))
 
         self.refresh()
 

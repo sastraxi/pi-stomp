@@ -155,7 +155,7 @@ def main():
             period += 1
             if period % 2 == 0:
                 handler.poll_indicators()
-            if period % 5 == 0:
+            if period % 3 == 0:  # 30ms = ~33Hz (56MHz LCD @ 33.6ms/frame)
                 handler.poll_lcd_updates()
             if period % 100 == 0:
                 handler.poll_modui_changes()
