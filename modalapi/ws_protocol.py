@@ -164,11 +164,11 @@ def parse_message(raw_message: str) -> WebSocketMessage:
 
         elif cmd == "output_set":
             # Format: output_set <instance_id> <port_symbol> <value>
-            if len(parts) > 1:
-                details = parts[1].split(' ')
-                instance_id = details[0]
-                port_symbol = details[1] if len(details) > 1 else ""
-                value = float(details[2]) if len(details) > 2 else 0.0
+            if len(parts) >= 3:
+                instance_id = parts[1]
+                port_and_value = parts[2].split(' ', 1)
+                port_symbol = port_and_value[0] if len(port_and_value) > 0 else ""
+                value = float(port_and_value[1]) if len(port_and_value) > 1 else 0.0
                 return OutputSetMessage(
                     instance_id=instance_id,
                     port_symbol=port_symbol,
