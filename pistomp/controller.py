@@ -24,7 +24,7 @@ from typing import TypedDict
 
 class RoutingDestination(Enum):
     """Where MIDI messages are routed."""
-    VIRTUAL = "virtual"      # piStomp-MIDI virtual port
+    VIRTUAL = "virtual"      # MIDI through virtual port
     EXTERNAL = "external"    # External hardware device
 
 
