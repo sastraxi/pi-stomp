@@ -211,45 +211,46 @@ class Lcd(abstract_lcd.Lcd):
                 self.w_pedalboard.tick()
 
         # Update control progress bars (analog controls and encoders)
-        for icon in self.w_controls:
-            if icon.object is None:
-                continue
+        if self.pstack.current == self.main_panel:
+            for icon in self.w_controls:
+                if icon.object is None:
+                    continue
 
-            midi_value = None
-            if isinstance(icon.object, AnalogMidiControl):
-                # AnalogMidiControl - convert ADC value to MIDI
-                midi_value = as_midi_value(icon.object.last_read)
+                midi_value = None
+                if isinstance(icon.object, AnalogMidiControl):
+                    # AnalogMidiControl - convert ADC value to MIDI
+                    midi_value = as_midi_value(icon.object.last_read)
 
-            elif isinstance(icon.object, (EncoderMidiControl, EncoderController)):
-                # EncoderMidiControl/EncoderController - already in MIDI range
-                midi_value = icon.object.midi_value
+                elif isinstance(icon.object, (EncoderMidiControl, EncoderController)):
+                    # EncoderMidiControl/EncoderController - already in MIDI range
+                    midi_value = icon.object.midi_value
 
-            elif isinstance(icon.object, BlendMode):
-                # BlendMode - get position from hijacked input
-                input_ctrl = icon.object.input_controller.controlled_input
-                if input_ctrl:
-                    # Get normalized position based on input type
-                    if isinstance(input_ctrl, (EncoderMidiControl, EncoderController)):
-                        position = input_ctrl.midi_value / 127.0
+                elif isinstance(icon.object, BlendMode):
+                    # BlendMode - get position from hijacked input
+                    input_ctrl = icon.object.input_controller.controlled_input
+                    if input_ctrl:
+                        # Get normalized position based on input type
+                        if isinstance(input_ctrl, (EncoderMidiControl, EncoderController)):
+                            position = input_ctrl.midi_value / 127.0
+                        else:
+                            position = input_ctrl.last_read / 1023.0  # ADC normalized to 0.0-1.0
+                        midi_value = int(position * 127)  # Convert to MIDI range for progress bar
+
+                        # Find closest stop and update label with snapshot name
+                        stops = icon.object.input_controller.stops
+                        closest_stop = min(stops, key=lambda s: abs(s.position - position))
+
+                        # Get snapshot name and update label if changed
+                        snapshot_name = self.handler.current.presets.get(closest_stop.snapshot_index, "")
+                        if snapshot_name and snapshot_name != icon.text:
+                            icon.set_text(snapshot_name)
                     else:
-                        position = input_ctrl.last_read / 1023.0  # ADC normalized to 0.0-1.0
-                    midi_value = int(position * 127)  # Convert to MIDI range for progress bar
+                        logging.warning("BlendMode icon has no associated input controller")
 
-                    # Find closest stop and update label with snapshot name
-                    stops = icon.object.input_controller.stops
-                    closest_stop = min(stops, key=lambda s: abs(s.position - position))
-
-                    # Get snapshot name and update label if changed
-                    snapshot_name = self.handler.current.presets.get(closest_stop.snapshot_index, "")
-                    if snapshot_name and snapshot_name != icon.text:
-                        icon.set_text(snapshot_name)
-                else:
-                    logging.warning("BlendMode icon has no associated input controller")
-
-            if midi_value is not None:
-                progress = midi_value / 127.0
-                if icon.progress != progress:
-                    icon.set_progress(progress)
+                if midi_value is not None:
+                    progress = midi_value / 127.0
+                    if icon.progress != progress:
+                        icon.set_progress(progress)
 
         # Update output clipping indicators
         if self.handler and self.handler.clipping_monitor is not None:
