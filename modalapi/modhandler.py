@@ -267,22 +267,30 @@ class Modhandler(Handler):
             return
 
         new_snapshot_name = self.current.presets.get(new_snapshot_index)
+        logging.debug(f"Snapshot change: index={new_snapshot_index}, name='{new_snapshot_name}', "
+                     f"active_blend={self.active_blend_mode.config.get('name') if self.active_blend_mode else None}")
 
         # Deactivate current blend mode if switching away
         if self.active_blend_mode:
             old_name = self.active_blend_mode.config.get('name')
             if old_name != new_snapshot_name:
+                logging.info(f"Deactivating blend mode '{old_name}' (switching to '{new_snapshot_name}')")
                 self.active_blend_mode.deactivate()
                 self.active_blend_mode = None
+            else:
+                logging.debug(f"Staying on blend mode '{old_name}'")
 
         # Activate new blend mode if switching to a blend snapshot
         if new_snapshot_name in self.blend_modes:
+            logging.info(f"Activating blend mode '{new_snapshot_name}'")
             self.active_blend_mode = self.blend_modes[new_snapshot_name]
             try:
                 self.active_blend_mode.activate()
             except Exception as e:
                 logging.error(f"Failed to activate blend mode '{new_snapshot_name}': {e}")
                 self.active_blend_mode = None
+        else:
+            logging.debug(f"Snapshot '{new_snapshot_name}' is not a blend snapshot")
 
     def _handle_ws_message(self, raw_message: str):
         """Handle incoming WebSocket message from MOD-UI using typed protocol."""
