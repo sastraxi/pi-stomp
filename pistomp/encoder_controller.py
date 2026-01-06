@@ -33,9 +33,10 @@ def clamp(value, min_value, max_value):
 class EncoderController(encoder.Encoder, controller.Controller):
     """Encoder with speed-based amplification and parameter quantization."""
 
-    # Speed thresholds (accumulated rotations in 10ms poll cycle)
+    # Speed thresholds (accumulated rotations between poll cycles)
     FAST_THRESHOLD = 4      # 4+ rotations = very fast
     MEDIUM_THRESHOLD = 2    # 2-3 rotations = fast
+
     # Multipliers
     FAST_MULTIPLIER = 8
     MEDIUM_MULTIPLIER = 4
@@ -63,9 +64,13 @@ class EncoderController(encoder.Encoder, controller.Controller):
         )
         self.handler = handler
         self.midiout = midiout
-        self.quantizer: Optional[ParameterQuantizer] = None
         self.value_change_callback: Optional[Any] = None
-        self.midi_value = 64  # Start at middle value for MIDI Learn
+
+        # default quantizer / value is for MIDI CC (0-127) if unbound
+        self.quantizer = ParameterQuantizer(0, 127, 128, 1.0)
+        self.quantizer.set_value(64)  # Start at middle value for MIDI Learn
+        self.midi_value = int(self.quantizer.get_value())
+
         logging.debug(f"EncoderController init: id={id}, midi_CC={midi_CC}, midi_channel={midi_channel}")
 
     def bind_to_parameter(self, parameter: Parameter, taper: float = 1.0) -> None:
@@ -98,27 +103,22 @@ class EncoderController(encoder.Encoder, controller.Controller):
             multiplier = self.SLOW_MULTIPLIER
 
         delta = direction * multiplier
+        new_value = self.quantizer.move_steps(delta)
         logging.debug(f"Speed: abs_dir={abs_dir}, multiplier={multiplier}, delta={delta}")
-
-        if self.quantizer:
-            new_value = self.quantizer.move_steps(delta)
-            if self.parameter:
-                self.midi_value = self._value_to_midi(new_value)
-            if self.parameter:
-                self.parameter.value = new_value
-            logging.debug(f"Bound: steps={delta}, value={new_value}")
-        else:
-            self.midi_value = clamp(self.midi_value + delta, 0, 127)
-            logging.debug(f"Unbound: delta={delta}, midi={self.midi_value}")
+            
+        self.midi_value = self._value_to_midi(new_value)
+        if self.parameter:
+            self.parameter.value = new_value
+            
+        logging.debug(f"Encoder refresh: steps={delta}, value={new_value}, midi={self.midi_value}")
 
         if self.midi_CC:
             self.midiout.send_message([self.midi_channel | CONTROL_CHANGE, self.midi_CC, int(self.midi_value)])
 
-        if self.quantizer:
-            if self.value_change_callback:
-                self.value_change_callback(new_value, self)
-            elif self.parameter:
-                self.handler.encoder_value_changed(self.parameter, new_value)
+        if self.value_change_callback:
+            self.value_change_callback(new_value, self)
+        elif self.parameter:
+            self.handler.encoder_value_changed(self.parameter, new_value)
 
     def _value_to_midi(self, value: float) -> int:
         """Convert parameter value to MIDI CC value [0-127]."""
@@ -128,10 +128,8 @@ class EncoderController(encoder.Encoder, controller.Controller):
         return int(clamp(midi_value, 0, 127))
 
     def get_normalized_value(self) -> float:
-        """Get current value normalized to [0.0, 1.0] for blend mode."""
-        if self.quantizer:
-            return self.quantizer.get_normalized_position()
-        return self.midi_value / 127.0
+        """Get current value normalized to [0.0, 1.0]."""
+        return self.quantizer.get_normalized_position()
 
     def read_rotary(self):
         """Poll encoder state (called from hardware polling loop)."""
