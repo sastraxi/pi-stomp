@@ -29,6 +29,8 @@ class ParameterSetter:
     This dramatically reduces WebSocket traffic during expression pedal movement.
     """
 
+    TOLERANCE = float(1 / 1024.0)
+
     def __init__(self, bridge: WebSocketBridgeProtocol) -> None:
         """
         Initialize parameter setter with shared WebSocket bridge.
@@ -38,8 +40,8 @@ class ParameterSetter:
         """
         self.bridge = bridge
 
-        # MIDI-level change tracking
-        self.last_sent_midi_values: dict[ParameterKey, int] = {}
+        # Value change tracking (raw float values, not MIDI)
+        self.last_sent_midi_values: dict[ParameterKey, float] = {}
 
         logging.info("ParameterSetter initialized")
 
@@ -47,38 +49,36 @@ class ParameterSetter:
         """
         Send single parameter via WebSocket with de-duplication (non-blocking).
 
-        Converts value to MIDI resolution (0-127) and skips send if same as
-        last sent MIDI value for this parameter. This prevents flooding the
-        WebSocket with redundant messages during smooth pedal movements.
+        Skips send if value hasn't changed (within 0.01 tolerance) since last send.
+        This prevents flooding the WebSocket with redundant messages during smooth
+        pedal movements.
 
         Args:
             instance_id: Plugin instance ID (e.g., "xfade", "CollisionDrive")
             symbol: Parameter symbol (e.g., "Gain", ":bypass")
-            value: Normalized value [0.0, 1.0]
+            value: Parameter value in native units (NOT normalized)
 
         Returns:
             True if sent, False if skipped (duplicate) or dropped (backpressure)
         """
-        # Convert to MIDI resolution (0-127) for change detection
-        midi_value = int(round(value * 127))
-
-        # Check if changed from last sent value
         key = ParameterKey(instance_id, symbol)
-        if self.last_sent_midi_values.get(key) == midi_value:
-            return False  # Skip - same MIDI value as last send
+        last_value = self.last_sent_midi_values.get(key)
+        if last_value is not None and abs(last_value - value) < self.TOLERANCE:
+            return False  # Skip - value unchanged within tolerance
 
         # Send via WebSocket
         if self.bridge.send_parameter(instance_id, symbol, value):
-            # Update tracking on successful queue
-            self.last_sent_midi_values[key] = midi_value
+            # Update tracking on successful queue (store raw float value)
+            self.last_sent_midi_values[key] = value
             return True
 
         # Dropped due to backpressure
+        logging.warning(f"Dropped (backpressure): {instance_id}/{symbol} value={value:.3f}")
         return False
 
     def reset_tracking(self) -> None:
         """
-        Reset MIDI change tracking (call on re-initialization).
+        Reset value change tracking (call on re-initialization).
 
         Clears all tracked values so next pedal movement will send all parameters.
         """
