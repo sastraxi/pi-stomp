@@ -244,7 +244,7 @@ class TextWidget(Widget):
         self.refresh()
 
     def tick(self):
-        """Called every 200ms from poll_updates(). Override in subclasses for animation."""
+        """Override in subclasses for animation."""
         pass
 
     def _draw(self, image, draw, real_box):
@@ -295,22 +295,27 @@ class Button(TextWidget):
 class ScrollingText(TextWidget):
     """TextWidget with horizontal ping-pong scrolling for overflow text."""
 
-    def __init__(self, scroll_speed: int = 4, pause_start_ticks: int = 10, pause_end_ticks: int = 5, **kwargs):
+    def __init__(self, pixels_per_second: float = 50.0, pause_start_sec: float = 2.0, pause_end_sec: float = 1.0, lcd_poll_divisor: int = 8, **kwargs):
         """
         Args:
-            scroll_speed: Pixels to scroll per tick (200ms interval)
-            pause_start_ticks: Ticks to pause at start position (default: 10 = 2 seconds)
-            pause_end_ticks: Ticks to pause at end position (default: 5 = 1 second)
+            pixels_per_second: Pixels to scroll per second (default: 50.0)
+            pause_start_sec: Seconds to pause at start position (default: 2.0)
+            pause_end_sec: Seconds to pause at end position (default: 1.0)
+            lcd_poll_divisor: Main loop divisor for LCD updates (used to calc tick duration)
         """
         super().__init__(**kwargs)
-        self.scroll_speed: int = scroll_speed
-        self.pause_start_ticks: int = pause_start_ticks
-        self.pause_end_ticks: int = pause_end_ticks
+        self.pixels_per_second: float = pixels_per_second
+        self.pause_start_sec: float = pause_start_sec
+        self.pause_end_sec: float = pause_end_sec
+        
+        # Calculate duration of one tick in seconds (base loop sleep is 10ms = 0.01s)
+        self.tick_duration_sec: float = (10 * lcd_poll_divisor) / 1000.0
 
         # Scrolling state
         self.scroll_offset: int = 0
+        self._float_scroll_offset: float = 0.0
         self.scroll_direction: int = 1  # 1 = scroll left, -1 = scroll right
-        self.scroll_pause_counter: int = pause_start_ticks
+        self.pause_counter_sec: float = pause_start_sec
 
         # Cached rendering
         self.cached_text_image: Optional[Image.Image] = None
@@ -345,7 +350,7 @@ class ScrollingText(TextWidget):
         return self.cached_text_width > available_width
 
     def tick(self) -> None:
-        """Override: Called every 200ms from poll_updates() to advance scrolling animation."""
+        """Override: Called from poll_updates() to advance scrolling animation."""
         # Ensure cached image exists
         if self.cached_text_image is None:
             self._render_text_to_cache()
@@ -355,14 +360,15 @@ class ScrollingText(TextWidget):
             # Text fits - reset to start if currently scrolled
             if self.scroll_offset != 0:
                 self.scroll_offset = 0
+                self._float_scroll_offset = 0.0
                 self.scroll_direction = 1
-                self.scroll_pause_counter = self.pause_start_ticks
+                self.pause_counter_sec = self.pause_start_sec
                 self.refresh()
             return
 
         # Handle pause at ends
-        if self.scroll_pause_counter > 0:
-            self.scroll_pause_counter -= 1
+        if self.pause_counter_sec > 0:
+            self.pause_counter_sec -= self.tick_duration_sec
             return
 
         # Calculate scroll boundaries
@@ -372,17 +378,22 @@ class ScrollingText(TextWidget):
 
         # Update scroll offset
         old_offset = self.scroll_offset
-        self.scroll_offset += self.scroll_direction * self.scroll_speed
+        
+        move_amount = self.pixels_per_second * self.tick_duration_sec
+        self._float_scroll_offset += self.scroll_direction * move_amount
+        self.scroll_offset = int(self._float_scroll_offset)
 
         # Bounce at boundaries with pause
         if self.scroll_offset >= max_offset:
             self.scroll_offset = max_offset
+            self._float_scroll_offset = float(max_offset)
             self.scroll_direction = -1
-            self.scroll_pause_counter = self.pause_end_ticks
+            self.pause_counter_sec = self.pause_end_sec
         elif self.scroll_offset <= 0:
             self.scroll_offset = 0
+            self._float_scroll_offset = 0.0
             self.scroll_direction = 1
-            self.scroll_pause_counter = self.pause_start_ticks
+            self.pause_counter_sec = self.pause_start_sec
 
         # Only refresh if offset actually changed
         if self.scroll_offset != old_offset:
@@ -391,8 +402,9 @@ class ScrollingText(TextWidget):
     def _clear_cache_and_restart(self) -> None:
         self.cached_text_image = None
         self.scroll_offset = 0
+        self._float_scroll_offset = 0.0
         self.scroll_direction = 1
-        self.scroll_pause_counter = self.pause_start_ticks
+        self.pause_counter_sec = self.pause_start_sec
 
     def set_text(self, text: str) -> None:
         super().set_text(text)
