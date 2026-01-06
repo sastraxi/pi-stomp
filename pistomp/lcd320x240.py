@@ -192,24 +192,25 @@ class Lcd(abstract_lcd.Lcd):
         self.pstack.poll_updates()
 
         # Update control progress bars (analog controls and encoders)
-        for icon in self.w_controls:
-            if icon.object is None:
-                continue
+        if self.pstack.current == self.main_panel:
+            for icon in self.w_controls:
+                if icon.object is None:
+                    continue
 
-            midi_value = None
-            if hasattr(icon.object, "last_read"):
-                # AnalogMidiControl - convert ADC value to MIDI
-                from pistomp.analogmidicontrol import as_midi_value
+                midi_value = None
+                if hasattr(icon.object, "last_read"):
+                    # AnalogMidiControl - convert ADC value to MIDI
+                    from pistomp.analogmidicontrol import as_midi_value
 
-                midi_value = as_midi_value(icon.object.last_read)
-            elif hasattr(icon.object, "midi_value"):
-                # EncoderMidiControl - already in MIDI range
-                midi_value = icon.object.midi_value
+                    midi_value = as_midi_value(icon.object.last_read)
+                elif hasattr(icon.object, "midi_value"):
+                    # EncoderMidiControl - already in MIDI range
+                    midi_value = icon.object.midi_value
 
-            if midi_value is not None:
-                progress = midi_value / 127.0
-                if icon.progress != progress:
-                    icon.set_progress(progress)
+                if midi_value is not None:
+                    progress = midi_value / 127.0
+                    if icon.progress != progress:
+                        icon.set_progress(progress)
 
     #
     # Toolbar
