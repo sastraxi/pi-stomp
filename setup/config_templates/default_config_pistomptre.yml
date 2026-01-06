@@ -54,12 +54,14 @@ hardware:
   # id: <integer>                 The id and position on the screen (starting with 0 on the left)
   # type: <KNOB | EXPRESSION>     The control type, used to represent the control on the screen (optional)
   # midi_CC: <integer>            The MIDI CC message to be sent when the control is adjusted (optional)
+  # threshold: <integer>          ADC change threshold to trigger (default: 16, recommend: 8 for MIDI alignment)
   #
   #analog_controllers:
   #  - adc_input: 5
   #    id: 0
   #    type: EXPRESSION
   #    midi_CC: 75
+  #    threshold: 8
 
   # encoders:
   # Each encoder definition is a list which starts with the id
