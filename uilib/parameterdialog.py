@@ -132,7 +132,11 @@ class Parameterdialog(Dialog):
             self.last_param_value = self.param_value
         else:
             # Incremental update: only refresh bars that changed state
-            for idx, i in enumerate(self.graph_abscissa):
+            items = list(enumerate(self.graph_abscissa))
+            if self.param_value < self.last_param_value:
+                items = reversed(items)
+
+            for idx, i in items:
                 i = int(i) - 1
                 a = int(i * self.num_actual / self.num_points)
                 p = float(self.actual_points[a])
