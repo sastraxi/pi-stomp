@@ -57,6 +57,7 @@ class Parameterdialog(Dialog):
 
         self.w_value = None
         self.w_bars = []  # Reusable bar widgets
+        self.last_param_value = None  # Track previous value for incremental bar updates
         self._draw_contents()
 
     def _calc_graph_points(self, x, min, max):
@@ -78,13 +79,13 @@ class Parameterdialog(Dialog):
         min_text = self.parameter.format(self.param_min)
         max_text = self.parameter.format(self.param_max)
 
-        # Calculate text width and centered position
+        # Calculate centered position
         font = Config().get_font('default')
         text_width, text_height = get_text_size(val_text, font)
         x_centered = (self.box.width - text_width) // 2
 
         if self.w_value is None:
-            self.w_value = TextWidget(box=Box.xywh(x_centered, 25, 0, 0), text=val_text, parent=self,
+            self.w_value = TextWidget(box=Box.xywh(x_centered, 23, text_width, text_height), text=val_text, parent=self,
                        align=WidgetAlign.NONE, name='value')
             self.w_value.set_foreground('yellow')
             TextWidget(box=Box.xywh(0, y0, 0, 0), text=min_text, parent=self, outline=0,
@@ -92,10 +93,12 @@ class Parameterdialog(Dialog):
             TextWidget(box=Box.xywh(220, y0, 0, 0), text=max_text, parent=self, outline=0,
                        align=WidgetAlign.NONE, name='value')
         else:
-            # Manually update box position without breaking parent relationship
-            # Update box BEFORE text to ensure refresh uses correct position
-            self.w_value.box = Box.xywh(x_centered, 25, 0, 0)
+            # Update text (refreshes old box area)
             self.w_value.set_text(val_text)
+            # Update box position and width (realign=True) without triggering full parent refresh
+            self.w_value.set_box(Box.xywh(x_centered, 23, text_width, text_height), realign=True, refresh=False)
+            # Refresh new box area
+            self.w_value.refresh()
 
     def _draw_graph(self):
         # TODO detailed dimensions, colors, etc. should not be defined in uilib
@@ -109,24 +112,44 @@ class Parameterdialog(Dialog):
             x = 0
             for i in self.graph_abscissa:
                 i = int(i) - 1  # abscissa start at 1, arrays start at 0
-                g = self.graph_points[i]
+                g = int(self.graph_points[i])  # PIL requires integer coordinates
                 line_box = Box.xywh(x + x_offset, y0 - g, self.bar_width, g)
                 w = Widget(box=line_box, parent=self, outline=1, sel_width=0, outline_radius=0,
                            align=WidgetAlign.NONE)
                 self.w_bars.append(w)
                 x = x + self.bar_width
 
-        # Just update colors (fast!)
-        for idx, i in enumerate(self.graph_abscissa):
-            i = int(i) - 1
-            a = int(i * self.num_actual / self.num_points)
-            p = self.actual_points[a]
-            if p <= self.param_value:
-                self.w_bars[idx].set_foreground('yellow')
-            else:
-                self.w_bars[idx].set_foreground((100, 100, 240))
+            # First render: set all bar colors and do full refresh
+            for idx, i in enumerate(self.graph_abscissa):
+                i = int(i) - 1
+                a = int(i * self.num_actual / self.num_points)
+                p = float(self.actual_points[a])
+                if p <= self.param_value:
+                    self.w_bars[idx].set_foreground('yellow')
+                else:
+                    self.w_bars[idx].set_foreground((100, 100, 240))
+            self.refresh()  # Full dialog refresh on first render
+            self.last_param_value = self.param_value
+        else:
+            # Incremental update: only refresh bars that changed state
+            for idx, i in enumerate(self.graph_abscissa):
+                i = int(i) - 1
+                a = int(i * self.num_actual / self.num_points)
+                p = float(self.actual_points[a])
 
-        self.refresh()
+                # Determine if this bar should be filled
+                old_filled = p <= self.last_param_value
+                new_filled = p <= self.param_value
+
+                # Only update and refresh if state changed
+                if old_filled != new_filled:
+                    if new_filled:
+                        self.w_bars[idx].set_foreground('yellow')
+                    else:
+                        self.w_bars[idx].set_foreground((100, 100, 240))
+                    self.w_bars[idx].refresh()
+
+            self.last_param_value = self.param_value
 
     def _reset_timeout_timer(self):
         if self.timeout is not None:
