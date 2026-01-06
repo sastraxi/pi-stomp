@@ -126,9 +126,6 @@ class Lcd(abstract_lcd.Lcd):
         self.footswitch_panel = Panel(box=Box.xywh(0, 176, self.display_width, 64))
         self.pstack.push_panel(self.footswitch_panel)
 
-        # render token queue (frame dropping for responsiveness)
-        self.render_token: tuple[Parameter.Parameter, float] | None = None
-
         self.pedalboards = {}
 
         self.splash_show(True)
@@ -183,12 +180,6 @@ class Lcd(abstract_lcd.Lcd):
         # self.main_panel.refresh()
 
     def poll_updates(self):
-        # Dequeue and render latest parameter update (if any)
-        if self.render_token:
-            param, value = self.render_token
-            self.render_token = None
-            self._render_parameter_update(param, value)
-
         self.pstack.poll_updates()
 
         # Update control progress bars (analog controls and encoders)
@@ -575,16 +566,6 @@ class Lcd(abstract_lcd.Lcd):
 
         self.w_parameter_dialogs[parameter.name] = d
         return d  # return the dialog so the parameter can be modified using the tweak knob
-
-    def queue_parameter_update(self, parameter: Parameter.Parameter, value: float) -> None:
-        """Queue parameter update for next LCD poll (frame dropping for responsiveness)."""
-        self.render_token = (parameter, value)
-
-    def _render_parameter_update(self, parameter: Parameter.Parameter, value: float) -> None:
-        """Render queued parameter update (called from poll_updates)."""
-        d = self.draw_parameter_dialog(parameter, timeout=PARAMETER_DIALOG_TIMEOUT)
-        if d:
-            d.update_value(value)
 
     def display_parameter_value(self, parameter: Parameter.Parameter, value: float) -> None:
         """Update parameter dialog with new value (controller already calculated it)."""
