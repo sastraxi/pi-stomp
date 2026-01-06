@@ -102,7 +102,7 @@ class EncoderController(encoder.Encoder, controller.Controller):
 
         if self.quantizer:
             new_value = self.quantizer.move_steps(delta)
-            if self.midi_CC and self.parameter:
+            if self.parameter:
                 self.midi_value = self._value_to_midi(new_value)
             if self.parameter:
                 self.parameter.value = new_value
