@@ -20,7 +20,6 @@ import common.parameter as Parameter
 
 import numpy as np
 import threading
-import traceback
 
 class Parameterdialog(Dialog):
     def __init__(self, stack, parameter,
@@ -161,16 +160,11 @@ class Parameterdialog(Dialog):
             self.timer = threading.Timer(self.timeout, self.pop)
             self.timer.start()
 
-    def update_text_only(self, new_value: float) -> None:
-        """Update only the text value (immediate feedback) without full graph redraw."""
-        self._reset_timeout_timer()
-        self.param_value = new_value
-        self._update_text_widget()
-
     def update_value(self, new_value: float) -> None:
         """Update display with new value (controller already calculated it)."""
         self._reset_timeout_timer()
         self.param_value = new_value
+        self._update_text_widget()
         self._draw_graph()
 
     def parameter_value_change(self, direction):
