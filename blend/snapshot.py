@@ -157,7 +157,8 @@ class SnapshotManager:
                 params[param_symbol] = value
 
             # Add bypass state as :bypass parameter
-            params[':bypass'] = 0.0 if bypassed else 1.0
+            # :bypass = 1.0 means bypassed, 0.0 means active (see plugin.py:49)
+            params[':bypass'] = 1.0 if bypassed else 0.0
 
             state[instance_id] = params
 
@@ -250,12 +251,13 @@ class SnapshotManager:
                     snapshots_data['snapshots'].pop(existing_idx)
                     snapshots_modified = True
 
-            # Create EMPTY blend snapshot - blend mode will set all parameters via WebSocket
-            # This avoids conflicts with MOD-UI's in-memory snapshot cache
+            # Create completely empty blend snapshot
+            # All parameters (including bypass states) are sent via WebSocket on activation
+            # This prevents the snapshot from getting out of date with stop changes
             logging.info(f"Creating empty blend snapshot '{snapshot_name}'")
             blend_snapshot: SnapshotData = {
                 'name': snapshot_name,
-                'data': {}  # Completely empty - no parameters at all
+                'data': {}  # Completely empty - everything sent via WebSocket
             }
 
             # Append new snapshot
