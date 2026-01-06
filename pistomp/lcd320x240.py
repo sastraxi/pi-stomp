@@ -53,7 +53,7 @@ class Lcd(abstract_lcd.Lcd):
         # 48MHz: 39ms/frame → poll every 40ms (divisor=4)
         # 56MHz: 34ms/frame → poll every 30ms (divisor=3)
         frame_time_ms = (56.0 / spi_speed_mhz) * 33.6
-        self.poll_divisor = max(3, round(frame_time_ms / 10.0))
+        self.poll_divisor = max(1, round(frame_time_ms / 10.0))
 
         # TODO would be good to decouple the actual LCD hardware.  This file should work for any 320x240 display
         display = LcdIli9341(board.SPI(),
@@ -690,7 +690,7 @@ class Lcd(abstract_lcd.Lcd):
         """Update parameter dialog with new value (controller already calculated it)."""
         d = self.draw_parameter_dialog(parameter, timeout=PARAMETER_DIALOG_TIMEOUT)
         if d:
-            d.update_value(value)
+            d.update_text_only(value)
 
     def parameter_commit(self, parameter, value):
         self.handler.parameter_value_commit(parameter, value)

@@ -875,6 +875,7 @@ class Modhandler(Handler):
                 self.lcd.enc_step_widget(d, direction)
 
     def encoder_value_changed(self, param: Parameter, new_value: float) -> None:
+        self.lcd.display_parameter_value(param, new_value)
         self.lcd.queue_parameter_update(param, new_value)
         if param.instance_id is None:
             # External MIDI: already sent in encoder_controller.refresh(), just display
