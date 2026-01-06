@@ -19,8 +19,7 @@ import common.util as util
 import common.parameter as Parameter
 
 import numpy as np
-import threading
-import traceback
+import time
 
 class Parameterdialog(Dialog):
     def __init__(self, stack, parameter,
@@ -43,7 +42,9 @@ class Parameterdialog(Dialog):
         self.tweak = util.renormalize_float(self.parameter_tweak_amount, 0, 127, self.param_min, self.param_max)
 
         self.timeout = timeout
-        self.timer = None
+        self.expiry_time = None
+        if self.timeout:
+            self.reset_timeout()
 
         # "graph" are the y-scaled values, "actual" are the actual non-scaled values
         self.taper = self.parameter.get_taper()  # Derive from parameter type
@@ -155,27 +156,28 @@ class Parameterdialog(Dialog):
 
             self.last_param_value = self.param_value
 
-    def _reset_timeout_timer(self):
+    def reset_timeout(self):
         if self.timeout is not None:
-            if self.timer is not None:
-                self.timer.cancel()
-            self.timer = threading.Timer(self.timeout, self.pop)
-            self.timer.start()
+            self.expiry_time = time.time() + self.timeout
+
+    def tick(self):
+        if self.expiry_time and time.time() > self.expiry_time:
+            self.pop()
 
     def update_text_only(self, new_value: float) -> None:
         """Update only the text value (immediate feedback) without full graph redraw."""
-        self._reset_timeout_timer()
+        self.reset_timeout()
         self.param_value = new_value
         self._update_text_widget()
 
     def update_value(self, new_value: float) -> None:
         """Update display with new value (controller already calculated it)."""
-        self._reset_timeout_timer()
+        self.reset_timeout()
         self.param_value = new_value
         self._draw_graph()
 
     def parameter_value_change(self, direction):
-        self._reset_timeout_timer()
+        self.reset_timeout()
 
         # Calculate new value
         new_value = self.param_value + (direction * self.tweak)
@@ -226,7 +228,6 @@ class Parameterdialog(Dialog):
             self.parameter_value_change(1)
 
     def pop(self):
-        self.stack.pop_panel(self)
-        if self.timer is not None:
-            self.timer.cancel()
-            self.timer = None
+        if self.parent:
+            self.stack.pop_panel(self)
+        self.expiry_time = None

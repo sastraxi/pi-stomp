@@ -119,7 +119,7 @@ class Lcd(abstract_lcd.Lcd):
         self.w_controls = []
         self.w_splash = None
         self.w_info_msg = None
-        self.w_parameter_dialogs = {}
+        self.w_parameter_dialogs: dict[Parameter.Parameter, Parameterdialog] = {}
 
         # panels
         self.pstack = PanelStack(display, image_format="RGB", use_dimming=True)  # TODO use dimming without loosing FS's
@@ -192,6 +192,10 @@ class Lcd(abstract_lcd.Lcd):
             param, value = self.render_token
             self.render_token = None
             self._render_parameter_update(param, value)
+
+        # Hide parameter dialogs after timeout
+        for d in self.w_parameter_dialogs.values():
+            d.tick()
 
         self.pstack.poll_updates()
 
