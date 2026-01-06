@@ -646,7 +646,7 @@ class Lcd(abstract_lcd.Lcd):
         """Update parameter dialog with new value (controller already calculated it)."""
         d = self.draw_parameter_dialog(parameter, timeout=PARAMETER_DIALOG_TIMEOUT)
         if d:
-            d.update_value(value)
+            d.update_text_only(value)
 
     def parameter_commit(self, parameter, value):
         self.handler.parameter_value_commit(parameter, value)

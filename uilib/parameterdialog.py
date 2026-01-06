@@ -72,11 +72,8 @@ class Parameterdialog(Dialog):
             b.set_selected(True)
         self._draw_graph()
 
-    def _draw_graph(self):
-        # TODO detailed dimensions, colors, etc. should not be defined in uilib
+    def _update_text_widget(self):
         y0 = 80
-        x_offset = 10
-
         val_text = self.parameter.format(self.param_value)
         min_text = self.parameter.format(self.param_min)
         max_text = self.parameter.format(self.param_max)
@@ -95,10 +92,17 @@ class Parameterdialog(Dialog):
             TextWidget(box=Box.xywh(220, y0, 0, 0), text=max_text, parent=self, outline=0,
                        align=WidgetAlign.NONE, name='value')
         else:
-            # Update text and reposition to keep centered
-            self.w_value.set_text(val_text)
             # Manually update box position without breaking parent relationship
+            # Update box BEFORE text to ensure refresh uses correct position
             self.w_value.box = Box.xywh(x_centered, 25, 0, 0)
+            self.w_value.set_text(val_text)
+
+    def _draw_graph(self):
+        # TODO detailed dimensions, colors, etc. should not be defined in uilib
+        y0 = 80
+        x_offset = 10
+
+        self._update_text_widget()
 
         # Create bar widgets on first call, reuse them afterward
         if not self.w_bars:
@@ -130,6 +134,12 @@ class Parameterdialog(Dialog):
                 self.timer.cancel()
             self.timer = threading.Timer(self.timeout, self.pop)
             self.timer.start()
+
+    def update_text_only(self, new_value: float) -> None:
+        """Update only the text value (immediate feedback) without full graph redraw."""
+        self._reset_timeout_timer()
+        self.param_value = new_value
+        self._update_text_widget()
 
     def update_value(self, new_value: float) -> None:
         """Update display with new value (controller already calculated it)."""
