@@ -498,7 +498,7 @@ class BlendMode:
 
         # Check if file was modified
         if current_timestamp != self.snapshots_file_timestamp:
-            logging.info("Snapshots file modified, resyncing blend snapshot and re-preparing...")
+            logging.info("Snapshots file modified, re-preparing blend mode with updated stop data...")
 
             # Check if currently active
             was_active = (self.input_controller and
@@ -508,22 +508,17 @@ class BlendMode:
             if was_active:
                 self.deactivate()
 
-            # Re-sync the blend snapshot (recreates from updated stops)
-            SnapshotManager.sync_blend_snapshots(
-                bundle_path,
-                [self.config],
-                self.handler.root_uri
-            )
-
-            # Re-prepare with new stop data (recomputes diff maps)
+            # Re-prepare with new stop data (recomputes diff maps from updated snapshots.json)
+            # NOTE: We do NOT call sync_blend_snapshots() here to avoid race condition with MOD-UI writes
+            # The blend snapshot entries already exist (created during pedalboard load)
             self.cleanup()  # Full cleanup
-            self.prepare()  # Re-prepare
+            self.prepare()  # Re-prepare (reads snapshots.json and recreates stops)
 
             # Reactivate if it was active
             if was_active:
                 self.activate()
 
-            # Update timestamp AFTER sync (sync writes the file, changing timestamp)
-            self.snapshots_file_timestamp = SnapshotManager.get_snapshots_file_timestamp(bundle_path)
+            # Update timestamp
+            self.snapshots_file_timestamp = current_timestamp
 
             logging.info("Blend mode re-prepared successfully")

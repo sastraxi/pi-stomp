@@ -529,13 +529,16 @@ class Mod(Handler):
                 self.set_current_pedalboard(pb)
 
         # Check for snapshot file modifications (blend mode stop edits)
-        if self.active_blend_mode:
+        # Check ALL blend modes, not just active one (user might be editing a stop snapshot)
+        for blend_mode in self.blend_modes.values():
             try:
-                self.active_blend_mode.check_for_snapshot_changes()
+                blend_mode.check_for_snapshot_changes()
             except Exception as e:
-                logging.error(f"Blend mode snapshot check failed, deactivating: {e}")
-                self.active_blend_mode.cleanup()
-                self.active_blend_mode = None
+                logging.error(f"Blend mode snapshot check failed: {e}")
+                # If it's the active one, deactivate it
+                if blend_mode == self.active_blend_mode:
+                    blend_mode.cleanup()
+                    self.active_blend_mode = None
 
     #
     # Pedalboard Stuff
@@ -801,6 +804,9 @@ class Mod(Handler):
                 self.active_blend_mode = self.blend_modes[new_snapshot_name]
                 logging.info(f"Activating blend mode: '{new_snapshot_name}'")
                 try:
+                    # Check for snapshot changes immediately before activating
+                    # to ensure we have the latest stop data (user may have just saved a snapshot)
+                    self.active_blend_mode.check_for_snapshot_changes()
                     self.active_blend_mode.initialize()
                 except Exception as e:
                     logging.error(f"Failed to activate blend mode '{new_snapshot_name}': {e}")
