@@ -176,8 +176,8 @@ class BlendMode:
         """
         Activate blend mode (attach to input).
 
-        Called when switching to this blend snapshot. Immediately syncs current
-        input position to set all parameters, since the blend snapshot is empty.
+        Called when switching to this blend snapshot. Clears de-duplication cache
+        and syncs current input position to set all parameters (including bypass states).
         """
         if not self.input_controller:
             raise RuntimeError("Cannot activate - blend mode not prepared")
@@ -185,6 +185,10 @@ class BlendMode:
         input_id = self.config.get("input_id")
         if input_id is None:
             raise ValueError("Blend mode requires 'input_id' config")
+
+        # Clear de-duplication cache so all parameters (including bypass) get sent fresh
+        if self.parameter_setter:
+            self.parameter_setter.reset_tracking()
 
         # Attach to analog input (expression pedal or encoder)
         self.input_controller.attach_to_input(
@@ -195,7 +199,13 @@ class BlendMode:
 
         # Immediately sync current input position to set all parameters
         # (blend snapshot is empty, so we need to establish initial state)
-        self.input_controller.sync_current_position()
+        try:
+            self.input_controller.sync_current_position()
+        except Exception as e:
+            # If sync fails, detach to avoid leaving callback attached
+            logging.error(f"Failed to sync blend mode position: {e}")
+            self.input_controller.detach_from_input()
+            raise
 
         logging.info(f"Activated blend mode: '{self.config.get('name')}'")
 
@@ -488,7 +498,7 @@ class BlendMode:
 
         # Check if file was modified
         if current_timestamp != self.snapshots_file_timestamp:
-            logging.info("Snapshots file modified, resyncing blend snapshot and re-preparing...")
+            logging.info("Snapshots file modified, re-preparing blend mode with updated stop data...")
 
             # Check if currently active
             was_active = (self.input_controller and
@@ -498,22 +508,17 @@ class BlendMode:
             if was_active:
                 self.deactivate()
 
-            # Re-sync the blend snapshot (recreates from updated stops)
-            SnapshotManager.sync_blend_snapshots(
-                bundle_path,
-                [self.config],
-                self.handler.root_uri
-            )
-
-            # Re-prepare with new stop data (recomputes diff maps)
+            # Re-prepare with new stop data (recomputes diff maps from updated snapshots.json)
+            # NOTE: We do NOT call sync_blend_snapshots() here to avoid race condition with MOD-UI writes
+            # The blend snapshot entries already exist (created during pedalboard load)
             self.cleanup()  # Full cleanup
-            self.prepare()  # Re-prepare
+            self.prepare()  # Re-prepare (reads snapshots.json and recreates stops)
 
             # Reactivate if it was active
             if was_active:
                 self.activate()
 
-            # Update timestamp AFTER sync (sync writes the file, changing timestamp)
-            self.snapshots_file_timestamp = SnapshotManager.get_snapshots_file_timestamp(bundle_path)
+            # Update timestamp
+            self.snapshots_file_timestamp = current_timestamp
 
             logging.info("Blend mode re-prepared successfully")
