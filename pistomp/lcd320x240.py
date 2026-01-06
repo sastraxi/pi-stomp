@@ -30,6 +30,7 @@ from uilib.lcd_ili9341 import *
 from pistomp.footswitch import Footswitch  # TODO would like to avoid this module knowing such details
 from pistomp.analogmidicontrol import AnalogMidiControl, as_midi_value
 from pistomp.encodermidicontrol import EncoderMidiControl
+from pistomp.encoder_controller import EncoderController
 from blend.manager import BlendMode
 
 # import traceback
@@ -217,8 +218,8 @@ class Lcd(abstract_lcd.Lcd):
                 # AnalogMidiControl - convert ADC value to MIDI
                 midi_value = as_midi_value(icon.object.last_read)
 
-            elif isinstance(icon.object, EncoderMidiControl):
-                # EncoderMidiControl - already in MIDI range
+            elif isinstance(icon.object, (EncoderMidiControl, EncoderController)):
+                # EncoderMidiControl/EncoderController - already in MIDI range
                 midi_value = icon.object.midi_value
 
             elif isinstance(icon.object, BlendMode):
@@ -226,7 +227,7 @@ class Lcd(abstract_lcd.Lcd):
                 input_ctrl = icon.object.input_controller.controlled_input
                 if input_ctrl:
                     # Get normalized position based on input type
-                    if isinstance(input_ctrl, EncoderMidiControl):
+                    if isinstance(input_ctrl, (EncoderMidiControl, EncoderController)):
                         position = input_ctrl.midi_value / 127.0
                     else:
                         position = input_ctrl.last_read / 1023.0  # ADC normalized to 0.0-1.0
