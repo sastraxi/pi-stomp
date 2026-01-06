@@ -53,7 +53,7 @@ class Lcd(abstract_lcd.Lcd):
         # 48MHz: 39ms/frame → poll every 40ms (divisor=4)
         # 56MHz: 34ms/frame → poll every 30ms (divisor=3)
         frame_time_ms = (56.0 / spi_speed_mhz) * 33.6
-        self.poll_divisor = max(1, round(frame_time_ms / 10.0))
+        self.poll_divisor = max(3, round(frame_time_ms / 10.0))
 
         # TODO would be good to decouple the actual LCD hardware.  This file should work for any 320x240 display
         display = LcdIli9341(board.SPI(),
@@ -196,10 +196,12 @@ class Lcd(abstract_lcd.Lcd):
         self.pstack.poll_updates()
 
         # Tick text widgets (scrolling animation if needed)
-        if self.w_preset:
-            self.w_preset.tick()
-        if self.w_pedalboard:
-            self.w_pedalboard.tick()
+        # Only scroll if the main panel is active (not covered by a modal/dialog)
+        if self.pstack.current == self.main_panel:
+            if self.w_preset:
+                self.w_preset.tick()
+            if self.w_pedalboard:
+                self.w_pedalboard.tick()
 
         # Update control progress bars (analog controls and encoders)
         for icon in self.w_controls:
