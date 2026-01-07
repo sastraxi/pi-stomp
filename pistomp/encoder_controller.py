@@ -122,9 +122,12 @@ class EncoderController(encoder.Encoder, controller.Controller):
 
     def _value_to_midi(self, value: float) -> int:
         """Convert parameter value to MIDI CC value [0-127]."""
-        midi_value = util.renormalize(
-            value, self.parameter.minimum, self.parameter.maximum, self.midi_min, self.midi_max
-        )
+        if self.parameter is None:
+            midi_value = value
+        else:
+            midi_value = util.renormalize(
+                value, self.parameter.minimum, self.parameter.maximum, self.midi_min, self.midi_max
+            )
         return int(clamp(midi_value, 0, 127))
 
     def get_normalized_value(self) -> float:
