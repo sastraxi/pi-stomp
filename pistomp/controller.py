@@ -21,6 +21,7 @@ import json
 import logging
 from typing import TypedDict
 from common.parameter import Parameter
+from rtmidi import MidiOut
 
 
 class RoutingDestination(Enum):
@@ -65,17 +66,15 @@ class FootswitchDisplayInfo(TypedDict, total=False):
 
 class Controller:
 
-    def __init__(self, midi_channel, midi_CC):
-        self.midi_channel = midi_channel
-        self.midi_CC = midi_CC
-        self.minimum = None
-        self.maximum = None
+    def __init__(self, midi_channel: int, midi_CC: int | None):
+        self.midi_channel: int = midi_channel
+        self.midi_CC: int | None = midi_CC
         self.parameter: Parameter | None = None
         self.hardware_name = None
         #self.type = None  # this will conflict with encoder.type for EncoderController
-        self.midi_min = 0
-        self.midi_max = 127
-        self.midiout = None  # Set by subclasses
+        self.midi_min: int = 0
+        self.midi_max: int = 127
+        self.midiout: MidiOut | None = None  # Set by subclasses
 
     def to_json(self):
         return json.dumps(self, default=lambda o: o.__dict__, sort_keys=True, indent=4)
@@ -92,7 +91,10 @@ class Controller:
             return RoutingInfo.virtual()
 
     def get_display_info(self) -> dict:
-        """Get display information. Override in subclasses."""
-        return {}
-
-
+        """Get display information. Supplement in subclasses."""
+        routing = self.get_routing_info()
+        info: dict = {}
+        if routing.destination == RoutingDestination.EXTERNAL:
+            info['port_name'] = routing.port_name
+            info['midi_cc'] = self.midi_CC
+        return info
