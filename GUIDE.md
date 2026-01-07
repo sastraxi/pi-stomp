@@ -307,7 +307,7 @@ Config merged and applied
 - Symbols: `MASTER`, `CAPTURE_VOLUME`, `EQ_1`-`EQ_5` (defined per card)
 
 **System Settings** (VU calibration, bank selection):
-- Persisted: `/home/pistomp/data/settings.yml`
+- Persisted: `/home/pistomp/data/config/settings.yml`
 - Read/Write: `settings.get_setting(key)` / `set_setting(key, value)`
 
 ### MOD Integration
@@ -360,7 +360,7 @@ GET  /get_bpm                            # Get current BPM
 **Footswitches** (`pistomp/footswitch.py`):
 - **Modes**: MIDI CC, Relay Bypass, Preset Change, Tap Tempo
 - **Longpress Groups**: Shared class-level state for multi-switch actions
-  - Two switches in group pressed within 400ms → group callback
+  - Two switches in group pressed within 0.4s → group callback
   - Examples: `next_snapshot`, `previous_snapshot`, `toggle_bypass`
 - **Config Overlay**: Per-pedalboard override of MIDI CC, bypass, preset, color
 - **Physical**: GPIO-based (`gpioswitch.py`) or ADC-based (`analogswitch.py`)
@@ -387,6 +387,7 @@ GET  /get_bpm                            # Get current BPM
   - Builder pattern constructs UI from pedalboard data
   - Event-driven updates via `link_data()`
   - **ParameterDialog**: Driven by `Parameter` object (encapsulates formatting/taper)
+  - Auto-dismiss timeout: `PARAMETER_DIALOG_TIMEOUT = 1.0` seconds
 
 **Control Progress Visualization**:
 - Real-time progress bars for analog controls and encoders (v2/v3)
@@ -500,14 +501,16 @@ poll_controls()
 
 **MOD API**:
 - `modalapi/pedalboard.py` - LILV parser
-- `common/parameter.py` - Parameter representation & formatting
 - `modalapi/plugin.py` - Plugin representation
 - `modalapi/websocket_bridge.py` - Async WebSocket client
 - `modalapi/ws_protocol.py` - Typed message parsing
 
 **Config & State**:
 - `pistomp/config.py` - Config loading/validation
-- `pistomp/settings.py` - Persistent settings (JSON)
+- `pistomp/settings.py` - Persistent settings (YAML)
+- `common/parameter.py` - Parameter representation & formatting
+- `common/token.py` - Token constants
+- `common/util.py` - Utility functions
 
 **Display**:
 - `pistomp/lcd320x240.py` - Color LCD (v2/v3)
@@ -556,4 +559,4 @@ blend_snapshots:
 - MIDI-bound parameters automatically excluded from interpolation
 - Supports both expression pedals and tweak encoders (v3)
 - Encoder callback override: skips display update when blend mode active
-- `blend/` - interpolation.py, stop.py, manager.py, input_controller.py
+- `blend/` - easing.py, input_controller.py, interpolation.py, manager.py, parameter_setter.py, snapshot.py, stop.py, types.py
