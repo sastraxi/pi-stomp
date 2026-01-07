@@ -30,16 +30,13 @@ class Parameterdialog(Dialog):
         self.stack = stack  # TODO very LAME to require the stack to be passed, ideally panel would be able to pop itself
         self.parameter = parameter
         
-        self.param_min = parameter.minimum
-        self.param_max = parameter.maximum
-
         # adjustment amount per click
         if self.parameter.type in (Parameter.Type.INTEGER, Parameter.Type.ENUMERATION, Parameter.Type.TOGGLED):
             self.parameter_tweak_amount = 1
         else:
             self.parameter_tweak_amount = 8
 
-        self.tweak = util.renormalize_float(self.parameter_tweak_amount, 0, 127, self.param_min, self.param_max)
+        self.tweak = util.renormalize_float(self.parameter_tweak_amount, 0, 127, self.parameter.minimum, self.parameter.maximum)
 
         self.timeout = timeout
         self.timer = None
@@ -51,7 +48,7 @@ class Parameterdialog(Dialog):
         self.bar_width = 4
         self.actual_abscissa = np.linspace(0, self.num_actual, self.num_actual)
         self.graph_abscissa = np.linspace(1, self.num_points, self.num_points)
-        self.actual_points = self._calc_graph_points(self.actual_abscissa, self.param_min, self.param_max)
+        self.actual_points = self._calc_graph_points(self.actual_abscissa, self.parameter.minimum, self.parameter.maximum)
         self.graph_points  = self._calc_graph_points(self.graph_abscissa, 0, self.num_points)  # TODO
 
         self.w_value = None
@@ -75,8 +72,8 @@ class Parameterdialog(Dialog):
         x_offset = 10
 
         val_text = self.parameter.format(self.parameter.value)
-        min_text = self.parameter.format(self.param_min)
-        max_text = self.parameter.format(self.param_max)
+        min_text = self.parameter.format(self.parameter.minimum)
+        max_text = self.parameter.format(self.parameter.maximum)
 
         # Calculate text width and centered position
         font = Config().get_font('default')
@@ -135,10 +132,10 @@ class Parameterdialog(Dialog):
         new_value = self.parameter.value + (direction * self.tweak)
 
         # Clamp
-        if new_value > self.param_max:
-            new_value = self.param_max
-        if new_value < self.param_min:
-            new_value = self.param_min
+        if new_value > self.parameter.maximum:
+            new_value = self.parameter.maximum
+        if new_value < self.parameter.minimum:
+            new_value = self.parameter.minimum
 
         # Integer rounding
         if self.parameter.type in (Parameter.Type.INTEGER, Parameter.Type.ENUMERATION, Parameter.Type.TOGGLED):
@@ -161,7 +158,7 @@ class Parameterdialog(Dialog):
         next_value = self.actual_points[next_index]
         step_size = abs(next_value - current_value)
 
-        param_range = self.param_max - self.param_min
+        param_range = self.parameter.maximum - self.parameter.minimum
         linear_step_size = param_range / (self.num_actual - 1)
 
         if step_size < 0.0001:
