@@ -30,7 +30,6 @@ class Parameterdialog(Dialog):
         self.stack = stack  # TODO very LAME to require the stack to be passed, ideally panel would be able to pop itself
         self.parameter = parameter
         
-        self.param_value = parameter.value
         self.param_min = parameter.minimum
         self.param_max = parameter.maximum
 
@@ -75,7 +74,7 @@ class Parameterdialog(Dialog):
         y0 = 80
         x_offset = 10
 
-        val_text = self.parameter.format(self.param_value)
+        val_text = self.parameter.format(self.parameter.value)
         min_text = self.parameter.format(self.param_min)
         max_text = self.parameter.format(self.param_max)
 
@@ -108,7 +107,7 @@ class Parameterdialog(Dialog):
             line_box = Box.xywh(x + x_offset, y0 - g, self.bar_width, g)
             w = Widget(box=line_box, parent=self, outline=1, sel_width=0, outline_radius=0,
                        align=WidgetAlign.NONE)
-            if p <= self.param_value:
+            if p <= self.parameter.value:
                 w.set_foreground('yellow')
             else:
                 w.set_foreground((100, 100, 240))
@@ -126,14 +125,14 @@ class Parameterdialog(Dialog):
     def update_value(self, new_value: float) -> None:
         """Update display with new value (controller already calculated it)."""
         self._reset_timeout_timer()
-        self.param_value = new_value
+        self.parameter.value = new_value
         self._draw_graph()
 
     def parameter_value_change(self, direction):
         self._reset_timeout_timer()
 
         # Calculate new value
-        new_value = self.param_value + (direction * self.tweak)
+        new_value = self.parameter.value + (direction * self.tweak)
 
         # Clamp
         if new_value > self.param_max:
@@ -145,10 +144,10 @@ class Parameterdialog(Dialog):
         if self.parameter.type in (Parameter.Type.INTEGER, Parameter.Type.ENUMERATION, Parameter.Type.TOGGLED):
             new_value = round(new_value)
 
-        if new_value == self.param_value:
+        if new_value == self.parameter.value:
             return
 
-        self.param_value = new_value
+        self.parameter.value = new_value
         if self.action is not None:
             self.action(self.object, new_value)
         self._draw_graph()

@@ -86,6 +86,8 @@ class Modhandler(Handler):
         # Stores snapshot index from loading_end until pedalboard change is detected
         self.next_pedalboard_preset_index = None
 
+        self.volume_parameter = None
+
         # Backup
         self.backup_dir = "/media/usb0/backups"
         self.backup_file = "pistomp_backup.zip"
@@ -570,6 +572,7 @@ class Modhandler(Handler):
                 volume_param.unit_symbol = "dB"
                 enc.bind_to_parameter(volume_param, taper=1)
                 # Uses normal encoder_value_changed flow (instance_id=None → audio_parameter_commit)
+                self.volume_parameter = volume_param
                 logging.info(f"Bound volume encoder to audio parameter: {volume_param.name}")
                 break
 
@@ -1045,9 +1048,9 @@ class Modhandler(Handler):
     def configure_wifi_credentials(self, ssid, password):
         return self.wifi_manager.configure_wifi(ssid, password)
 
-    def audio_parameter_change(self, direction, name, symbol, value, min, max, commit_callback):
+    def audio_parameter_change(self, direction, name, symbol, value, min, max, commit_callback, parameter=None):
         if symbol is not None:
-            d = self.lcd.draw_audio_parameter_dialog(name, symbol, value, min, max, commit_callback)
+            d = self.lcd.draw_audio_parameter_dialog(name, symbol, value, min, max, commit_callback, parameter)
             if d is not None:
                 self.lcd.enc_step_widget(d, direction)
 
@@ -1061,7 +1064,7 @@ class Modhandler(Handler):
         if arg is None:
             arg = 0
         self.audio_parameter_change(arg, "Output Volume", self.audiocard.MASTER, value,
-                                             -25.75, 6, self.audio_parameter_commit)
+                                             -25.75, 6, self.audio_parameter_commit, self.volume_parameter)
 
     def system_menu_vu_calibration(self, arg):
         value = self.settings.get_setting('analogVU.adc_baseline')
