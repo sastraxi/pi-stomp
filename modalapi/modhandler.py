@@ -1048,23 +1048,41 @@ class Modhandler(Handler):
     def configure_wifi_credentials(self, ssid, password):
         return self.wifi_manager.configure_wifi(ssid, password)
 
-    def audio_parameter_change(self, direction, name, symbol, value, min, max, commit_callback, parameter=None):
-        if symbol is not None:
-            d = self.lcd.draw_audio_parameter_dialog(name, symbol, value, min, max, commit_callback, parameter)
+    def _create_audio_parameter(self, name, symbol, min_val, max_val):
+        value = self.audiocard.get_volume_parameter(symbol)
+        info = {
+            Token.NAME: name,
+            Token.SYMBOL: symbol,
+            Token.RANGES: {
+                Token.MINIMUM: min_val,
+                Token.MAXIMUM: max_val
+            }
+        }
+        param = Parameter(info, value, None)
+        param.unit_symbol = "dB"
+        return param
+
+    def audio_parameter_change(self, direction, parameter, commit_callback):
+        if parameter is not None:
+            d = self.lcd.draw_audio_parameter_dialog(parameter, commit_callback)
             if d is not None:
                 self.lcd.enc_step_widget(d, direction)
 
     def system_menu_input_gain(self, arg):
-        value = self.audiocard.get_volume_parameter(self.audiocard.CAPTURE_VOLUME)
-        self.lcd.draw_audio_parameter_dialog("Input Gain", self.audiocard.CAPTURE_VOLUME, value,
-                                             -19.75, 12, self.audio_parameter_commit)
-
-    def system_menu_headphone_volume(self, arg):
-        value = self.audiocard.get_volume_parameter(self.audiocard.MASTER)
         if arg is None:
             arg = 0
-        self.audio_parameter_change(arg, "Output Volume", self.audiocard.MASTER, value,
-                                             -25.75, 6, self.audio_parameter_commit, self.volume_parameter)
+        param = self._create_audio_parameter("Input Gain", self.audiocard.CAPTURE_VOLUME, -19.75, 12)
+        self.audio_parameter_change(arg, param, self.audio_parameter_commit)
+
+    def system_menu_headphone_volume(self, arg):
+        if arg is None:
+            arg = 0
+        
+        param = self.volume_parameter
+        if param is None:
+            param = self._create_audio_parameter("Output Volume", self.audiocard.MASTER, -25.75, 6.0)
+
+        self.audio_parameter_change(arg, param, self.audio_parameter_commit)
 
     def system_menu_vu_calibration(self, arg):
         value = self.settings.get_setting('analogVU.adc_baseline')
@@ -1076,29 +1094,34 @@ class Modhandler(Handler):
         self.hardware.recalibrateVU_baseline(value)
 
     def system_menu_eq1_gain(self, arg):
-        value = self.audiocard.get_volume_parameter(self.audiocard.EQ_1)
-        self.lcd.draw_audio_parameter_dialog("Low Band Gain", self.audiocard.EQ_1, value,
-                                             -10.50, 12, self.audio_parameter_commit)
+        if arg is None:
+            arg = 0
+        param = self._create_audio_parameter("Low Band Gain", self.audiocard.EQ_1, -10.50, 12)
+        self.audio_parameter_change(arg, param, self.audio_parameter_commit)
 
     def system_menu_eq2_gain(self, arg):
-        value = self.audiocard.get_volume_parameter(self.audiocard.EQ_2)
-        self.lcd.draw_audio_parameter_dialog("Low-Mid Band Gain", self.audiocard.EQ_2, value,
-                                             -10.50, 12, self.audio_parameter_commit)
+        if arg is None:
+            arg = 0
+        param = self._create_audio_parameter("Low-Mid Band Gain", self.audiocard.EQ_2, -10.50, 12)
+        self.audio_parameter_change(arg, param, self.audio_parameter_commit)
 
     def system_menu_eq3_gain(self, arg):
-        value = self.audiocard.get_volume_parameter(self.audiocard.EQ_3)
-        self.lcd.draw_audio_parameter_dialog("Mid Band Gain", self.audiocard.EQ_3, value,
-                                             -10.50, 12, self.audio_parameter_commit)
+        if arg is None:
+            arg = 0
+        param = self._create_audio_parameter("Mid Band Gain", self.audiocard.EQ_3, -10.50, 12)
+        self.audio_parameter_change(arg, param, self.audio_parameter_commit)
 
     def system_menu_eq4_gain(self, arg):
-        value = self.audiocard.get_volume_parameter(self.audiocard.EQ_4)
-        self.lcd.draw_audio_parameter_dialog("High-Mid Band Gain", self.audiocard.EQ_4, value,
-                                             -10.50, 12, self.audio_parameter_commit)
+        if arg is None:
+            arg = 0
+        param = self._create_audio_parameter("High-Mid Band Gain", self.audiocard.EQ_4, -10.50, 12)
+        self.audio_parameter_change(arg, param, self.audio_parameter_commit)
 
     def system_menu_eq5_gain(self, arg):
-        value = self.audiocard.get_volume_parameter(self.audiocard.EQ_5)
-        self.lcd.draw_audio_parameter_dialog("High Band Gain", self.audiocard.EQ_5, value,
-                                             -10.50, 12, self.audio_parameter_commit)
+        if arg is None:
+            arg = 0
+        param = self._create_audio_parameter("High Band Gain", self.audiocard.EQ_5, -10.50, 12)
+        self.audio_parameter_change(arg, param, self.audio_parameter_commit)
 
     def audio_parameter_commit(self, symbol, value):
         self.audiocard.set_volume_parameter(symbol, value)
