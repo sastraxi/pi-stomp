@@ -28,10 +28,10 @@ from pathlib import Path
 
 import common.token as Token
 import common.util as util
-import common.parameter as Parameter
 import modalapi.pedalboard as Pedalboard
 import modalapi.wifi as Wifi
 import modalapi.external_midi as ExternalMidi
+from modalapi.external_midi import EXTERNAL_INSTANCE_ID
 import pistomp.settings as Settings
 from blend.snapshot import SnapshotManager
 from modalapi.websocket_bridge import AsyncWebSocketBridge
@@ -774,6 +774,12 @@ class Modhandler(Handler):
     #
     def parameter_value_commit(self, param, value):
         param.value = value
+        
+        # External MIDI parameters are local-only (visual feedback), no REST update needed
+        if param.instance_id == EXTERNAL_INSTANCE_ID:
+            logging.debug("Skipping REST update for external parameter: %s" % param.symbol)
+            return
+
         url = self.root_uri + "effect/parameter/pi_stomp_set//graph%s/%s" % (param.instance_id, param.symbol)
         formatted_value = ("%.1f" % param.value)
         self.parameter_set_send(url, formatted_value, 200)

@@ -26,6 +26,9 @@ from rtmidi import MidiOut as RtMidiOut
 # Type alias for MIDI message (list of bytes)
 MidiMessage = list[int]
 
+# Constant for identifying external parameters
+EXTERNAL_INSTANCE_ID = "External"
+
 
 class ExternalMidiOut:
     """

@@ -23,7 +23,7 @@ import common.util as Util
 import pistomp.analogmidicontrol as AnalogMidiControl
 import pistomp.footswitch as Footswitch
 import pistomp.taptempo as taptempo
-from modalapi.external_midi import ExternalMidiOut
+from modalapi.external_midi import ExternalMidiOut, EXTERNAL_INSTANCE_ID
 import common.parameter as Parameter
 
 from abc import abstractmethod
@@ -373,7 +373,7 @@ class Hardware:
             'properties': ['integer']
         }
         val = getattr(controller, 'midi_value', 0)
-        return Parameter.Parameter(info, val, f"{midi_channel}:{midi_cc}", "External")
+        return Parameter.Parameter(info, val, f"{midi_channel}:{midi_cc}", EXTERNAL_INSTANCE_ID)
 
     def __init_encoders_and_analog(self, cfg):
         """Update midiout for encoders and analog controllers based on config"""
