@@ -200,7 +200,6 @@ class EncoderController(encoder.Encoder, controller.Controller):
         return int(clamp(midi_value, 0, 127))
 
     def get_normalized_value(self) -> float:
-        """Get current value normalized to [0.0, 1.0]."""
         if self.num_steps <= 1:
             return 0.0
         return self.current_step / (self.num_steps - 1)

@@ -99,6 +99,9 @@ class AnalogMidiControl(analogcontrol.AnalogControl, controller.Controller):
             # save the potentiometer reading for the next loop
             self.last_read = value
 
+    def get_normalized_value(self) -> float:
+        return self.last_read / 1023.0
+
     def get_display_info(self) -> AnalogDisplayInfo:
         """Get display information for LCD."""
         return {

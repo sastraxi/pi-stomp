@@ -42,7 +42,6 @@ from modalapi.pedalboard_monitor import PedalboardMonitor
 from pistomp.analogmidicontrol import AnalogMidiControl
 from pistomp.controller import RoutingInfo, RoutingDestination
 from pistomp.encoder_controller import EncoderController
-from pistomp.encodermidicontrol import EncoderMidiControl
 from pistomp.footswitch import Footswitch
 
 
@@ -630,7 +629,7 @@ class Modhandler(Handler):
                                 display_info = controller.get_display_info()
                                 display_info['category'] = plugin.category
                                 self.current.analog_controllers[key] = display_info
-                            elif isinstance(controller, (EncoderMidiControl, EncoderController)):
+                            elif isinstance(controller, EncoderController):
                                 key = "%s:%s" % (plugin.instance_id, param.name)
                                 display_info = controller.get_display_info()
                                 display_info['category'] = plugin.category
@@ -646,7 +645,7 @@ class Modhandler(Handler):
         for controller in self.hardware.controllers.values():
             routing = controller.get_routing_info()
             if routing.destination == RoutingDestination.EXTERNAL:
-                if isinstance(controller, (AnalogMidiControl, EncoderMidiControl, EncoderController)):
+                if isinstance(controller, (AnalogMidiControl, EncoderController)):
                     if hasattr(controller, 'midi_CC') and controller.midi_CC is not None:
                         # Create synthetic parameter for EncoderController if not already bound
                         if isinstance(controller, EncoderController) and controller.parameter is None:

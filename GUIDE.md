@@ -365,9 +365,8 @@ GET  /get_bpm                            # Get current BPM
 - **Config Overlay**: Per-pedalboard override of MIDI CC, bypass, preset, color
 - **Physical**: GPIO-based (`gpioswitch.py`) or ADC-based (`analogswitch.py`)
 
-**Encoders** (`pistomp/encoder.py`, `pistomp/encoder_controller.py`, `pistomp/encodermidicontrol.py`):
-- **Base**: Quadrature decoding, GPIO interrupts, debounce
-- **EncoderMidiControl** (v1/v2): Fixed 8 MIDI units per rotation (16 total positions)
+**Encoders** (`pistomp/encoder.py`, `pistomp/encoder_controller.py`):
+- **Base**: Quadrature decoding, GPIO interrupts, debounce (v1/v2)
 - **EncoderController** (v3): Speed-based amplification + parameter quantization
   - Speed detection: 4+ rotations=8× steps, 2-3=4× steps, 1=1× step
   - Resolution: 128 (MIDI CC), 256 (continuous), exact (INTEGER/ENUMERATION/TOGGLED)
@@ -481,8 +480,7 @@ poll_controls()
 **Controls**:
 - `pistomp/controller.py` - Base class, RoutingInfo/DisplayInfo data structures
 - `pistomp/footswitch.py` - Footswitch logic, longpress groups
-- `pistomp/encoder.py` - Rotary encoder decoding
-- `pistomp/encodermidicontrol.py` - Fixed resolution encoder (v1/v2)
+- `pistomp/encoder.py` - Rotary encoder decoding (v1/v2 use base class directly)
 - `pistomp/encoder_controller.py` - Speed amplification + quantization (v3)
 - `pistomp/analogmidicontrol.py` - ADC-based MIDI controller
 
