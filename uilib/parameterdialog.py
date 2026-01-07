@@ -112,12 +112,8 @@ class Parameterdialog(Dialog):
             i = int(i) - 1
             a = int(i * self.num_actual / self.num_points)
             p = self.actual_points[a]
-            g = self.graph_points[i]
-            line_box = Box.xywh(x + x_offset, y0 - g, self.bar_width, g)
-            w = Widget(box=line_box, parent=self, outline=1, sel_width=0, outline_radius=0,
-                       align=WidgetAlign.NONE)
             if p <= self.parameter.value:
-                w.set_foreground('yellow')
+                self.w_bars[idx].set_foreground('yellow')
             else:
                 self.w_bars[idx].set_foreground((100, 100, 240))
 
