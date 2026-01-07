@@ -48,20 +48,20 @@ class AnalogMidiControl(analogcontrol.AnalogControl):
 
     def _send_value(self, value):
         """
-        Route value to callback or MIDI based on current configuration.
+        Route value to MIDI and/or callback based on current configuration.
 
         Args:
             value: Raw ADC value (0-1023)
         """
+        # Always convert to MIDI and send
+        set_volume = as_midi_value(value)
+        cc = [self.midi_channel | CONTROL_CHANGE, self.midi_CC, set_volume]
+        logging.debug("AnalogControl Sending CC event %s" % cc)
+        self.midiout.send_message(cc)
+
         if self.value_change_callback:
-            # Delegate to callback (e.g., blend mode interpolation)
+            # Also delegate to callback (e.g., blend mode interpolation)
             self.value_change_callback(value, self)
-        else:
-            # Default behavior: convert to MIDI and send
-            set_volume = as_midi_value(value)
-            cc = [self.midi_channel | CONTROL_CHANGE, self.midi_CC, set_volume]
-            logging.debug("AnalogControl Sending CC event %s" % cc)
-            self.midiout.send_message(cc)
 
     def send_current_value(self):
         """
