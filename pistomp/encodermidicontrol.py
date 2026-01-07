@@ -88,15 +88,10 @@ class EncoderMidiControl(encoder.Encoder, controller.Controller):
         # Now that the MIDI msg was sent, update our current value
         self.midi_value = midi_value
 
-        # Blend mode callback override: if set, ONLY call callback (skip display update)
-        # XXX: When blend mode is active, we may need to update the LCD to show the
-        # encoder's current value. Consider adding a separate display update mechanism
-        # that doesn't interfere with blend mode's parameter interpolation.
         if self.value_change_callback:
             self.value_change_callback(midi_value, self)
-        else:
-            # Regular behavior: update display
-            self.handler.parameter_midi_change(self.parameter, direction)
+        
+        self.handler.parameter_midi_change(self.parameter, direction)
 
     def get_normalized_value(self) -> float:
         """Get current value normalized to [0.0, 1.0] for blend mode."""
@@ -104,18 +99,11 @@ class EncoderMidiControl(encoder.Encoder, controller.Controller):
 
     def get_display_info(self) -> AnalogDisplayInfo:
         """Get display information for LCD."""
-        routing = self.get_routing_info()
-
-        info: AnalogDisplayInfo = {
+        return {
+            **super(EncoderMidiControl, self).get_display_info(),
             'type': self.type,
             'id': self.id,
             'category': None,  # Set during parameter binding
         }
-
-        if routing.destination == RoutingDestination.EXTERNAL:
-            info['port_name'] = routing.port_name
-            info['midi_cc'] = self.midi_CC
-
-        return info
 
 

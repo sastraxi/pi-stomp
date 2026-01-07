@@ -40,7 +40,7 @@ from modalapi.ws_protocol import parse_message, LoadingEndMessage, PedalSnapshot
 from modalapi.pedalboard_monitor import PedalboardMonitor
 
 from pistomp.analogmidicontrol import AnalogMidiControl
-from pistomp.controller import RoutingDestination
+from pistomp.controller import RoutingInfo, RoutingDestination
 from pistomp.encoder_controller import EncoderController
 from pistomp.encodermidicontrol import EncoderMidiControl
 from pistomp.footswitch import Footswitch
@@ -570,7 +570,7 @@ class Modhandler(Handler):
                 }
                 volume_param = Parameter(info, value, None)
                 volume_param.unit_symbol = "dB"
-                enc.bind_to_parameter(volume_param, taper=1)
+                enc.bind_to_parameter(volume_param)
                 # Uses normal encoder_value_changed flow (instance_id=None → audio_parameter_commit)
                 self.volume_parameter = volume_param
                 logging.info(f"Bound volume encoder to audio parameter: {volume_param.name}")
@@ -613,8 +613,7 @@ class Modhandler(Handler):
 
                             # Bind controller to parameter
                             if isinstance(controller, EncoderController):
-                                taper = 2 if param.type == Type.LOGARITHMIC else 1
-                                controller.bind_to_parameter(param, taper)
+                                controller.bind_to_parameter(param)
                             else:
                                 controller.parameter = param
                                 controller.set_value(param.value)
@@ -661,7 +660,7 @@ class Modhandler(Handler):
                                 TTL_PROPERTIES: [TTL_INTEGER]
                             }
                             ext_param = Parameter(ext_info, controller.midi_value, None)
-                            controller.bind_to_parameter(ext_param, taper=1)
+                            controller.bind_to_parameter(ext_param)
                             logging.debug(f"Bound external controller to synthetic parameter: {ext_param.name}")
 
                         # Add to display
@@ -853,12 +852,12 @@ class Modhandler(Handler):
             if d:
                 self.lcd.enc_step_widget(d, direction)
 
-    def encoder_value_changed(self, param: Parameter, new_value: float) -> None:
+    def encoder_value_changed(self, param: Parameter, new_value: float, routing_info: RoutingInfo) -> None:
         self.lcd.display_parameter_value(param, new_value)
-        if param.instance_id is None:
+        if routing_info.destination == RoutingDestination.EXTERNAL:
             # External MIDI: already sent in encoder_controller.refresh(), just display
-            if param.symbol.startswith("external_"):
-                return
+            return
+        if param.instance_id is None:
             # Audio parameter (volume, EQ, etc.)
             self.audio_parameter_commit(param.symbol, new_value)
         else:
