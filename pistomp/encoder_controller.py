@@ -22,7 +22,7 @@ import common.util as util
 import pistomp.controller as controller
 import pistomp.encoder as encoder
 from pistomp.handler import Handler
-from common.parameter import Parameter
+from common.parameter import Parameter, Type
 
 import logging
 
@@ -95,14 +95,14 @@ class EncoderController(encoder.Encoder, controller.Controller):
         """Get the number of discrete steps for the bound parameter."""
         if self.midi_CC is not None or self.parameter is None:
             return 128  # MIDI CC resolution; just a guess for unbound
-        
-        if self.parameter.type == Parameter.Type.INTEGER:
+
+        if self.parameter.type == Type.INTEGER:
             return int(self.parameter.maximum - self.parameter.minimum) + 1
 
-        if self.parameter.type == Parameter.Type.ENUMERATION:
+        if self.parameter.type == Type.ENUMERATION:
             return len(self.parameter.get_enum_value_list())
 
-        if self.parameter.type == Parameter.Type.TOGGLED:
+        if self.parameter.type == Type.TOGGLED:
             return 2
 
         # Finer resolution for continuous parameters
