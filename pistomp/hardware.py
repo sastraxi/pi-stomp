@@ -113,7 +113,7 @@ class Hardware:
         self.__init_footswitches(self.cfg)
 
         # External MIDI configuration
-        self.__init_external_midi_default()
+        self.__init_external_midi(self.cfg)
 
         # Pedalboard specific config
         if cfg is not None:
@@ -312,9 +312,6 @@ class Hardware:
         for ac in self.analog_controls:
             if isinstance(ac, AnalogMidiControl.AnalogMidiControl):
                 ac.set_midi_channel(self.midi_channel)
-
-    def __init_external_midi_default(self):
-        self.__init_external_midi(self.cfg)
 
     def __init_external_midi(self, cfg):
         """Initialize/update external MIDI config (called for both default and pedalboard)."""
