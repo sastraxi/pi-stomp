@@ -28,7 +28,7 @@ class Parameterdialog(Dialog):
         self._init_attrs(Widget.INH_ATTRS, kwargs)
         super(Parameterdialog,self).__init__(width, height, title, title_font, **kwargs)
         self.stack = stack  # TODO very LAME to require the stack to be passed, ideally panel would be able to pop itself
-        self.parameter = parameter
+        self.parameter: Parameter = parameter
         
         # adjustment amount per click
         if self.parameter.type in (Parameter.Type.INTEGER, Parameter.Type.ENUMERATION, Parameter.Type.TOGGLED):
