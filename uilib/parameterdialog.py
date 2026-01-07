@@ -29,7 +29,6 @@ class Parameterdialog(Dialog):
         self.stack = stack  # TODO very LAME to require the stack to be passed, ideally panel would be able to pop itself
         self.parameter = parameter
         
-        self.param_value = parameter.value
         self.param_min = parameter.minimum
         self.param_max = parameter.maximum
 
@@ -75,7 +74,7 @@ class Parameterdialog(Dialog):
 
     def _update_text_widget(self):
         y0 = 80
-        val_text = self.parameter.format(self.param_value)
+        val_text = self.parameter.format(self.parameter.value)
         min_text = self.parameter.format(self.param_min)
         max_text = self.parameter.format(self.param_max)
 
@@ -166,7 +165,7 @@ class Parameterdialog(Dialog):
     def update_value(self, new_value: float) -> None:
         """Update display with new value (controller already calculated it)."""
         self.reset_timeout()
-        self.param_value = new_value
+        self.parameter.value = new_value
         self._update_text_widget()
         self._draw_graph()
 
@@ -174,7 +173,7 @@ class Parameterdialog(Dialog):
         self.reset_timeout()
 
         # Calculate new value
-        new_value = self.param_value + (direction * self.tweak)
+        new_value = self.parameter.value + (direction * self.tweak)
 
         # Clamp
         if new_value > self.param_max:
@@ -186,10 +185,10 @@ class Parameterdialog(Dialog):
         if self.parameter.type in (Parameter.Type.INTEGER, Parameter.Type.ENUMERATION, Parameter.Type.TOGGLED):
             new_value = round(new_value)
 
-        if new_value == self.param_value:
+        if new_value == self.parameter.value:
             return
 
-        self.param_value = new_value
+        self.parameter.value = new_value
         if self.action is not None:
             self.action(self.object, new_value)
         self._draw_graph()
