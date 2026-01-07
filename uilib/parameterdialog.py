@@ -27,7 +27,7 @@ class Parameterdialog(Dialog):
         self._init_attrs(Widget.INH_ATTRS, kwargs)
         super(Parameterdialog,self).__init__(width, height, title, title_font, **kwargs)
         self.stack = stack  # TODO very LAME to require the stack to be passed, ideally panel would be able to pop itself
-        self.parameter = parameter
+        self.parameter: Parameter = parameter
         
         # adjustment amount per click
         if self.parameter.type in (Parameter.Type.INTEGER, Parameter.Type.ENUMERATION, Parameter.Type.TOGGLED):
@@ -120,16 +120,16 @@ class Parameterdialog(Dialog):
                 i = int(i) - 1
                 a = int(i * self.num_actual / self.num_points)
                 p = float(self.actual_points[a])
-                if p <= self.param_value:
+                if p <= self.parameter.value:
                     self.w_bars[idx].set_foreground('yellow')
                 else:
                     self.w_bars[idx].set_foreground((100, 100, 240))
             self.refresh()  # Full dialog refresh on first render
-            self.last_param_value = self.param_value
+            self.last_param_value = self.parameter.value
         else:
             # Incremental update: only refresh bars that changed state
             items = list(enumerate(self.graph_abscissa))
-            if self.param_value < self.last_param_value:
+            if self.parameter.value < self.last_param_value:
                 items = reversed(items)
 
             for idx, i in items:
@@ -139,7 +139,7 @@ class Parameterdialog(Dialog):
 
                 # Determine if this bar should be filled
                 old_filled = p <= self.last_param_value
-                new_filled = p <= self.param_value
+                new_filled = p <= self.parameter.value
 
                 # Only update and refresh if state changed
                 if old_filled != new_filled:
@@ -149,7 +149,7 @@ class Parameterdialog(Dialog):
                         self.w_bars[idx].set_foreground((100, 100, 240))
                     self.w_bars[idx].refresh()
 
-            self.last_param_value = self.param_value
+            self.last_param_value = self.parameter.value
 
     def reset_timeout(self):
         if self.timeout is not None:
