@@ -382,6 +382,9 @@ class Modhandler(Handler):
                 cfg = yaml.load(ymlfile, Loader=yaml.SafeLoader)
         self.hardware.reinit(cfg)
 
+        # Sync current state of analog controls (expression pedals, etc.)
+        self.hardware.sync_analog_controls()
+
         # Initialize the data and draw on LCD
         self.bind_current_pedalboard()
         self.load_current_presets()
@@ -395,6 +398,7 @@ class Modhandler(Handler):
                 self.external_midi.send_messages_for_pedalboard()
             except Exception as e:
                 logging.warning(f"Failed to send external MIDI messages: {e}")
+
 
     def bind_current_pedalboard(self):
         # "current" being the pedalboard mod-host says is current
