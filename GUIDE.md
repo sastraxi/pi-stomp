@@ -365,14 +365,13 @@ GET  /get_bpm                            # Get current BPM
 - **Config Overlay**: Per-pedalboard override of MIDI CC, bypass, preset, color
 - **Physical**: GPIO-based (`gpioswitch.py`) or ADC-based (`analogswitch.py`)
 
-**Encoders** (`pistomp/encoder.py`, `pistomp/encoder_controller.py`):
+**Encoders** (`pistomp/encoder.py`, `pistomp/encoder_controller.py`, `pistomp/encodermidicontrol.py`):
 - **Base**: Quadrature decoding, GPIO interrupts, debounce
+- **EncoderMidiControl** (v1/v2): Fixed 8 MIDI units per rotation (16 total positions)
 - **EncoderController** (v3): Speed-based amplification + parameter quantization
-  - Uses accumulator count as speed indicator (more rotations in 10ms = faster)
-  - Thresholds: 4+ rotations=8× steps, 2-3=4× steps, 1=1× step
-  - ParameterQuantizer: Discrete steps (128 for MIDI, 256 for non-MIDI)
-  - Flow: rotation → accumulate → amplify → quantize → commit
-- **Volume Encoder**: EncoderController bound to synthetic audio Parameter
+  - Speed detection: 4+ rotations=8× steps, 2-3=4× steps, 1=1× step
+  - Resolution: 128 (MIDI CC), 256 (continuous), exact (INTEGER/ENUMERATION/TOGGLED)
+- **Volume Encoder**: EncoderController bound to synthetic audio Parameter (v3 only)
 - **Buttons**: Configurable shortpress (callback + args) and longpress
 - **State Machines** (v1/v2 only): `TopEncoderMode`, `BotEncoderMode`, `UniversalEncoderMode`
 
@@ -483,8 +482,8 @@ poll_controls()
 - `pistomp/controller.py` - Base class, RoutingInfo/DisplayInfo data structures
 - `pistomp/footswitch.py` - Footswitch logic, longpress groups
 - `pistomp/encoder.py` - Rotary encoder decoding
-- `pistomp/encoder_controller.py` - Encoder with speed amplification + quantization (v3)
-- `pistomp/parameter_quantizer.py` - Discrete step quantization
+- `pistomp/encodermidicontrol.py` - Fixed resolution encoder (v1/v2)
+- `pistomp/encoder_controller.py` - Speed amplification + quantization (v3)
 - `pistomp/analogmidicontrol.py` - ADC-based MIDI controller
 
 **MIDI**:
