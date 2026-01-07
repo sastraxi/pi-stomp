@@ -216,7 +216,6 @@ class Mod(Handler):
 
     def add_hardware(self, hardware):
         self.hardware = hardware
-        # Pass external MIDI manager to hardware for config updates
         hardware.external_midi = self.external_midi
 
     def add_lcd(self, lcd):

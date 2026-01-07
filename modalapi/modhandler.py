@@ -156,7 +156,6 @@ class Modhandler(Handler):
 
     def add_hardware(self, hardware):
         self.hardware = hardware
-        # Pass external MIDI manager to hardware for config updates
         hardware.external_midi = self.external_midi
 
     def add_lcd(self, lcd):
@@ -396,9 +395,6 @@ class Modhandler(Handler):
                 self.external_midi.send_messages_for_pedalboard()
             except Exception as e:
                 logging.warning(f"Failed to send external MIDI messages: {e}")
-
-        # Sync current state of analog controls (expression pedals, etc.)
-        self.hardware.sync_analog_controls()
 
     def bind_current_pedalboard(self):
         # "current" being the pedalboard mod-host says is current
