@@ -99,18 +99,14 @@ class AnalogMidiControl(analogcontrol.AnalogControl, controller.Controller):
             # save the potentiometer reading for the next loop
             self.last_read = value
 
+    def get_normalized_value(self) -> float:
+        return self.last_read / 1023.0
+
     def get_display_info(self) -> AnalogDisplayInfo:
         """Get display information for LCD."""
-        routing = self.get_routing_info()
-
-        info: AnalogDisplayInfo = {
+        return {
+            **super(AnalogMidiControl, self).get_display_info(),
             'type': self.type,
             'id': self.id,
             'category': None,  # Set during parameter binding
         }
-
-        if routing.destination == RoutingDestination.EXTERNAL:
-            info['port_name'] = routing.port_name
-            info['midi_cc'] = self.midi_CC
-
-        return info
