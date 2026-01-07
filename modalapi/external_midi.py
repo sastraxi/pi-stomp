@@ -104,7 +104,7 @@ class ExternalMidiManager:
         Initialize the External MIDI Manager.
         Configuration will be provided via update_config() method.
         """
-        self.midi_ports: dict[str, rtmidi.MidiOut | None] = {}
+        self.midi_ports: dict[str, rtmidi.MidiOut] = {}
         self.port_configs: dict[str, PortConfig] = {}
         self.messages: dict[str, list[MidiMessage]] = {}
         self.enabled: bool = False
@@ -229,14 +229,12 @@ class ExternalMidiManager:
         port_config = self.port_configs.get(port_name)
         if not port_config:
             logging.warning(f"No configuration found for MIDI port: {port_name}")
-            self.midi_ports[port_name] = None
             return None
 
         # Find the port
         port_idx = self._find_port_by_name(port_config)
         if port_idx is None:
             logging.warning(f"Could not find MIDI port for: {port_name}")
-            self.midi_ports[port_name] = None
             return None
 
         # Open the port
@@ -248,8 +246,21 @@ class ExternalMidiManager:
             return midi_out
         except Exception as e:
             logging.error(f"Failed to open MIDI port {port_name} (index {port_idx}): {e}")
-            self.midi_ports[port_name] = None
             return None
+
+    def _invalidate_port(self, port_name: str) -> None:
+        """
+        Invalidate a port that has failed, closing it and removing from cache.
+        This forces re-discovery/re-opening on next use.
+        """
+        if port_name in self.midi_ports:
+            midi_out = self.midi_ports[port_name]
+            try:
+                midi_out.close_port()
+            except Exception as e:
+                logging.debug(f"Error closing invalidated port {port_name}: {e}")
+
+            del self.midi_ports[port_name]
 
     def _validate_midi_message(self, message: MidiMessage) -> bool:
         """
@@ -309,6 +320,8 @@ class ExternalMidiManager:
 
             except Exception as e:
                 logging.error(f"Failed to send MIDI message to {port_name}: {e}")
+                self._invalidate_port(port_name)
+                break  # Stop sending remaining messages to this broken port
 
     def send_cc(self, port_name: str, channel: int, cc: int, value: int) -> bool:
         """
@@ -366,6 +379,7 @@ class ExternalMidiManager:
             return True
         except Exception as e:
             logging.error(f"Failed to send CC to {port_name}: {e}")
+            self._invalidate_port(port_name)
             return False
 
     def send_messages_for_pedalboard(self) -> bool:
@@ -399,12 +413,11 @@ class ExternalMidiManager:
         """
         # Close external MIDI ports
         for port_name, midi_out in self.midi_ports.items():
-            if midi_out is not None:
-                try:
-                    midi_out.close_port()
-                    logging.debug(f"Closed MIDI port: {port_name}")
-                except Exception as e:
-                    logging.warning(f"Error closing MIDI port {port_name}: {e}")
+            try:
+                midi_out.close_port()
+                logging.debug(f"Closed MIDI port: {port_name}")
+            except Exception as e:
+                logging.warning(f"Error closing MIDI port {port_name}: {e}")
 
         self.midi_ports.clear()
         logging.info("External MIDI manager closed")
