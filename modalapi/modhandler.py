@@ -40,9 +40,8 @@ from modalapi.ws_protocol import parse_message, LoadingEndMessage, PedalSnapshot
 from modalapi.pedalboard_monitor import PedalboardMonitor
 
 from pistomp.analogmidicontrol import AnalogMidiControl
-from pistomp.controller import RoutingDestination
+from pistomp.controller import RoutingInfo, RoutingDestination
 from pistomp.encoder_controller import EncoderController
-from pistomp.encodermidicontrol import EncoderMidiControl
 from pistomp.footswitch import Footswitch
 
 
@@ -579,7 +578,7 @@ class Modhandler(Handler):
                 }
                 volume_param = Parameter(info, value, None)
                 volume_param.unit_symbol = "dB"
-                enc.bind_to_parameter(volume_param, taper=1)
+                enc.bind_to_parameter(volume_param)
                 # Uses normal encoder_value_changed flow (instance_id=None → audio_parameter_commit)
                 self.volume_parameter = volume_param
                 logging.info(f"Bound volume encoder to audio parameter: {volume_param.name}")
@@ -622,8 +621,7 @@ class Modhandler(Handler):
 
                             # Bind controller to parameter
                             if isinstance(controller, EncoderController):
-                                taper = 2 if param.type == Type.LOGARITHMIC else 1
-                                controller.bind_to_parameter(param, taper)
+                                controller.bind_to_parameter(param)
                             else:
                                 controller.parameter = param
                                 controller.set_value(param.value)
@@ -640,7 +638,7 @@ class Modhandler(Handler):
                                 display_info = controller.get_display_info()
                                 display_info['category'] = plugin.category
                                 self.current.analog_controllers[key] = display_info
-                            elif isinstance(controller, (EncoderMidiControl, EncoderController)):
+                            elif isinstance(controller, EncoderController):
                                 key = "%s:%s" % (plugin.instance_id, param.name)
                                 display_info = controller.get_display_info()
                                 display_info['category'] = plugin.category
@@ -656,7 +654,7 @@ class Modhandler(Handler):
         for controller in self.hardware.controllers.values():
             routing = controller.get_routing_info()
             if routing.destination == RoutingDestination.EXTERNAL:
-                if isinstance(controller, (AnalogMidiControl, EncoderMidiControl, EncoderController)):
+                if isinstance(controller, (AnalogMidiControl, EncoderController)):
                     if hasattr(controller, 'midi_CC') and controller.midi_CC is not None:
                         # Create synthetic parameter for EncoderController if not already bound
                         if isinstance(controller, EncoderController) and controller.parameter is None:
@@ -670,7 +668,7 @@ class Modhandler(Handler):
                                 TTL_PROPERTIES: [TTL_INTEGER]
                             }
                             ext_param = Parameter(ext_info, controller.midi_value, None)
-                            controller.bind_to_parameter(ext_param, taper=1)
+                            controller.bind_to_parameter(ext_param)
                             logging.debug(f"Bound external controller to synthetic parameter: {ext_param.name}")
 
                         # Add to display
@@ -862,12 +860,12 @@ class Modhandler(Handler):
             if d:
                 self.lcd.enc_step_widget(d, direction)
 
-    def encoder_value_changed(self, param: Parameter, new_value: float) -> None:
+    def encoder_value_changed(self, param: Parameter, new_value: float, routing_info: RoutingInfo) -> None:
         self.lcd.display_parameter_value(param, new_value)
-        if param.instance_id is None:
+        if routing_info.destination == RoutingDestination.EXTERNAL:
             # External MIDI: already sent in encoder_controller.refresh(), just display
-            if param.symbol.startswith("external_"):
-                return
+            return
+        if param.instance_id is None:
             # Audio parameter (volume, EQ, etc.)
             self.audio_parameter_commit(param.symbol, new_value)
         else:

@@ -112,25 +112,6 @@ class InputController:
         """Reset state tracking (call on re-initialization)."""
         self.current_segment_idx = 0
 
-    def _get_normalized_position(self, control: BlendInputProtocol) -> float:
-        """
-        Get normalized [0.0, 1.0] position from control.
-
-        Args:
-            control: The input control
-
-        Returns:
-            Normalized position [0.0, 1.0]
-        """
-        from pistomp.encodermidicontrol import EncoderMidiControl
-
-        if isinstance(control, EncoderMidiControl):
-            # Encoder: MIDI value already accumulated (0-127)
-            return control.midi_value / 127.0
-        else:
-            # Expression pedal: ADC value (0-1023)
-            return control.last_read / 1023.0
-
     def sync_current_position(self) -> None:
         """
         Force update of ALL parameters based on current input position.
@@ -147,7 +128,7 @@ class InputController:
             return
 
         # Get normalized position from control
-        percentage = self._get_normalized_position(self.controlled_input)
+        percentage = self.controlled_input.get_normalized_value()
 
         # Find segment for interpolation
         segment_idx = self._find_segment(percentage)
@@ -203,7 +184,7 @@ class InputController:
             control: The input control that triggered the callback
         """
         # Get normalized position from control (isinstance check done once)
-        percentage = self._get_normalized_position(control)
+        percentage = control.get_normalized_value()
 
         # Find segment (use cached value as hint for optimization)
         segment_idx = self._find_segment(percentage)
