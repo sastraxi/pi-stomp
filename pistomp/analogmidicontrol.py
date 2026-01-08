@@ -25,6 +25,11 @@ import pistomp.analogcontrol as analogcontrol
 import logging
 
 
+def as_midi_value(adc_value: int):
+    """Convert a 10-bit ADC value (0-1023) to a MIDI value (0-127)."""
+    return util.renormalize(adc_value, 0, 1023, 0, 127)
+
+
 class AnalogMidiControl(analogcontrol.AnalogControl):
     def __init__(self, spi, adc_channel, tolerance, midi_CC, midi_channel, midiout, type, id=None, cfg={}, value_change_callback=None):
         super(AnalogMidiControl, self).__init__(spi, adc_channel, tolerance)
