@@ -63,11 +63,23 @@ ssh pistomp@pistomp.local "sudo systemctl restart mod-ala-pi-stomp"
 
 ## Key Data Paths
 
+### Application
 - **Code**: `/home/pistomp/pi-stomp/`
-- **Data**: `/home/pistomp/data/`
+- **Service**: `/lib/systemd/system/mod-ala-pi-stomp.service`
+- **System Binaries**: `/usr/local/bin/{mod-host,mod-ui,jackd}`
+
+### User Data
+- **Root**: `/home/pistomp/data/`
 - **Config**: `/home/pistomp/data/config/`
 - **Pedalboards**: `/home/pistomp/data/.pedalboards/`
-- **Service**: `/lib/systemd/system/mod-ala-pi-stomp.service`
+- **User Files**: `/home/pistomp/data/user-files/` (samples, SFZ/SF2 instruments, IRs)
+- **LV2 Plugins**: `/home/pistomp/.lv2/` (scanned by mod-host)
+
+### State Files
+- **Last Pedalboard**: `/home/pistomp/data/last.json` (auto-loads on startup - clear to prevent crashes)
+- **Banks**: `/home/pistomp/data/banks.json` (pedalboard grouping)
+- **Settings**: `/home/pistomp/data/config/settings.yml` (system settings)
+- **ALSA State**: `/var/lib/alsa/asound.state` (audio mixer levels)
 
 ## Testing Changes
 
