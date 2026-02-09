@@ -503,6 +503,9 @@ class Mod(Handler):
 
                 self.current.preset_index = msg.snapshot_id
                 self.update_lcd_title()
+                
+    def poll_system_info(self):
+        pass
 
     def poll_modui_changes(self):
         """Poll for changes from MOD-UI"""
