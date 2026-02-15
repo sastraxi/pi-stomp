@@ -29,7 +29,6 @@ from uilib.lcd_ili9341 import *
 
 from pistomp.footswitch import Footswitch  # TODO would like to avoid this module knowing such details
 from pistomp.analogmidicontrol import AnalogMidiControl, as_midi_value
-from pistomp.encodermidicontrol import EncoderMidiControl
 from pistomp.encoder_controller import EncoderController
 from blend.manager import BlendMode
 
