@@ -21,6 +21,7 @@ dependencies = [
     "jsonschema>=4.0",
     "python-rtmidi>=1.4",
     "requests>=2.28",
+    "Pillow>=9.0",
     "pyalsaaudio>=0.9; sys_platform == 'linux'",
     "websockets>=15.0.1",
 ]
@@ -31,6 +32,7 @@ hardware = [
     "gfxhat>=0.0.1; sys_platform == 'linux'",
     "matplotlib>=3.5",
     "rpi-ws281x>=5.0; sys_platform == 'linux'",
+    "spidev>=3.0; sys_platform == 'linux'",
     "adafruit-circuitpython-neopixel>=6.3",
     "adafruit-circuitpython-rgb-display>=3.10",
     "adafruit-circuitpython-mcp3xxx>=1.4",
