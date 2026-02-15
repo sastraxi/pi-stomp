@@ -835,7 +835,12 @@ class Modhandler(Handler):
     #
     def parameter_value_commit(self, param, value):
         param.value = value
-        
+
+        # Audio parameter (volume, EQ, etc.) - no REST update needed
+        if param.instance_id is None:
+            self.audio_parameter_commit(param.symbol, value)
+            return
+
         # External MIDI parameters are local-only (visual feedback), no REST update needed
         if param.instance_id == EXTERNAL_INSTANCE_ID:
             logging.debug("Skipping REST update for external parameter: %s" % param.symbol)
