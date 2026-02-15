@@ -947,7 +947,7 @@ requires-dist = [
     { name = "jsonschema", specifier = ">=4.0" },
     { name = "lgpio", marker = "sys_platform == 'linux' and extra == 'hardware'", specifier = ">=0.2" },
     { name = "matplotlib", marker = "extra == 'hardware'", specifier = ">=3.5" },
-    { name = "pillow", specifier = ">=9.0" },
+    { name = "pillow", specifier = ">=9.2" },
     { name = "pyalsaaudio", marker = "sys_platform == 'linux'", specifier = ">=0.9" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.0" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=4.0" },
