@@ -872,6 +872,8 @@ class Lcd(abstract_lcd.Lcd):
 
     # Toolbar
     def update_wifi(self, wifi_status):
+        if self.w_wifi is None:
+            return
         if util.DICT_GET(wifi_status, "hotspot_active"):
             img = "wifi_orange.png"
         elif util.DICT_GET(wifi_status, "wifi_connected"):
