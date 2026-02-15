@@ -208,7 +208,7 @@ class Lcd(abstract_lcd.Lcd):
                     # AnalogMidiControl - convert ADC value to MIDI
                     midi_value = as_midi_value(icon.object.last_read)
 
-                elif isinstance(icon.object, (EncoderMidiControl, EncoderController)):
+                elif isinstance(icon.object, EncoderController):
                     # EncoderMidiControl/EncoderController - already in MIDI range
                     midi_value = icon.object.midi_value
 
@@ -217,7 +217,7 @@ class Lcd(abstract_lcd.Lcd):
                     input_ctrl = icon.object.input_controller.controlled_input
                     if input_ctrl:
                         # Get normalized position based on input type
-                        if isinstance(input_ctrl, (EncoderMidiControl, EncoderController)):
+                        if isinstance(input_ctrl, EncoderController):
                             position = input_ctrl.midi_value / 127.0
                         else:
                             position = input_ctrl.last_read / 1023.0  # ADC normalized to 0.0-1.0
