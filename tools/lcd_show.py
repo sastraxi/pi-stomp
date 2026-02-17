@@ -30,9 +30,8 @@ MSG_PADDING_BOTTOM = 18
 def init_display(baudrate: int) -> ili9341.ILI9341:
     cs = digitalio.DigitalInOut(board.CE0)
     dc = digitalio.DigitalInOut(board.D6)
-    rst = digitalio.DigitalInOut(board.D5)
     spi = board.SPI()
-    return ili9341.ILI9341(spi, cs=cs, dc=dc, rst=rst, baudrate=baudrate)
+    return ili9341.ILI9341(spi, cs=cs, dc=dc, rst=None, baudrate=baudrate)
 
 
 def load_and_fit(path: str, stretch: bool) -> Image.Image:
