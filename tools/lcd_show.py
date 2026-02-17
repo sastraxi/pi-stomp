@@ -24,7 +24,7 @@ FAST_BAUD = 80 * 1000 * 1000
 MSG_FONT = "DejaVuSans.ttf"
 MSG_FONT_SIZE = 22
 MSG_COLOR = (255, 255, 255)
-MSG_PADDING_BOTTOM = 12
+MSG_PADDING_BOTTOM = 18
 
 
 def init_display(baudrate: int) -> ili9341.ILI9341:
