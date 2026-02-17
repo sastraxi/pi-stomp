@@ -18,18 +18,32 @@ import adafruit_rgb_display.ili9341 as ili9341
 from uilib.panel import *
 import logging
 import threading
+import os
 
 class LcdIli9341(LcdBase):
     # XXX
     # TODO: Turn "flip" into all 90deg angle combinations
     def __init__(self, spi, cs_pin, dc_pin, reset_pin, baudrate, flip = True):
+        # If display has already been initialized this boot, don't reset it
+        init_stamp = "/run/lcd.init"
+        rst = reset_pin
+        if os.path.exists(init_stamp):
+            rst = None
+
         self.disp = ili9341.ILI9341(
             spi,
             cs=cs_pin,
             dc=dc_pin,
-            rst=reset_pin,
+            rst=rst,
             baudrate=baudrate
         )
+
+        if rst is not None:
+            try:
+                with open(init_stamp, 'w') as f:
+                    pass
+            except Exception:
+                pass
 
         # Use this to assure we don't have multiple threads trying to change the screen
         # All methods which do change the screen (eg. dist. calls) should acquire/release

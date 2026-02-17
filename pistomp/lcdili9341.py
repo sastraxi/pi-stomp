@@ -146,6 +146,11 @@ class Lcd(lcdcolor.Lcdcolor):
         rst = self.reset_pin
         baud = self.baudrate
 
+        # If display has already been initialized this boot, don't reset it
+        init_stamp = "/run/lcd.init"
+        if os.path.exists(init_stamp):
+            rst = None
+
         self.disp = ili9341.ILI9341(
             spi,
             cs=cs,
@@ -153,6 +158,13 @@ class Lcd(lcdcolor.Lcdcolor):
             rst=rst,
             baudrate=baud
         )
+
+        if rst is not None:
+            try:
+                with open(init_stamp, 'w') as f:
+                    pass
+            except Exception:
+                pass
 
     def refresh_plugins(self):
         # TODO could be smarter here and only refresh the affected zone
