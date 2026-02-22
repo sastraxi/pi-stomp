@@ -132,7 +132,8 @@ class Lcd(abstract_lcd.Lcd):
 
         self.pedalboards = {}
 
-        self.splash_show(True)
+        if not display.has_system_splash:
+            self.splash_show(True)
 
     #
     # Navigation
@@ -858,8 +859,10 @@ class Lcd(abstract_lcd.Lcd):
         self.pstack.pop_panel(self.footswitch_panel)
         if self.main_panel_pushed:
             self.pstack.pop_panel(self.main_panel)
-        self.w_splash.set_foreground(self.color_splash_down)
-        self.splash_panel.refresh()
+        if self.w_splash is not None:
+            # will not show if there is a system splash
+            self.w_splash.set_foreground(self.color_splash_down)
+            self.splash_panel.refresh()
 
     def clear(self):
         pass

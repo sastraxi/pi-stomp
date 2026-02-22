@@ -15,35 +15,25 @@
 
 import adafruit_rgb_display.ili9341 as ili9341
 
-from uilib.panel import *
+from uilib.panel import LcdBase, Box
+from functools import cached_property, cache
 import logging
 import threading
 import os
 
+INIT_STAMP = "/run/lcd.init"
+
+
 class LcdIli9341(LcdBase):
     # XXX
     # TODO: Turn "flip" into all 90deg angle combinations
-    def __init__(self, spi, cs_pin, dc_pin, reset_pin, baudrate, flip = True):
-        # If display has already been initialized this boot, don't reset it
-        init_stamp = "/run/lcd.init"
-        rst = reset_pin
-        if os.path.exists(init_stamp):
-            rst = None
+    def __init__(self, spi, cs_pin, dc_pin, reset_pin, baudrate, flip=True):
+        rst = reset_pin if not self.has_system_splash else None
 
-        self.disp = ili9341.ILI9341(
-            spi,
-            cs=cs_pin,
-            dc=dc_pin,
-            rst=rst,
-            baudrate=baudrate
-        )
+        self.disp = ili9341.ILI9341(spi, cs=cs_pin, dc=dc_pin, rst=rst, baudrate=baudrate)
 
-        if rst is not None:
-            try:
-                with open(init_stamp, 'w') as f:
-                    pass
-            except Exception:
-                pass
+        if not self.has_system_splash:
+            self._set_stamp()
 
         # Use this to assure we don't have multiple threads trying to change the screen
         # All methods which do change the screen (eg. dist. calls) should acquire/release
@@ -57,18 +47,30 @@ class LcdIli9341(LcdBase):
         self.height = self.disp.width
         self.flip = flip
 
+    @cached_property
+    def has_system_splash(self):
+        """Does the OS provide a splash screen?"""
+        return os.path.exists(INIT_STAMP)
+
+    def _set_stamp(self):
+        try:
+            with open(INIT_STAMP, "w") as _f:
+                pass
+        except Exception:
+            pass
+
     def dimensions(self):
         return (self.width, self.height)
 
     def default_format(self):
-        return 'RGB'
+        return "RGB"
 
     def clear(self):
         self.lock.acquire()
         self.disp.fill(0)
         self.lock.release()
 
-    def update(self, image, box = None):
+    def update(self, image, box=None):
         if self.lock.locked():
             logging.debug("LCD update was locked by another thread")
         self.lock.acquire()
@@ -81,7 +83,7 @@ class LcdIli9341(LcdBase):
         #
         img_width, img_height = image.size
         if box is None:
-            box = Box(0,0,img_width,img_height)
+            box = Box(0, 0, img_width, img_height)
 
         # Check if we need to crop the image to the LCD size
         x1, y1, x2, y2 = box.rect
@@ -90,7 +92,7 @@ class LcdIli9341(LcdBase):
         if y2 > self.height:
             y2 = self.height
         if x1 != 0 or y1 != 0 or x2 != img_width or y2 != img_width:
-            image = image.crop((x1,y1,x2,y2))
+            image = image.crop((x1, y1, x2, y2))
             if self.flip:
                 x = self.height - y2
                 y = x1
@@ -99,4 +101,3 @@ class LcdIli9341(LcdBase):
                 y = self.width - x2
         self.disp.image(image, 270 if self.flip else 90, x, y)
         self.lock.release()
-
