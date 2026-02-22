@@ -226,6 +226,18 @@ class AsyncWebSocketBridge:
                     logging.info(f"WebSocket connected to {self.ws_url}")
                     retry_delay = 1.0  # Reset retry delay on successful connect
 
+                    # Flush stale messages from before the disconnect.
+                    # After a reconnect, mod-ui sends a fresh loading_end which re-syncs state
+                    flushed = 0
+                    while not self.command_queue.empty():
+                        try:
+                            self.command_queue.get_nowait()
+                            flushed += 1
+                        except queue.Empty:
+                            break
+                    if flushed:
+                        logging.info(f"Flushed {flushed} stale messages from queue after reconnect")
+
                     # Run send and receive tasks concurrently
                     await asyncio.gather(self._send_messages(ws), self._receive_messages(ws))
 
