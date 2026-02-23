@@ -361,7 +361,7 @@ class ExternalMidiManager:
             if not messages:
                 continue
 
-            logging.debug(f"Sending MIDI message(s) to {port_name}: {messages.join(', ')}")
+            logging.debug(f"Sending MIDI message(s) to {port_name}: {messages}")
             self._send_messages(port_name, messages, self.send_delay_ms)
 
         return True
