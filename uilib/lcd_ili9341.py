@@ -39,9 +39,6 @@ class LcdIli9341(LcdBase):
         # All methods which do change the screen (eg. dist. calls) should acquire/release
         self.lock = threading.Lock()
 
-        # Clear the display
-        self.clear()
-
         # Test full screen image
         self.width = self.disp.height
         self.height = self.disp.width

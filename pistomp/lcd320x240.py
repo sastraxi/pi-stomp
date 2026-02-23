@@ -124,11 +124,11 @@ class Lcd(abstract_lcd.Lcd):
         # panels
         self.pstack = PanelStack(display, image_format="RGB", use_dimming=True)  # TODO use dimming without loosing FS's
         self.splash_panel = Panel(box=Box.xywh(0, 0, self.display_width, self.display_height))
-        self.pstack.push_panel(self.splash_panel)
+        self.pstack.push_panel(self.splash_panel, refresh=False)
         self.main_panel = Panel(box=Box.xywh(0, 0, self.display_width, 170))
         self.main_panel_pushed = False
         self.footswitch_panel = Panel(box=Box.xywh(0, 176, self.display_width, 64))
-        self.pstack.push_panel(self.footswitch_panel)
+        self.pstack.push_panel(self.footswitch_panel, refresh=False)
 
         self.pedalboards = {}
 
