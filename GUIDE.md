@@ -185,6 +185,7 @@ Shortpress accepts string (callback name) or object with `callback` and `args` (
 - **Direct hardware access** - No HAL layer, direct SPI/GPIO/MIDI interaction
 - **Real-time constraints** - Never block in critical path, separate frequencies by priority
 - **Hardware reality drives architecture** - Embrace limitations (ADC polling, SPI timing)
+- **ADC endpoint clamping** - Analog controls clamp ADC values within `tolerance` of 0 or 1023 to exact endpoints, ensuring expression pedals always reach 0 and 127. Without this, the tolerance deadband prevents the final small movement from triggering.
 
 ### Version Handling
 - **Explicit version routing** - Factory pattern with known version checks, not capability detection
@@ -208,6 +209,8 @@ Shortpress accepts string (callback name) or object with `callback` and `args` (
 - **WebSocket events** - Typed protocol (`ws_protocol.py`) for real-time change detection
 - **LILV for local parsing** - Parse `.ttl` bundles locally for performance and rich data
 - **Trust MOD for audio** - piStomp is controller interface, not audio processor
+- **Unbounded WebSocket queue** - Never drop parameter messages. Blend mode can produce 9+ params per 10ms tick; a bounded queue causes silent message loss and "stuck" parameters.
+- **MOD-UI designated ports** - mod-ui rejects `param_set` for plugin bypass/enable ports (`BYPASS`, `Bypass`, `PluginEnabled`, `enable`). These are "designated" ports managed by mod-ui internally. Blend mode must not send these via WebSocket `param_set`.
 
 ### Code Organization
 - **Factories for versioning** - `Handlerfactory` and `Hardwarefactory` route versions
@@ -226,6 +229,8 @@ Shortpress accepts string (callback name) or object with `callback` and `args` (
 - **Explicit over implicit** - Clear code paths, minimal magic
 - **Configuration over compilation** - Users customize via YAML, not Python
 - **Fail gracefully** - Log warnings, continue operation where possible
+- **Consider log volume before adding logging in a loop** - A single `logging.warning()` in a 10ms loop produces 100 messages/second. In a 200ms loop, 5/second. The strategy we use to tackle this while still providing observability is context-dependent.
+- **Logs answer "what happened?", code answers "what can happen?"** - Check logs first to understand the problem, then shift to reading code when designing solutions. Staying in the logs too long during solutioning leads to chasing symptoms instead of fixing causes.
 
 ### When Extending
 - **New hardware version?** Add factory branch, inherit from `Hardware`
