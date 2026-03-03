@@ -53,19 +53,18 @@ class AsyncWebSocketBridge:
     """
 
     def __init__(
-        self, ws_url: str = "ws://localhost:80/websocket", max_queue_size: int = 100, backpressure_threshold: int = 8192
+        self, ws_url: str = "ws://localhost:80/websocket", backpressure_threshold: int = 8192
     ):
         """
         Initialize WebSocket bridge.
 
         Args:
             ws_url: WebSocket URL to connect to
-            max_queue_size: Maximum number of messages to queue (backpressure threshold)
             backpressure_threshold: TCP write buffer size (bytes) to trigger backpressure warning (default: 8KB)
         """
         self.ws_url = ws_url
         self.backpressure_threshold = backpressure_threshold
-        self.command_queue: queue.Queue = queue.Queue(maxsize=max_queue_size)
+        self.command_queue: queue.Queue = queue.Queue()  # Unbounded - never drop blend mode messages
         self.received_queue: queue.Queue = queue.Queue()  # Thread-safe queue for incoming messages
         self.loop: Optional[asyncio.AbstractEventLoop] = None
         self.ws: Optional[websockets.WebSocketClientProtocol] = None
@@ -120,20 +119,8 @@ class AsyncWebSocketBridge:
         # Strip leading slash if present (instance_id may be "/StompBox_fuzz" or "StompBox_fuzz")
         instance_id = instance_id.lstrip("/")
         msg = f"param_set /graph/{instance_id}/{symbol} {value}"
-
-        try:
-            # Non-blocking put - fails immediately if queue full
-            self.command_queue.put_nowait(msg)
-            return True
-        except queue.Full:
-            # Queue full = backpressure!
-            self.messages_dropped += 1
-            if self.messages_dropped % 10 == 1:  # Log every 10th drop to avoid spam
-                logging.warning(
-                    f"WebSocket queue full ({self.command_queue.qsize()})! "
-                    f"Dropped {self.messages_dropped} messages total"
-                )
-            return False
+        self.command_queue.put_nowait(msg)
+        return True
 
     def get_queue_depth(self) -> int:
         """Get current queue depth (for monitoring)."""

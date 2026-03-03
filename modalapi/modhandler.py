@@ -114,7 +114,6 @@ class Modhandler(Handler):
         try:
             self.ws_bridge = AsyncWebSocketBridge(
                 ws_url='ws://localhost:80/websocket',
-                max_queue_size=100,
                 backpressure_threshold=8192  # 8 KB
             )
             self.ws_bridge.start()
