@@ -215,7 +215,11 @@ class Lcd(abstract_lcd.Lcd):
 
                 elif isinstance(icon.object, BlendMode):
                     # BlendMode - get position from hijacked input
-                    input_ctrl = icon.object.input_controller.controlled_input
+                    # input_controller is None after cleanup(), or controlled_input
+                    # is None when prepared but not yet activated - both are expected
+                    # transient states during snapshot changes
+                    ic = icon.object.input_controller
+                    input_ctrl = ic.controlled_input if ic else None
                     if input_ctrl:
                         # Get normalized position based on input type
                         if isinstance(input_ctrl, EncoderController):
@@ -225,15 +229,13 @@ class Lcd(abstract_lcd.Lcd):
                         midi_value = int(position * 127)  # Convert to MIDI range for progress bar
 
                         # Find closest stop and update label with snapshot name
-                        stops = icon.object.input_controller.stops
+                        stops = ic.stops
                         closest_stop = min(stops, key=lambda s: abs(s.position - position))
 
                         # Get snapshot name and update label if changed
                         snapshot_name = self.handler.current.presets.get(closest_stop.snapshot_index, "")
                         if snapshot_name and snapshot_name != icon.text:
                             icon.set_text(snapshot_name)
-                    else:
-                        logging.warning("BlendMode icon has no associated input controller")
 
                 if midi_value is not None:
                     progress = midi_value / 127.0
