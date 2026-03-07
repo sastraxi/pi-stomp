@@ -70,11 +70,11 @@ class SnapshotManager:
 
         Supports:
         - Integer index (0-based)
-        - String name with case-insensitive prefix matching
+        - String name with case-insensitive exact matching
 
         Args:
             snapshots_json: Parsed snapshots.json dict
-            identifier: Snapshot index or name (or prefix)
+            identifier: Snapshot index or name
 
         Returns:
             Snapshot index (0-based)
@@ -90,35 +90,19 @@ class SnapshotManager:
                 raise ValueError(f"Snapshot index {identifier} out of range (0-{len(snapshots)-1})")
             return identifier
 
-        # If string, do case-insensitive prefix match
+        # Case-insensitive exact match
         identifier_lower = identifier.lower()
-        matches = []
 
         for i, snapshot in enumerate(snapshots):
-            name = snapshot.get('name', '')
-            if name.lower().startswith(identifier_lower):
-                matches.append((i, name))
+            if snapshot.get('name', '').lower() == identifier_lower:
+                logging.debug(f"Resolved snapshot '{identifier}' to index {i}")
+                return i
 
-        if len(matches) == 0:
-            # Show available snapshots for helpful error message
-            available = [f"{i}: {s.get('name', '')}" for i, s in enumerate(snapshots)]
-            raise ValueError(
-                f"No snapshot found matching '{identifier}'. "
-                f"Available: {', '.join(available)}"
-            )
-
-        if len(matches) > 1:
-            # Multiple matches - show them for disambiguation
-            match_list = [f"{i}: {name}" for i, name in matches]
-            raise ValueError(
-                f"Ambiguous snapshot name '{identifier}' matches multiple snapshots: "
-                f"{', '.join(match_list)}"
-            )
-
-        # Exactly one match
-        index, name = matches[0]
-        logging.debug(f"Resolved snapshot '{identifier}' to index {index} ('{name}')")
-        return index
+        available = [f"{i}: {s.get('name', '')}" for i, s in enumerate(snapshots)]
+        raise ValueError(
+            f"No snapshot found matching '{identifier}'. "
+            f"Available: {', '.join(available)}"
+        )
 
     @staticmethod
     def parse_snapshot_data(snapshots_json: SnapshotsJson, snapshot_index: int) -> SnapshotStateDict:
