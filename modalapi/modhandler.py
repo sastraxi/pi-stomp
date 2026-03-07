@@ -282,6 +282,7 @@ class Modhandler(Handler):
                 logging.info(f"Deactivating blend mode '{old_name}' (switching to '{new_snapshot_name}')")
                 self.active_blend_mode.deactivate()
                 self.active_blend_mode = None
+                self.lcd.draw_analog_assignments(self.current.analog_controllers)
             else:
                 logging.debug(f"Staying on blend mode '{old_name}'")
 
@@ -294,6 +295,7 @@ class Modhandler(Handler):
                 # to ensure we have the latest stop data (user may have just saved a snapshot)
                 self.active_blend_mode.check_for_snapshot_changes()
                 self.active_blend_mode.activate()
+                self.lcd.draw_analog_assignments(self.current.analog_controllers)
             except Exception as e:
                 logging.error(f"Failed to activate blend mode '{new_snapshot_name}': {e}")
                 self.active_blend_mode = None
