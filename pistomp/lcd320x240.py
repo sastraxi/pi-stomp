@@ -28,6 +28,9 @@ from uilib import *
 from uilib.lcd_ili9341 import *
 
 from pistomp.footswitch import Footswitch  # TODO would like to avoid this module knowing such details
+from pistomp.analogmidicontrol import AnalogMidiControl, as_midi_value
+from pistomp.encodermidicontrol import EncoderMidiControl
+from pistomp.encoder_controller import EncoderController
 
 # Parameter dialog auto-dismiss timeout (seconds)
 PARAMETER_DIALOG_TIMEOUT = 1.0
@@ -183,12 +186,9 @@ class Lcd(abstract_lcd.Lcd):
                     continue
 
                 midi_value = None
-                if hasattr(icon.object, "last_read"):
-                    # AnalogMidiControl - convert ADC value to MIDI
-                    from pistomp.analogmidicontrol import as_midi_value
+                if isinstance(icon.object, AnalogMidiControl):
                     midi_value = as_midi_value(icon.object.last_read)
-                elif hasattr(icon.object, "midi_value"):
-                    # EncoderMidiControl/EncoderController - already in MIDI range
+                elif isinstance(icon.object, (EncoderMidiControl, EncoderController)):
                     midi_value = icon.object.midi_value
 
                 if midi_value is not None:
