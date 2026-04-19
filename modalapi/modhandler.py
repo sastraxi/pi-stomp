@@ -311,6 +311,15 @@ class Modhandler(Handler):
         self.current_bank = bank_name
         self.settings.set_setting(Token.BANK, bank_name)
 
+    def set_lcd_speed(self, speed_mhz):
+        self.settings.set_setting('lcd.spi_speed_mhz', speed_mhz)
+        self.lcd.show_lcd_speed_message(speed_mhz)
+        # Exit cleanly - systemd will restart with new LCD speed
+        import time
+        import sys
+        time.sleep(1.5)  # Show message briefly
+        sys.exit(0)
+
     #
     # Pedalboard Stuff
     #

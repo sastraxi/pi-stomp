@@ -34,19 +34,27 @@ PARAMETER_DIALOG_TIMEOUT = 1.0
 
 class Lcd(abstract_lcd.Lcd):
 
-    def __init__(self, cwd, handler=None, flip=False):
+    def __init__(self, cwd, handler=None, flip=False, spi_speed_mhz=24):
         self.cwd = cwd
         self.imagedir = os.path.join(cwd, "images")
         Config(os.path.join(cwd, 'ui', 'config.json'))
         self.handler = handler
         self.flip = flip
+        self.spi_speed_mhz = spi_speed_mhz
+
+        # Calculate optimal polling divisor based on LCD speed
+        # 24MHz: 78ms/frame → poll every 80ms (divisor=8)
+        # 48MHz: 39ms/frame → poll every 40ms (divisor=4)
+        # 56MHz: 34ms/frame → poll every 30ms (divisor=3)
+        frame_time_ms = (56.0 / spi_speed_mhz) * 33.6
+        self.poll_divisor = max(1, round(frame_time_ms / 10.0))
 
         # TODO would be good to decouple the actual LCD hardware.  This file should work for any 320x240 display
         display = LcdIli9341(board.SPI(),
                              digitalio.DigitalInOut(board.CE0),
                              digitalio.DigitalInOut(board.D6),
                              digitalio.DigitalInOut(board.D5),
-                             24000000,
+                             spi_speed_mhz * 1_000_000,
                              flip)
 
         # Colors
@@ -528,6 +536,7 @@ class Lcd(abstract_lcd.Lcd):
     #
     def draw_system_menu(self, event, widget):
         items = [("System info", self.draw_system_info_dialog, None),
+                 ("LCD Speed >", self.draw_lcd_speed_menu, None),
                  ("System shutdown", self.handler.system_menu_shutdown, None),
                  ("System reboot",  self.handler.system_menu_reboot, None),
                  ("Restart sound engine", self.handler.system_menu_restart_sound, None),
@@ -563,6 +572,21 @@ class Lcd(abstract_lcd.Lcd):
             self.handler.temperature,
             self.handler.throttled)
         d = MessageDialog(self.pstack, msg, title="System Info", width=300, height=130)
+        self.pstack.push_panel(d)
+
+    def draw_lcd_speed_menu(self, event):
+        current_speed = self.spi_speed_mhz
+        items = [
+            ("24 MHz (Safe)", self.handler.set_lcd_speed, 24, current_speed==24),
+            ("48 MHz", self.handler.set_lcd_speed, 48, current_speed==48),
+            ("56 MHz", self.handler.set_lcd_speed, 56, current_speed==56),
+            ("80 MHz", self.handler.set_lcd_speed, 80, current_speed==80),
+        ]
+        self.draw_selection_menu(items, "LCD SPI Speed", auto_dismiss=False)
+
+    def show_lcd_speed_message(self, speed_mhz):
+        msg = f"LCD speed set to {speed_mhz} MHz.\n\nRestarting service..."
+        d = MessageDialog(self.pstack, msg, title="LCD Speed", width=280, height=140)
         self.pstack.push_panel(d)
 
     def draw_bank_menu(self, event):
@@ -619,7 +643,7 @@ class Lcd(abstract_lcd.Lcd):
         }
         param = Parameter.Parameter(info, value, None)
         d = Parameterdialog(self.pstack, param,
-                            width=270, height=130, auto_destroy=False, title=name, timeout=2.2,
+                            width=270, height=130, auto_destroy=False, title=name, timeout=PARAMETER_DIALOG_TIMEOUT,
                             action=commit_callback, object=symbol)
         self.pstack.push_panel(d)
         return d

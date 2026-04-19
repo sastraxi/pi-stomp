@@ -32,6 +32,9 @@ class Lcd(abstract_lcd.Lcd):
             raise Lcd.__single
         Lcd.__single = self
 
+        # Polling divisor for main loop (monochrome LCD is fast)
+        self.poll_divisor = 3
+
         # GFX properties
         self.width, self.height = lcd.dimensions()
         self.height -= 1  # TODO figure out why this is needed
