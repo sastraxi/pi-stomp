@@ -29,8 +29,8 @@ from uilib.lcd_ili9341 import *
 
 from pistomp.footswitch import Footswitch  # TODO would like to avoid this module knowing such details
 from pistomp.analogmidicontrol import AnalogMidiControl, as_midi_value
-from pistomp.encodermidicontrol import EncoderMidiControl
 from pistomp.encoder_controller import EncoderController
+from blend.manager import BlendMode
 
 # Parameter dialog auto-dismiss timeout (seconds)
 PARAMETER_DIALOG_TIMEOUT = 1.0
@@ -188,8 +188,24 @@ class Lcd(abstract_lcd.Lcd):
                 midi_value = None
                 if isinstance(icon.object, AnalogMidiControl):
                     midi_value = as_midi_value(icon.object.last_read)
-                elif isinstance(icon.object, (EncoderMidiControl, EncoderController)):
+                elif isinstance(icon.object, EncoderController):
                     midi_value = icon.object.midi_value
+                elif isinstance(icon.object, BlendMode):
+                    input_ctrl = icon.object.input_controller.controlled_input
+                    if input_ctrl:
+                        if isinstance(input_ctrl, EncoderController):
+                            position = input_ctrl.midi_value / 127.0
+                        else:
+                            position = input_ctrl.last_read / 1023.0
+                        midi_value = int(position * 127)
+
+                        stops = icon.object.input_controller.stops
+                        closest_stop = min(stops, key=lambda s: abs(s.position - position))
+                        snapshot_name = self.handler.current.presets.get(closest_stop.snapshot_index, "")
+                        if snapshot_name and snapshot_name != icon.text:
+                            icon.set_text(snapshot_name)
+                    else:
+                        logging.warning("BlendMode icon has no associated input controller")
 
                 if midi_value is not None:
                     progress = midi_value / 127.0
@@ -777,6 +793,15 @@ class Lcd(abstract_lcd.Lcd):
                     analog_control = ac
                     break
 
+            # Substitute BlendMode object if this control is the blend mode input
+            icon_object = analog_control
+            if (
+                analog_control is not None
+                and self.handler.active_blend_mode
+                and analog_control.id == self.handler.active_blend_mode.config.get("input_id", 0)
+            ):
+                icon_object = self.handler.active_blend_mode
+
             if k is None:
                 # Non-mapped control
                 name = "none"
@@ -807,6 +832,10 @@ class Lcd(abstract_lcd.Lcd):
                             text_color = Category.get_category_color(category)
                             color = self.default_plugin_color
 
+            if isinstance(icon_object, BlendMode):
+                text_color = self.default_plugin_color
+                color = self.default_plugin_color
+
             if control_type == Token.KNOB:
                 w = Icon(
                     box=Box.xywh(x, y, width_per_control, 20),
@@ -814,7 +843,7 @@ class Lcd(abstract_lcd.Lcd):
                     text_color=text_color,
                     parent=self.main_panel,
                     outline=0,
-                    object=analog_control,
+                    object=icon_object,
                 )
                 w.set_foreground(color)
                 w.add_knob()
@@ -826,7 +855,7 @@ class Lcd(abstract_lcd.Lcd):
                     text_color=text_color,
                     parent=self.main_panel,
                     outline=0,
-                    object=analog_control,
+                    object=icon_object,
                 )
                 w.set_foreground(color)
                 w.add_pedal()

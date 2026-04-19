@@ -383,6 +383,10 @@ class Modhandler(Handler):
         return mod_bundle
 
     def set_current_pedalboard(self, pedalboard):
+        # Redraw analog assignments to revert any BlendMode icon substitution
+        if self.current and self.current.analog_controllers:
+            self.lcd.draw_analog_assignments(self.current.analog_controllers)
+
         # Delete previous "current"
         del self.current
 
