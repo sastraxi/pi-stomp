@@ -303,7 +303,7 @@ class Hardware:
             logging.debug("Created AnalogMidiControl Input: %d, Midi Chan: %d, CC: %d" %
                           (adc_input, midi_channel, midi_cc))
 
-    def add_encoder(self, id, type, callback, longpress_callback, midi_channel, midi_cc, shortpress_config=None, midiout=None):
+    def add_encoder(self, id, type, callback, longpress_callback, midi_channel, midi_cc, midiout=None):
         # This should be implemented by hardware subclasses that support tweak encoders (Tre at least)
         pass
 

@@ -29,7 +29,8 @@ from uilib.lcd_ili9341 import *
 
 from pistomp.footswitch import Footswitch  # TODO would like to avoid this module knowing such details
 
-#import traceback
+# Parameter dialog auto-dismiss timeout (seconds)
+PARAMETER_DIALOG_TIMEOUT = 1.0
 
 class Lcd(abstract_lcd.Lcd):
 
@@ -443,10 +444,9 @@ class Lcd(abstract_lcd.Lcd):
                       ("Off", self.parameter_commit_enum, (parameter, 0), current_value==0)]
             d = self.draw_selection_menu(items, title, auto_dismiss=True)
         else:
-            taper = 2 if parameter.type == Parameter.Type.LOGARITHMIC else 1
-            d = Parameterdialog(self.pstack, parameter.name, current_value, parameter.minimum, parameter.maximum,
+            d = Parameterdialog(self.pstack, parameter,
                                 width=270, height=130, auto_destroy=True, title=title, timeout=timeout,
-                                action=self.parameter_commit, object=parameter, taper=taper)
+                                action=self.parameter_commit, object=parameter)
             self.pstack.push_panel(d)
 
         self.w_parameter_dialogs[parameter.name] = d
@@ -590,23 +590,35 @@ class Lcd(abstract_lcd.Lcd):
                  ("High Band Gain", self.handler.system_menu_eq5_gain, None)]
         self.draw_selection_menu(items, "Audio Menu") 
 
-    def draw_audio_parameter_dialog(self, name, symbol, value, min, max, commit_callback):
-        d = util.DICT_GET(self.w_parameter_dialogs, symbol)
+    def draw_audio_parameter_dialog(self, parameter, commit_callback):
+        d = util.DICT_GET(self.w_parameter_dialogs, parameter.name)
         if d is not None and d.parent is not None:
             return d
 
-        d = Parameterdialog(self.pstack, name, value, min, max,
-                            width=270, height=130, auto_destroy=True, title=name, timeout=2.2,
-                            action=commit_callback, object=symbol, taper=1)
-        self.w_parameter_dialogs[symbol] = d
+        d = Parameterdialog(self.pstack, parameter,
+                            width=270, height=130, auto_destroy=True, title=parameter.name,
+                            timeout=PARAMETER_DIALOG_TIMEOUT,
+                            action=commit_callback, object=parameter.symbol)
+        self.w_parameter_dialogs[parameter.name] = d
         self.pstack.push_panel(d)
         return d
+
+    def display_parameter_value(self, parameter: Parameter.Parameter, value: float) -> None:
+        d = self.draw_parameter_dialog(parameter, timeout=PARAMETER_DIALOG_TIMEOUT)
+        if d:
+            d.update_value(value)
 
     def draw_vu_calibration_dialog(self, symbol, value, commit_callback):
         if value is None:
             value = 512  # 1024 / 2
         name = "VU Calibration"
-        d = Parameterdialog(self.pstack, name, value, 502, 522,
+        info = {
+            Token.NAME: name,
+            Token.SYMBOL: symbol,
+            Token.RANGES: {Token.MINIMUM: 0, Token.MAXIMUM: 1023}
+        }
+        param = Parameter.Parameter(info, value, None)
+        d = Parameterdialog(self.pstack, param,
                             width=270, height=130, auto_destroy=False, title=name, timeout=2.2,
                             action=commit_callback, object=symbol)
         self.pstack.push_panel(d)

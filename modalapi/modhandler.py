@@ -25,6 +25,7 @@ import yaml
 
 import common.token as Token
 import common.util as util
+from common.parameter import Parameter, TTL_PROPERTIES, TTL_INTEGER
 import modalapi.pedalboard as Pedalboard
 import modalapi.wifi as Wifi
 import modalapi.external_midi as ExternalMidi
@@ -32,10 +33,9 @@ from modalapi.external_midi import EXTERNAL_INSTANCE_ID
 import pistomp.settings as Settings
 
 from pistomp.analogmidicontrol import AnalogMidiControl
-from pistomp.controller import RoutingDestination
-from pistomp.encodermidicontrol import EncoderMidiControl
+from pistomp.controller import RoutingDestination, RoutingInfo
+from pistomp.encoder_controller import EncoderController
 from pistomp.footswitch import Footswitch
-from pistomp.handler import Handler
 from pathlib import Path
 
 
@@ -75,6 +75,7 @@ class Modhandler(Handler):
 
         self.current = None  # pointer to Current class
         self.lcd = None
+        self.volume_parameter = None
 
         # Backup
         self.backup_dir = "/media/usb0/backups"
@@ -140,6 +141,28 @@ class Modhandler(Handler):
     def add_hardware(self, hardware):
         self.hardware = hardware
         hardware.external_midi = self.external_midi
+        self.bind_volume_encoder()
+
+    def bind_volume_encoder(self):
+        if self.hardware is None:
+            return
+        for enc in self.hardware.encoders:
+            if enc.type == Token.VOLUME and isinstance(enc, EncoderController):
+                value = self.audiocard.get_volume_parameter(self.audiocard.MASTER)
+                info = {
+                    Token.NAME: "Output Volume",
+                    Token.SYMBOL: self.audiocard.MASTER,
+                    Token.RANGES: {
+                        Token.MINIMUM: -25.75,
+                        Token.MAXIMUM: 6.0
+                    }
+                }
+                volume_param = Parameter(info, value, None)
+                volume_param.unit_symbol = "dB"
+                enc.bind_to_parameter(volume_param)
+                self.volume_parameter = volume_param
+                logging.info(f"Bound volume encoder to audio parameter: {volume_param.name}")
+                break
 
     def add_lcd(self, lcd):
         self.lcd = lcd
@@ -370,6 +393,7 @@ class Modhandler(Handler):
 
         # Initialize the data and draw on LCD
         self.bind_current_pedalboard()
+        self.bind_volume_encoder()
         self.load_current_presets()
         self.lcd.link_data(self.pedalboard_list, self.current, self.hardware.footswitches)
         self.lcd.draw_main_panel()
@@ -389,8 +413,7 @@ class Modhandler(Handler):
 
         # Clear previous parameter bindings from all controllers except volume encoder
         for controller in self.hardware.controllers.values():
-            is_volume = hasattr(controller, 'type') and controller.type == Token.VOLUME
-            if not is_volume:
+            if getattr(controller, 'type', None) != Token.VOLUME:
                 controller.parameter = None
 
         # Clear analog controllers display data
@@ -416,61 +439,53 @@ class Modhandler(Handler):
                                 )
                                 continue
 
-                            controller.parameter = param
-                            controller.set_value(param.value)
+                            controller.bind_to_parameter(param)
                             plugin.controllers.append(controller)
                             if isinstance(controller, Footswitch):
-                                # TODO sort this list so selection orders correctly (sort on midi_CC?)
                                 plugin.has_footswitch = True
                                 footswitch_plugins.append(plugin)
                                 controller.set_category(plugin.category)
-                            elif isinstance(controller, AnalogMidiControl):
+                            else:
                                 key = "%s:%s" % (plugin.instance_id, param.name)
-                                controller.cfg[Token.CATEGORY] = plugin.category  # somewhat LAME adding to cfg dict
-                                controller.cfg[Token.TYPE] = controller.type
-                                controller.cfg[Token.ID] = controller.id
-                                self.current.analog_controllers[key] = controller.cfg
-                            elif isinstance(controller, EncoderMidiControl):
-                                key = "%s:%s" % (plugin.instance_id, param.name)
-                                controller.cfg[Token.CATEGORY] = plugin.category  # somewhat LAME adding to cfg dict
-                                controller.cfg[Token.TYPE] = controller.type
-                                controller.cfg[Token.ID] = controller.id
-                                self.current.analog_controllers[key] = controller.cfg
+                                display_info = controller.get_display_info()
+                                display_info['category'] = plugin.category
+                                self.current.analog_controllers[key] = display_info
 
             # Special case for volume control
             for e in self.hardware.encoders:
                 if e.type == Token.VOLUME:
-                    cfg = {
-                        Token.CATEGORY: None,
-                        Token.TYPE: e.type,
-                        Token.ID: e.id
-                    }
-                    self.current.analog_controllers[Token.VOLUME] = cfg
+                    display_info = e.get_display_info()
+                    self.current.analog_controllers[Token.VOLUME] = display_info
 
-        # Handle external controllers (bind synthetic parameter + add to display)
+        # Handle all external controllers (create synthetic parameters for display)
         for controller in self.hardware.controllers.values():
             routing = controller.get_routing_info()
-            if routing.destination == RoutingDestination.EXTERNAL:
-                if controller.midi_CC is not None:
+            if routing.destination != RoutingDestination.EXTERNAL:
+                continue
+            if controller.midi_CC is None:
+                continue
+
+            # Create synthetic parameter if not already bound.
+            # AnalogMidiControl uses EXTERNAL_INSTANCE_ID so parameter_value_commit can guard it;
+            # EncoderController routes through encoder_value_changed instead.
+            if controller.parameter is None:
+                if isinstance(controller, AnalogMidiControl):
                     controller.parameter = self.hardware._create_external_parameter(
                         controller, routing.port_name, controller.midi_channel, controller.midi_CC
                     )
-                if isinstance(controller, AnalogMidiControl):
-                    if controller.midi_CC is not None:
-                        key = f"{controller.midi_channel}:{controller.midi_CC}"
-                        display_info = controller.get_display_info()
-                        display_info['category'] = 'External'
-                        self.current.analog_controllers[key] = display_info
-                elif isinstance(controller, EncoderMidiControl):
-                    if controller.midi_CC is not None:
-                        key = f"{controller.midi_channel}:{controller.midi_CC}"
-                        cfg = {
-                            Token.CATEGORY: 'External',
-                            Token.TYPE: controller.type,
-                            Token.ID: controller.id,
-                            **controller.get_display_info()
-                        }
-                        self.current.analog_controllers[key] = cfg
+                else:
+                    ext_info = {
+                        Token.NAME: f"{routing.port_name} CC{controller.midi_CC}",
+                        Token.SYMBOL: f"external_{controller.midi_CC}",
+                        Token.RANGES: {Token.MINIMUM: 0, Token.MAXIMUM: 127},
+                        TTL_PROPERTIES: [TTL_INTEGER]
+                    }
+                    controller.bind_to_parameter(Parameter(ext_info, controller.midi_value, None))
+
+            key = f"{controller.midi_channel}:{controller.midi_CC}"
+            display_info = controller.get_display_info()
+            display_info['category'] = 'External'
+            self.current.analog_controllers[key] = display_info
 
     def pedalboard_change(self, pedalboard=None):
         logging.info("Pedalboard change")
@@ -655,6 +670,15 @@ class Modhandler(Handler):
             if d:
                 self.lcd.enc_step_widget(d, direction)
 
+    def encoder_value_changed(self, param: Parameter, new_value: float, routing_info: RoutingInfo) -> None:
+        self.lcd.display_parameter_value(param, new_value)
+        if routing_info.destination == RoutingDestination.EXTERNAL:
+            return
+        if param.instance_id is None:
+            self.audio_parameter_commit(param.symbol, new_value)
+        else:
+            self.parameter_value_commit(param, new_value)
+
     #
     # System Menu
     #
@@ -838,23 +862,35 @@ class Modhandler(Handler):
     def configure_wifi_credentials(self, ssid, password):
         return self.wifi_manager.configure_wifi(ssid, password)
 
-    def audio_parameter_change(self, direction, name, symbol, value, min, max, commit_callback):
-        if symbol is not None:
-            d = self.lcd.draw_audio_parameter_dialog(name, symbol, value, min, max, commit_callback)
-            if d is not None:
+    def _create_audio_parameter(self, name, symbol, min_val, max_val):
+        value = self.audiocard.get_volume_parameter(symbol)
+        info = {
+            Token.NAME: name,
+            Token.SYMBOL: symbol,
+            Token.RANGES: {
+                Token.MINIMUM: min_val,
+                Token.MAXIMUM: max_val
+            }
+        }
+        param = Parameter(info, value, None)
+        param.unit_symbol = "dB"
+        return param
+
+    def audio_parameter_change(self, direction: int | None, parameter, commit_callback):
+        if parameter is not None:
+            d = self.lcd.draw_audio_parameter_dialog(parameter, commit_callback)
+            if d is not None and direction is not None:
                 self.lcd.enc_step_widget(d, direction)
 
     def system_menu_input_gain(self, arg):
-        value = self.audiocard.get_volume_parameter(self.audiocard.CAPTURE_VOLUME)
-        self.lcd.draw_audio_parameter_dialog("Input Gain", self.audiocard.CAPTURE_VOLUME, value,
-                                             -19.75, 12, self.audio_parameter_commit)
+        param = self._create_audio_parameter("Input Gain", self.audiocard.CAPTURE_VOLUME, -19.75, 12)
+        self.audio_parameter_change(arg, param, self.audio_parameter_commit)
 
     def system_menu_headphone_volume(self, arg):
-        value = self.audiocard.get_volume_parameter(self.audiocard.MASTER)
-        if arg is None:
-            arg = 0
-        self.audio_parameter_change(arg, "Output Volume", self.audiocard.MASTER, value,
-                                             -25.75, 6, self.audio_parameter_commit)
+        param = self.volume_parameter
+        if param is None:
+            param = self._create_audio_parameter("Output Volume", self.audiocard.MASTER, -25.75, 6.0)
+        self.audio_parameter_change(arg, param, self.audio_parameter_commit)
 
     def system_menu_vu_calibration(self, arg):
         value = self.settings.get_setting('analogVU.adc_baseline')
@@ -866,29 +902,24 @@ class Modhandler(Handler):
         self.hardware.recalibrateVU_baseline(value)
 
     def system_menu_eq1_gain(self, arg):
-        value = self.audiocard.get_volume_parameter(self.audiocard.EQ_1)
-        self.lcd.draw_audio_parameter_dialog("Low Band Gain", self.audiocard.EQ_1, value,
-                                             -10.50, 12, self.audio_parameter_commit)
+        param = self._create_audio_parameter("Low Band Gain", self.audiocard.EQ_1, -10.50, 12)
+        self.audio_parameter_change(arg, param, self.audio_parameter_commit)
 
     def system_menu_eq2_gain(self, arg):
-        value = self.audiocard.get_volume_parameter(self.audiocard.EQ_2)
-        self.lcd.draw_audio_parameter_dialog("Low-Mid Band Gain", self.audiocard.EQ_2, value,
-                                             -10.50, 12, self.audio_parameter_commit)
+        param = self._create_audio_parameter("Low-Mid Band Gain", self.audiocard.EQ_2, -10.50, 12)
+        self.audio_parameter_change(arg, param, self.audio_parameter_commit)
 
     def system_menu_eq3_gain(self, arg):
-        value = self.audiocard.get_volume_parameter(self.audiocard.EQ_3)
-        self.lcd.draw_audio_parameter_dialog("Mid Band Gain", self.audiocard.EQ_3, value,
-                                             -10.50, 12, self.audio_parameter_commit)
+        param = self._create_audio_parameter("Mid Band Gain", self.audiocard.EQ_3, -10.50, 12)
+        self.audio_parameter_change(arg, param, self.audio_parameter_commit)
 
     def system_menu_eq4_gain(self, arg):
-        value = self.audiocard.get_volume_parameter(self.audiocard.EQ_4)
-        self.lcd.draw_audio_parameter_dialog("High-Mid Band Gain", self.audiocard.EQ_4, value,
-                                             -10.50, 12, self.audio_parameter_commit)
+        param = self._create_audio_parameter("High-Mid Band Gain", self.audiocard.EQ_4, -10.50, 12)
+        self.audio_parameter_change(arg, param, self.audio_parameter_commit)
 
     def system_menu_eq5_gain(self, arg):
-        value = self.audiocard.get_volume_parameter(self.audiocard.EQ_5)
-        self.lcd.draw_audio_parameter_dialog("High Band Gain", self.audiocard.EQ_5, value,
-                                             -10.50, 12, self.audio_parameter_commit)
+        param = self._create_audio_parameter("High Band Gain", self.audiocard.EQ_5, -10.50, 12)
+        self.audio_parameter_change(arg, param, self.audio_parameter_commit)
 
     def audio_parameter_commit(self, symbol, value):
         self.audiocard.set_volume_parameter(symbol, value)
