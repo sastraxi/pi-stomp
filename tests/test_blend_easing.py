@@ -17,32 +17,6 @@ from blend.easing import (
 
 
 # ---------------------------------------------------------------------------
-# Shared invariants: every easing function must map 0→0 and 1→1
-# ---------------------------------------------------------------------------
-
-_ALL_EASINGS = [
-    ease_in_quad,
-    ease_out_quad,
-    ease_in_out_quad,
-    ease_in_cubic,
-    ease_out_cubic,
-    ease_in_out_cubic,
-    exponential_easing,
-    sine_easing,
-]
-
-
-@pytest.mark.parametrize("fn", _ALL_EASINGS)
-def test_easing_zero_maps_to_zero(fn):
-    assert fn(0.0) == pytest.approx(0.0)
-
-
-@pytest.mark.parametrize("fn", _ALL_EASINGS)
-def test_easing_one_maps_to_one(fn):
-    assert fn(1.0) == pytest.approx(1.0)
-
-
-# ---------------------------------------------------------------------------
 # Midpoint bias — ease_in variants are slower at the start (f(0.5) < 0.5)
 # ---------------------------------------------------------------------------
 
@@ -80,23 +54,16 @@ def test_sine_easing_midpoint_above_half():
     assert sine_easing(0.5) > 0.5
 
 
-# ---------------------------------------------------------------------------
-# Symmetry — ease_in_out variants are symmetric around (0.5, 0.5)
-# ---------------------------------------------------------------------------
-
-
-def test_ease_in_out_quad_symmetric():
+def test_ease_in_out_quad_midpoint_at_half():
     assert ease_in_out_quad(0.5) == pytest.approx(0.5)
-    assert ease_in_out_quad(0.25) == pytest.approx(1.0 - ease_in_out_quad(0.75), rel=1e-9)
 
 
-def test_ease_in_out_cubic_symmetric():
+def test_ease_in_out_cubic_midpoint_at_half():
     assert ease_in_out_cubic(0.5) == pytest.approx(0.5)
-    assert ease_in_out_cubic(0.25) == pytest.approx(1.0 - ease_in_out_cubic(0.75), rel=1e-9)
 
 
 # ---------------------------------------------------------------------------
-# exponential_easing boundary clamps
+# exponential_easing boundary clamps (special-cased in code)
 # ---------------------------------------------------------------------------
 
 

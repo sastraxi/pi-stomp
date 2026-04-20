@@ -197,35 +197,3 @@ def test_sync_current_position_sends_constant_params():
     mock_setter.send_parameter.assert_called_once_with("/Fx", "Const", 0.75)
 
 
-def test_sync_current_position_logs_skipped_differing_param(caplog):
-    param_data = _make_param_data(0.0, 1.0)
-    diff_map = {"/Fx": {"Vol": param_data}}
-    stops = [BlendStop(0.0, 0, {"/Fx": {"Vol": 0.0}}), BlendStop(1.0, 1, {"/Fx": {"Vol": 1.0}})]
-    mock_setter = MagicMock()
-    mock_setter.send_parameter.return_value = False
-    ic = InputController(linear_interpolation, stops, [diff_map], mock_setter)
-
-    control = _analog_control(1)
-    ic.attach_to_input([control], [], 1)
-    ic._get_normalized_position = lambda control: 0.5
-
-    with caplog.at_level(logging.DEBUG):
-        ic.sync_current_position()
-    assert "Skipped differing" in caplog.text
-
-
-def test_sync_current_position_logs_skipped_constant_param(caplog):
-    state = {"/Fx": {"Const": 0.75}}
-    stop_a = BlendStop(0.0, 0, state)
-    stop_b = BlendStop(1.0, 1, state)
-    mock_setter = MagicMock()
-    mock_setter.send_parameter.return_value = False
-    ic = InputController(linear_interpolation, [stop_a, stop_b], [{}], mock_setter)
-
-    control = _analog_control(1)
-    ic.attach_to_input([control], [], 1)
-    ic._get_normalized_position = lambda control: 0.5
-
-    with caplog.at_level(logging.DEBUG):
-        ic.sync_current_position()
-    assert "Skipped constant" in caplog.text

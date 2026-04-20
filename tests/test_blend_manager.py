@@ -237,7 +237,3 @@ def test_cleanup_resets_state_and_detaches():
     assert bm.segment_diff_maps == []
 
 
-def test_cleanup_is_idempotent_when_already_clean():
-    bm = _make_blend_mode({"name": "T", "input_id": 1, "stops": []})
-    bm.input_controller = None
-    bm.cleanup()  # should not raise

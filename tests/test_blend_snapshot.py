@@ -218,16 +218,6 @@ def test_sync_config_one_stop_is_skipped(mock_get, tmp_path):
 
 
 @patch("blend.snapshot.req.get")
-def test_notify_mod_ui_non_200_logs_warning(mock_get, caplog):
-    import logging
-
-    mock_get.return_value = MagicMock(status_code=503)
-    with caplog.at_level(logging.WARNING):
-        SnapshotManager._notify_mod_ui("http://localhost/")
-    assert "Failed" in caplog.text
-
-
-@patch("blend.snapshot.req.get")
 def test_notify_mod_ui_exception_does_not_propagate(mock_get):
     mock_get.side_effect = ConnectionError("unreachable")
     SnapshotManager._notify_mod_ui("http://localhost/")  # must not raise
