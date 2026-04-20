@@ -29,7 +29,7 @@ import modalapi.wifi as Wifi
 import pistomp.settings as Settings
 from blend.snapshot import SnapshotManager
 from modalapi.websocket_bridge import AsyncWebSocketBridge
-from modalapi.ws_protocol import parse_message, LoadingEndMessage, PedalSnapshotMessage
+from modalapi.ws_protocol import parse_message, LoadingEndMessage, PedalSnapshotMessage, WebSocketMessage
 from modalapi.pedalboard_monitor import PedalboardMonitor
 
 from pistomp.analogmidicontrol import AnalogMidiControl
@@ -99,7 +99,6 @@ class Modhandler(Handler):
         try:
             self.ws_bridge = AsyncWebSocketBridge(
                 ws_url='ws://localhost:80/websocket',
-                max_queue_size=100,
                 backpressure_threshold=8192  # 8 KB
             )
             self.ws_bridge.start()
@@ -293,12 +292,10 @@ class Modhandler(Handler):
         else:
             logging.debug(f"Snapshot '{new_snapshot_name}' is not a blend snapshot")
 
-    def _handle_ws_message(self, raw_message: str):
-        """Handle incoming WebSocket message from MOD-UI using typed protocol."""
-        msg = parse_message(raw_message)
-
+    def _handle_ws_message(self, msg: WebSocketMessage):
+        """Handle incoming WebSocket message from MOD-UI."""
         if isinstance(msg, LoadingEndMessage):
-            logging.info(f"WebSocket: Pedalboard loading finished, snapshot={msg.snapshot_id}")
+            logging.debug(f"WebSocket: Pedalboard loading finished, snapshot={msg.snapshot_id}")
             # Sometimes mod-ui sends us -1 for preset index, but shows 0 anyway ("Default")
             self.next_pedalboard_preset_index = max(0, msg.snapshot_id)
 
@@ -308,7 +305,7 @@ class Modhandler(Handler):
                 mod_bundle = self.pedalboard_monitor.get_current_pedalboard_bundle()
                 if mod_bundle and self.current and mod_bundle == self.current.pedalboard.bundle:
                     # Same pedalboard - this is a new snapshot on current board, not a pre-switch
-                    logging.info(f"WebSocket: Snapshot changed to {msg.snapshot_id} ({msg.snapshot_name}) - clearing stale pre-switch flag")
+                    logging.debug(f"WebSocket: Snapshot changed to {msg.snapshot_id} ({msg.snapshot_name}) - clearing stale pre-switch flag")
                     self.next_pedalboard_preset_index = None
 
                     if msg.snapshot_id not in self.current.presets:
@@ -319,10 +316,11 @@ class Modhandler(Handler):
                     self.lcd.draw_title()
                 else:
                     # Different pedalboard pending - this is a legitimate pre-switch update
-                    logging.info(f"WebSocket: Pre-switch snapshot changed to {msg.snapshot_id}")
+                    logging.debug(f"WebSocket: Pre-switch snapshot changed to {msg.snapshot_id}")
                     self.next_pedalboard_preset_index = msg.snapshot_id
             else:
-                logging.info(f"WebSocket: Snapshot changed to {msg.snapshot_id} ({msg.snapshot_name})")
+                assert self.current is not None, "Received snapshot message but no current pedalboard is set"
+                logging.debug(f"WebSocket: Snapshot changed to {msg.snapshot_id} ({msg.snapshot_name})")
 
                 if msg.snapshot_id not in self.current.presets:
                     self.current.presets[msg.snapshot_id] = msg.snapshot_name
@@ -332,12 +330,12 @@ class Modhandler(Handler):
                 self.lcd.draw_title()
 
     def poll_modui_changes(self):
-        """Poll for changes from MOD-UI"""
+        """Poll for changes from MOD-UI: websockets and file watching"""
         if self.ws_bridge is not None:
             messages = self.ws_bridge.get_received_messages()
             for msg in messages:
                 try:
-                    self._handle_ws_message(msg)
+                    self._handle_ws_message(parse_message(msg))
                 except Exception as e:
                     logging.error(f"Error handling WebSocket message '{msg}': {e}")
 
