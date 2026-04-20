@@ -3,14 +3,13 @@
 import asyncio
 import queue
 
-import pytest
-
 from modalapi.websocket_bridge import AsyncWebSocketBridge, WebSocketWorker
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_bridge() -> AsyncWebSocketBridge:
     """Construct a bridge without starting the background thread."""
@@ -45,6 +44,7 @@ class _FakeWs:
         if not self._messages:
             if self._close_after:
                 import websockets.exceptions
+
                 raise websockets.exceptions.ConnectionClosed(None, None)
             raise StopAsyncIteration
         return self._messages.pop(0)
