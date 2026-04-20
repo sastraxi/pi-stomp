@@ -17,7 +17,7 @@
 
 import logging
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from blend.interpolation import (
     # Spline interpolation
@@ -37,6 +37,7 @@ from blend.interpolation import (
 from blend.parameter_setter import ParameterSetter
 from blend.input_controller import InputController
 from blend.snapshot import SnapshotManager
+from modalapi.pedalboard_monitor import FileChangeMonitor
 from blend.stop import BlendStop
 from blend.types import (
     BlendSnapshotConfig,
@@ -47,6 +48,9 @@ from blend.types import (
     StopData,
 )
 from modalapi.parameter import Type as ParameterType
+
+if TYPE_CHECKING:
+    from modalapi.modhandler import Modhandler
 
 
 # Mapping of all interpolation function names
@@ -68,22 +72,10 @@ INTERPOLATION_FUNCTIONS: dict[str, InterpolationFunc] = {
 
 
 class BlendMode:
-    """
-    Coordinates blend mode components with pre-computation optimization.
-
-    Pre-computes enriched diff maps for each segment at initialization to
-    minimize work in the critical path (10ms polling loop).
-    """
+    """Coordinates blend mode components to enable smooth parameter interpolation."""
 
     def __init__(self, handler: Any, config: BlendSnapshotConfig) -> None:
-        """
-        Initialize blend mode coordinator.
-
-        Args:
-            handler: Reference to Modhandler instance
-            config: Single blend snapshot configuration dict from YAML
-        """
-        self.handler: Any = handler  # Modhandler - avoiding circular import
+        self.handler: Modhandler = handler
         self.config: BlendSnapshotConfig = config
         self.stops: list[BlendStop] = []
         self.segment_diff_maps: list[EnrichedDiffMap] = []
@@ -92,40 +84,25 @@ class BlendMode:
         self.parameter_setter: ParameterSetter | None = None
         self.input_controller: InputController | None = None
 
-        # Snapshot file monitoring (for detecting stop modifications)
-        self.snapshots_file_timestamp: float = 0
+        self.snapshots_monitor: FileChangeMonitor | None = None
 
     def prepare(self) -> None:
         """
         Prepare blend mode (one-time setup when pedalboard loads).
-
         Pre-computes enriched diff maps for each segment at initialization
         to minimize work in the critical path (pedal movement).
-
-        Steps:
-        1. Validate config and resolve interpolation function
-        2. Load and parse snapshots
-        3. Create stops
-        4. PRE-COMPUTE: Build enriched diff maps for each segment
-        5. Initialize parameter setter
-        6. Initialize input controller (but don't attach yet)
         """
         logging.info("Preparing blend mode...")
 
         try:
-            # Validate configuration and resolve interpolation function
             interpolation_func = self._validate_config()
-
-            # Load snapshots and create stops
             self.stops = self._create_stops()
 
             # Extract MIDI-bound parameters to exclude from interpolation
             midi_bound_params = self._extract_midi_bound_parameters()
 
-            # PRE-COMPUTE: Build enriched diff maps for each segment
             logging.info(f"Pre-computing diff maps for {len(self.stops) - 1} segments...")
             self.segment_diff_maps = []
-
             for segment_idx in range(len(self.stops) - 1):
                 lower = self.stops[segment_idx]
                 upper = self.stops[segment_idx + 1]
@@ -142,30 +119,28 @@ class BlendMode:
 
                 self.segment_diff_maps.append(diff_map)
 
-                # Log summary
                 param_count = sum(len(params) for params in diff_map.values())
                 logging.debug(
                     f"  Segment {segment_idx} ({lower.position:.2f} -> {upper.position:.2f}): "
                     f"{param_count} differing parameters"
                 )
 
-            logging.info("Diff map pre-computation complete")
-
-            # Initialize parameter setter (uses shared WebSocket bridge from handler)
             self.parameter_setter = ParameterSetter(self.handler.ws_bridge)
 
-            # Initialize input controller (but don't attach yet)
             input_id = self.config.get("input_id")
             if input_id is None:
                 raise ValueError("Blend mode requires 'input_id' config")
 
+            # Initialize input controller (but don't attach yet)
             self.input_controller = InputController(
                 interpolation_func,
                 self.stops,
-                self.segment_diff_maps,  # Pre-computed!
+                self.segment_diff_maps,
                 self.parameter_setter,
             )
 
+            snapshots_path = Path(self.handler.current.pedalboard.bundle) / "snapshots.json"
+            self.snapshots_monitor = FileChangeMonitor(str(snapshots_path))
             logging.info(f"Blend mode prepared with {len(self.stops)} stops")
 
         except Exception as e:
@@ -192,9 +167,7 @@ class BlendMode:
 
         # Attach to analog input (expression pedal or encoder)
         self.input_controller.attach_to_input(
-            self.handler.hardware.analog_controls,
-            self.handler.hardware.encoders,
-            input_id
+            self.handler.hardware.analog_controls, self.handler.hardware.encoders, input_id
         )
 
         # Immediately sync current input position to set all parameters
@@ -210,12 +183,7 @@ class BlendMode:
         logging.info(f"Activated blend mode: '{self.config.get('name')}'")
 
     def deactivate(self) -> None:
-        """
-        Deactivate blend mode (detach from input).
-
-        Called when switching away from this blend snapshot. Keeps everything
-        prepared so it can be quickly re-activated.
-        """
+        """Deactivate blend mode (detach from input)."""
         if not self.input_controller:
             return
 
@@ -240,15 +208,6 @@ class BlendMode:
 
         Converts list format to dict with evenly spaced positions.
         Example: ["A", "B", "C"] → {"0.0": "A", "0.5": "B", "1.0": "C"}
-
-        Args:
-            stops_config: Stops in dict or list format
-
-        Returns:
-            Normalized stops as dict {"position": snapshot_id}
-
-        Raises:
-            ValueError: If list has less than 2 entries or invalid format
         """
         if isinstance(stops_config, dict):
             return stops_config
@@ -298,18 +257,6 @@ class BlendMode:
         return midi_params
 
     def _validate_config(self) -> InterpolationFunc:
-        """
-        Validate config and resolve interpolation function.
-
-        Supports spline interpolation (hermite, catmull_rom) and
-        easing-based interpolation (linear, ease_in_quad, etc.).
-
-        Returns:
-            Per-parameter interpolation function
-
-        Raises:
-            ValueError: If config is invalid
-        """
         # Parse interpolation function name
         interp_name = self.config.get("interpolation", "linear")
         interpolation_func = INTERPOLATION_FUNCTIONS.get(interp_name)
@@ -323,23 +270,12 @@ class BlendMode:
         return interpolation_func
 
     def _create_stops(self) -> list[BlendStop]:
-        """
-        Load snapshots and create BlendStop objects.
-
-        Returns:
-            List of BlendStop objects (sorted by position)
-
-        Raises:
-            ValueError: If config is invalid or stops cannot be created
-        """
-        # Get and normalize stops configuration
+        """Load snapshots and create BlendStop objects from current config."""
         stops_config = self.config.get("stops")
         if not stops_config:
             raise ValueError("Blend mode requires 'stops' config")
 
-        # Normalize to dict format (handles both dict and list)
         snapshot_stops = self._normalize_stops_config(stops_config)
-
         if len(snapshot_stops) < 2:
             raise ValueError(f"Blend mode requires at least 2 stops, got {len(snapshot_stops)}")
 
@@ -347,9 +283,7 @@ class BlendMode:
         bundle_path = Path(self.handler.current.pedalboard.bundle)
         snapshots_data = SnapshotManager.read_snapshots_file(bundle_path)
 
-        # Parse and validate snapshot_stops entries
         stops_data: list[StopData] = []
-
         for position_str, snapshot_identifier in snapshot_stops.items():
             # Validate position is a stringified float
             try:
@@ -368,7 +302,6 @@ class BlendMode:
 
             stops_data.append(StopData(position, snapshot_index))
 
-        # Sort by position
         stops_data.sort(key=lambda x: x.position)
 
         # Create BlendStop objects
@@ -389,10 +322,7 @@ class BlendMode:
             logging.warning(f"Limiting to 4 stops (got {len(stops)})")
             stops = stops[:4]
 
-        # Sort stops by position
         stops.sort(key=lambda s: s.position)
-
-        # Validate stops are monotonic and distinguishable at MIDI CC resolution
         for i in range(len(stops) - 1):
             pos_a = stops[i].position
             pos_b = stops[i + 1].position
@@ -416,16 +346,6 @@ class BlendMode:
         return stops
 
     def _get_parameter_type(self, instance_id: str, symbol: str) -> ParameterType:
-        """
-        Get parameter type from pedalboard data.
-
-        Args:
-            instance_id: Plugin instance ID
-            symbol: Parameter symbol
-
-        Returns:
-            ParameterType enum value
-        """
         # Find plugin by instance_id
         for plugin in self.handler.current.pedalboard.plugins:
             if plugin.instance_id == instance_id:
@@ -437,16 +357,7 @@ class BlendMode:
         return ParameterType.DEFAULT
 
     def cleanup(self) -> None:
-        """
-        Clean up blend mode:
-        - Detach from input controller
-        - Reset tracking state
-        - Close parameter setter
-        - Reset state
-
-        Idempotent - safe to call multiple times.
-        """
-        # Idempotent check - if already cleaned up, nothing to do
+        """Idempotent cleanup of blend mode state (call on pedalboard unload or re-prepare)."""
         if self.input_controller is None:
             return
 
@@ -485,40 +396,21 @@ class BlendMode:
 
         Called periodically from handler's poll_modui_changes() on the active blend mode only.
         """
-        from pathlib import Path
-        from blend.snapshot import SnapshotManager
-
-        bundle_path = Path(self.handler.current.pedalboard.bundle)
-        current_timestamp = SnapshotManager.get_snapshots_file_timestamp(bundle_path)
-
-        # First check - just store timestamp
-        if self.snapshots_file_timestamp == 0:
-            self.snapshots_file_timestamp = current_timestamp
+        if not self.snapshots_monitor or not self.snapshots_monitor.check_for_change():
             return
 
-        # Check if file was modified
-        if current_timestamp != self.snapshots_file_timestamp:
-            logging.info("Snapshots file modified, re-preparing blend mode with updated stop data...")
+        logging.info("Snapshots file modified, re-preparing blend mode with updated stop data...")
 
-            # Check if currently active
-            was_active = (self.input_controller and
-                         self.input_controller.controlled_input is not None)
+        was_active = self.input_controller and self.input_controller.controlled_input is not None
+        if was_active:
+            self.deactivate()
 
-            # Deactivate if active
-            if was_active:
-                self.deactivate()
+        # NOTE: We do NOT call sync_blend_snapshots() here to avoid race condition with MOD-UI writes
+        # The blend snapshot entries already exist (created during pedalboard load)
+        self.cleanup()
+        self.prepare()
 
-            # Re-prepare with new stop data (recomputes diff maps from updated snapshots.json)
-            # NOTE: We do NOT call sync_blend_snapshots() here to avoid race condition with MOD-UI writes
-            # The blend snapshot entries already exist (created during pedalboard load)
-            self.cleanup()  # Full cleanup
-            self.prepare()  # Re-prepare (reads snapshots.json and recreates stops)
+        if was_active:
+            self.activate()
 
-            # Reactivate if it was active
-            if was_active:
-                self.activate()
-
-            # Update timestamp
-            self.snapshots_file_timestamp = current_timestamp
-
-            logging.info("Blend mode re-prepared successfully")
+        logging.info("Blend mode re-prepared successfully")
