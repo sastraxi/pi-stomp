@@ -24,6 +24,7 @@ from modalapi.parameter import Type as ParameterType
 # Config TypedDicts
 class BlendSnapshotConfig(TypedDict):
     """Single blend snapshot configuration from YAML."""
+
     name: str  # Required - snapshot name
     input_id: int  # Required - analog control or encoder ID
     interpolation: NotRequired[str]  # Optional - default: "linear"
@@ -32,6 +33,7 @@ class BlendSnapshotConfig(TypedDict):
 
 class PedalboardBlendConfig(TypedDict):
     """Pedalboard-level blend configuration containing multiple blend snapshots."""
+
     blend_snapshots: list[BlendSnapshotConfig]
 
 
@@ -45,6 +47,7 @@ MidiBoundParams = set[tuple[str, str]]  # {(instance_id, symbol)}
 # Snapshots.json TypedDicts
 class PluginData(TypedDict):
     """Plugin data from snapshots.json."""
+
     bypassed: bool
     parameters: dict[str, Any]
     ports: dict[str, float]
@@ -55,12 +58,14 @@ class PluginData(TypedDict):
 
 class SnapshotData(TypedDict):
     """Single snapshot entry from snapshots.json."""
+
     name: str
     data: dict[str, PluginData]
 
 
 class SnapshotsJson(TypedDict):
     """Complete snapshots.json file structure."""
+
     current: int
     snapshots: list[SnapshotData]
 
@@ -68,28 +73,33 @@ class SnapshotsJson(TypedDict):
 # State TypedDicts
 class ParameterState(TypedDict):
     """Parameter values for a plugin: {symbol: value}"""
+
     pass  # Dict[str, float] - dynamic keys
 
 
 class SnapshotState(TypedDict):
     """Complete snapshot state: {instance_id: {symbol: value}}"""
+
     pass  # Dict[str, Dict[str, float]] - dynamic keys
 
 
 class DiffMapEntry(TypedDict):
     """Single parameter diff entry: (val_a, val_b, param_type)"""
+
     pass  # Tuple[float, float, ParameterType] - but TypedDict doesn't support tuples
 
 
 # NamedTuple for intermediate data structures
 class StopData(NamedTuple):
     """Intermediate representation of a stop during parsing."""
+
     position: float
     snapshot_index: int
 
 
 class ParameterKey(NamedTuple):
     """Key for identifying a unique parameter in MIDI de-duplication tracking."""
+
     instance_id: str
     symbol: str
 
@@ -97,6 +107,7 @@ class ParameterKey(NamedTuple):
 # Protocol types for external dependencies
 class BlendInputProtocol(Protocol):
     """Protocol for blend mode input sources (expression pedal or encoder)."""
+
     id: int
     value_change_callback: Callable[[int, Any], None] | None
 
@@ -111,8 +122,8 @@ AnalogControlProtocol = BlendInputProtocol
 
 class WebSocketBridgeProtocol(Protocol):
     """Protocol for WebSocket bridge interface."""
+
     def send_parameter(self, instance_id: str, symbol: str, value: float) -> bool: ...
-    def get_stats(self) -> dict: ...
     def clear_queue(self) -> int: ...
 
 
@@ -121,6 +132,7 @@ ParameterStateDict = dict[str, float]
 SnapshotStateDict = dict[str, ParameterStateDict]
 DiffMapDict = dict[str, dict[str, tuple[float, float, ParameterType]]]
 ParameterTypeGetter = Callable[[str, str], ParameterType]
+
 
 # Pre-computed parameter data
 @dataclass
@@ -131,6 +143,7 @@ class ParamData:
     Includes values from neighboring stops for hermite/catmull-rom interpolation.
     Built once at snapshot load to optimize the critical path.
     """
+
     val_a: float  # Value at lower stop
     val_b: float  # Value at upper stop
     prev_val: float | None  # Value at stops[i-1] (None if i==0)
@@ -144,5 +157,6 @@ EnrichedDiffMap = dict[str, dict[str, ParamData]]  # {instance_id: {symbol: Para
 
 # Function type aliases
 EasingFunc = Callable[[float], float]
+
 # Per-parameter interpolation function: (local_pct, param_data) -> interpolated_value
 InterpolationFunc = Callable[[float, ParamData], float]

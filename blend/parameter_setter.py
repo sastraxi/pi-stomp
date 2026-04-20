@@ -26,24 +26,13 @@ class ParameterSetter:
 
     Tracks last-sent MIDI values per parameter to avoid redundant sends
     when smooth pedal movement produces consecutive identical MIDI values.
-    This dramatically reduces WebSocket traffic during expression pedal movement.
     """
 
     TOLERANCE = float(1 / 1024.0)
 
     def __init__(self, bridge: WebSocketBridgeProtocol) -> None:
-        """
-        Initialize parameter setter with shared WebSocket bridge.
-
-        Args:
-            bridge: Shared WebSocket bridge instance from handler
-        """
         self.bridge = bridge
-
-        # Value change tracking (raw float values, not MIDI)
         self.last_sent_midi_values: dict[ParameterKey, float] = {}
-
-        logging.info("ParameterSetter initialized")
 
     def send_parameter(self, instance_id: str, symbol: str, value: float) -> bool:
         """
@@ -53,48 +42,23 @@ class ParameterSetter:
         This prevents flooding the WebSocket with redundant messages during smooth
         pedal movements.
 
-        Args:
-            instance_id: Plugin instance ID (e.g., "xfade", "CollisionDrive")
-            symbol: Parameter symbol (e.g., "Gain", ":bypass")
-            value: Parameter value in native units (NOT normalized)
-
-        Returns:
-            True if sent, False if skipped (duplicate) or dropped (backpressure)
+        Returns True if message was sent, False if skipped due de-duplication or backpressure.
         """
         key = ParameterKey(instance_id, symbol)
         last_value = self.last_sent_midi_values.get(key)
-        if last_value is not None and abs(last_value - value) < self.TOLERANCE:
-            return False  # Skip - value unchanged within tolerance
 
-        # Send via WebSocket
+        if last_value is not None and abs(last_value - value) < self.TOLERANCE:
+            return False
+
         if self.bridge.send_parameter(instance_id, symbol, value):
-            # Update tracking on successful queue (store raw float value)
             self.last_sent_midi_values[key] = value
             return True
 
-        # Dropped due to backpressure
         logging.warning(f"Dropped (backpressure): {instance_id}/{symbol} value={value:.3f}")
         return False
 
     def reset_tracking(self) -> None:
-        """
-        Reset value change tracking (call on re-initialization).
-
-        Clears all tracked values so next pedal movement will send all parameters.
-        """
         self.last_sent_midi_values.clear()
-        logging.debug("ParameterSetter tracking reset")
-
-    def get_stats(self) -> dict:
-        """
-        Get WebSocket performance statistics.
-
-        Returns:
-            Dict with queue_depth, messages_sent, messages_dropped, etc.
-        """
-        return self.bridge.get_stats()
 
     def cleanup(self) -> None:
-        """Clean up resources."""
         self.last_sent_midi_values.clear()
-        logging.info("ParameterSetter cleaned up")

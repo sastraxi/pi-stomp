@@ -15,17 +15,13 @@
 
 """Snapshot file operations for blend mode."""
 
-import copy
 import json
 import logging
 import requests as req
 from pathlib import Path
 
-from blend.stop import BlendStop
 from blend.types import (
     BlendSnapshotConfig,
-    ParameterTypeGetter,
-    PluginData,
     SnapshotData,
     SnapshotsJson,
     SnapshotStateDict,
@@ -56,7 +52,7 @@ class SnapshotManager:
             raise FileNotFoundError(f"snapshots.json not found: {snapshots_file}")
 
         try:
-            with open(snapshots_file, 'r') as f:
+            with open(snapshots_file, "r") as f:
                 data = json.load(f)
             logging.debug(f"Read snapshots.json with {len(data.get('snapshots', []))} snapshots")
             return data
@@ -82,27 +78,24 @@ class SnapshotManager:
         Raises:
             ValueError: If identifier cannot be resolved
         """
-        snapshots = snapshots_json.get('snapshots', [])
+        snapshots = snapshots_json.get("snapshots", [])
 
         # If integer, validate and return
         if isinstance(identifier, int):
             if identifier < 0 or identifier >= len(snapshots):
-                raise ValueError(f"Snapshot index {identifier} out of range (0-{len(snapshots)-1})")
+                raise ValueError(f"Snapshot index {identifier} out of range (0-{len(snapshots) - 1})")
             return identifier
 
         # Case-insensitive exact match
         identifier_lower = identifier.lower()
 
         for i, snapshot in enumerate(snapshots):
-            if snapshot.get('name', '').lower() == identifier_lower:
+            if snapshot.get("name", "").lower() == identifier_lower:
                 logging.debug(f"Resolved snapshot '{identifier}' to index {i}")
                 return i
 
         available = [f"{i}: {s.get('name', '')}" for i, s in enumerate(snapshots)]
-        raise ValueError(
-            f"No snapshot found matching '{identifier}'. "
-            f"Available: {', '.join(available)}"
-        )
+        raise ValueError(f"No snapshot found matching '{identifier}'. Available: {', '.join(available)}")
 
     @staticmethod
     def parse_snapshot_data(snapshots_json: SnapshotsJson, snapshot_index: int) -> SnapshotStateDict:
@@ -119,13 +112,13 @@ class SnapshotManager:
         Raises:
             IndexError: If snapshot_index is out of range
         """
-        snapshots = snapshots_json.get('snapshots', [])
+        snapshots = snapshots_json.get("snapshots", [])
 
         if snapshot_index >= len(snapshots):
             raise IndexError(f"Snapshot index {snapshot_index} out of range (max: {len(snapshots) - 1})")
 
         snapshot = snapshots[snapshot_index]
-        snapshot_data = snapshot.get('data', {})
+        snapshot_data = snapshot.get("data", {})
         state = {}
 
         # Iterate through plugins in snapshot
@@ -133,8 +126,8 @@ class SnapshotManager:
             instance_id = SnapshotManager.map_key_to_instance(plugin_symbol)
 
             # Extract parameter values from ports
-            ports = plugin_data.get('ports', {})
-            bypassed = plugin_data.get('bypassed', False)
+            ports = plugin_data.get("ports", {})
+            bypassed = plugin_data.get("bypassed", False)
 
             params = {}
             for param_symbol, value in ports.items():
@@ -142,7 +135,7 @@ class SnapshotManager:
 
             # Add bypass state as :bypass parameter
             # :bypass = 1.0 means bypassed, 0.0 means active (see plugin.py:49)
-            params[':bypass'] = 1.0 if bypassed else 0.0
+            params[":bypass"] = 1.0 if bypassed else 0.0
 
             state[instance_id] = params
 
@@ -152,7 +145,7 @@ class SnapshotManager:
     @staticmethod
     def map_instance_to_key(instance_id: str) -> str:
         """Convert instance_id to snapshot key by stripping leading '/'."""
-        return instance_id.lstrip('/')
+        return instance_id.lstrip("/")
 
     @staticmethod
     def map_key_to_instance(key: str) -> str:
@@ -161,9 +154,7 @@ class SnapshotManager:
 
     @staticmethod
     def sync_blend_snapshots(
-        bundle_path: Path,
-        blend_configs: list[BlendSnapshotConfig] | None,
-        root_uri: str
+        bundle_path: Path, blend_configs: list[BlendSnapshotConfig] | None, root_uri: str
     ) -> dict[str, int]:
         """
         Sync blend snapshots with current configuration.
@@ -196,7 +187,7 @@ class SnapshotManager:
         snapshots_modified = False
 
         for blend_cfg in blend_configs:
-            snapshot_name = blend_cfg.get('name')
+            snapshot_name = blend_cfg.get("name")
             if not snapshot_name:
                 logging.warning("Blend config missing 'name', skipping")
                 continue
@@ -204,14 +195,14 @@ class SnapshotManager:
             # Check if blend snapshot already exists
             existing_idx = None
             existing_snapshot = None
-            for i, snapshot in enumerate(snapshots_data.get('snapshots', [])):
-                if snapshot.get('name') == snapshot_name:
+            for i, snapshot in enumerate(snapshots_data.get("snapshots", [])):
+                if snapshot.get("name") == snapshot_name:
                     existing_idx = i
                     existing_snapshot = snapshot
                     break
 
             # Get stops configuration for validation
-            stops_config = blend_cfg.get('stops')
+            stops_config = blend_cfg.get("stops")
             if not stops_config:
                 logging.warning(f"Blend snapshot '{snapshot_name}' missing 'stops', skipping")
                 continue
@@ -224,15 +215,17 @@ class SnapshotManager:
 
             # Check if existing snapshot is already correct (empty)
             if existing_snapshot is not None:
-                if not existing_snapshot.get('data'):
+                if not existing_snapshot.get("data"):
                     # Already exists and is empty - no need to recreate
-                    logging.debug(f"Blend snapshot '{snapshot_name}' already exists and is empty (index {existing_idx})")
+                    logging.debug(
+                        f"Blend snapshot '{snapshot_name}' already exists and is empty (index {existing_idx})"
+                    )
                     snapshot_indices[snapshot_name] = existing_idx
                     continue
                 else:
                     # Exists but has stale data - remove it
                     logging.info(f"Removing blend snapshot '{snapshot_name}' with stale data for recreation")
-                    snapshots_data['snapshots'].pop(existing_idx)
+                    snapshots_data["snapshots"].pop(existing_idx)
                     snapshots_modified = True
 
             # Create completely empty blend snapshot
@@ -240,13 +233,13 @@ class SnapshotManager:
             # This prevents the snapshot from getting out of date with stop changes
             logging.info(f"Creating empty blend snapshot '{snapshot_name}'")
             blend_snapshot: SnapshotData = {
-                'name': snapshot_name,
-                'data': {}  # Completely empty - everything sent via WebSocket
+                "name": snapshot_name,
+                "data": {},  # Completely empty - everything sent via WebSocket
             }
 
             # Append new snapshot
-            snapshots_data['snapshots'].append(blend_snapshot)
-            new_idx = len(snapshots_data['snapshots']) - 1
+            snapshots_data["snapshots"].append(blend_snapshot)
+            new_idx = len(snapshots_data["snapshots"]) - 1
             snapshot_indices[snapshot_name] = new_idx
             snapshots_modified = True
 
@@ -254,7 +247,7 @@ class SnapshotManager:
 
         # Write updated snapshots if any changes were made
         if snapshots_modified:
-            with open(snapshots_file, 'w') as f:
+            with open(snapshots_file, "w") as f:
                 json.dump(snapshots_data, f, indent=4)
 
             # Notify MOD-UI
@@ -275,6 +268,7 @@ class SnapshotManager:
             Modification timestamp (Unix epoch), or 0 if file doesn't exist
         """
         import os
+
         snapshots_file = bundle_path / "snapshots.json"
         try:
             return os.path.getmtime(snapshots_file)
