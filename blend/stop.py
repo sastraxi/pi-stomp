@@ -31,9 +31,6 @@ from modalapi.parameter import Type as ParameterType
 class BlendStop:
     """
     Represents a gradient stop in the blend interpolation space.
-
-    A stop defines a point along the expression pedal's range (0.0-1.0)
-    and the parameter state (snapshot) that should be active at that point.
     """
 
     def __init__(self, position: float, snapshot_index: int, snapshot_state: SnapshotStateDict) -> None:

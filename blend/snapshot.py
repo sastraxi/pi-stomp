@@ -33,19 +33,7 @@ class SnapshotManager:
 
     @staticmethod
     def read_snapshots_file(bundle_path: Path) -> SnapshotsJson:
-        """
-        Read and parse snapshots.json file.
-
-        Args:
-            bundle_path: Path to pedalboard bundle directory
-
-        Returns:
-            Parsed JSON dict
-
-        Raises:
-            FileNotFoundError: If snapshots.json doesn't exist
-            ValueError: If JSON is malformed
-        """
+        """Read and parse snapshots.json file."""
         snapshots_file = bundle_path / "snapshots.json"
 
         if not snapshots_file.exists():
@@ -61,23 +49,7 @@ class SnapshotManager:
 
     @staticmethod
     def resolve_snapshot_identifier(snapshots_json: SnapshotsJson, identifier: int | str) -> int:
-        """
-        Resolve snapshot identifier (index or name) to index.
-
-        Supports:
-        - Integer index (0-based)
-        - String name with case-insensitive exact matching
-
-        Args:
-            snapshots_json: Parsed snapshots.json dict
-            identifier: Snapshot index or name
-
-        Returns:
-            Snapshot index (0-based)
-
-        Raises:
-            ValueError: If identifier cannot be resolved
-        """
+        """Resolve snapshot identifier (index or name) to index."""
         snapshots = snapshots_json.get("snapshots", [])
 
         # If integer, validate and return
@@ -99,19 +71,7 @@ class SnapshotManager:
 
     @staticmethod
     def parse_snapshot_data(snapshots_json: SnapshotsJson, snapshot_index: int) -> SnapshotStateDict:
-        """
-        Parse snapshot data and extract parameter values.
-
-        Args:
-            snapshots_json: Parsed snapshots.json dict
-            snapshot_index: Index of snapshot to extract
-
-        Returns:
-            Dict of parameter states: {instance_id: {symbol: value}}
-
-        Raises:
-            IndexError: If snapshot_index is out of range
-        """
+        """Parse snapshot data and extract parameter values for all plugins in a snapshot."""
         snapshots = snapshots_json.get("snapshots", [])
 
         if snapshot_index >= len(snapshots):
@@ -255,25 +215,6 @@ class SnapshotManager:
             logging.info(f"Synced {len(snapshot_indices)} blend snapshots")
 
         return snapshot_indices
-
-    @staticmethod
-    def get_snapshots_file_timestamp(bundle_path: Path) -> float:
-        """
-        Get modification timestamp of snapshots.json file.
-
-        Args:
-            bundle_path: Path to pedalboard bundle directory
-
-        Returns:
-            Modification timestamp (Unix epoch), or 0 if file doesn't exist
-        """
-        import os
-
-        snapshots_file = bundle_path / "snapshots.json"
-        try:
-            return os.path.getmtime(snapshots_file)
-        except FileNotFoundError:
-            return 0.0
 
     @staticmethod
     def _notify_mod_ui(root_uri: str) -> None:
