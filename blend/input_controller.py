@@ -16,69 +16,36 @@
 """Analog input hijacking and control for blend mode."""
 
 import logging
-from typing import Any
+from bisect import bisect_right
 
 from blend.stop import BlendStop
 from blend.types import BlendInputProtocol, EnrichedDiffMap, InterpolationFunc
+from blend.parameter_setter import ParameterSetter
 
 
 class InputController:
-    """
-    Manages analog input callback for blend mode with optimized critical path.
-
-    Supports both expression pedals and tweak encoders. Implements the critical
-    path (10ms polling loop) for input movement:
-    1. Find segment (with cached hint)
-    2. Calculate local percentage
-    3. Lookup pre-computed diff map
-    4. Apply interpolation per-parameter
-    5. Send to ParameterSetter (handles de-dupe)
-    """
+    """Hijacks analog input callbacks to implement blend mode interpolation."""
 
     def __init__(
         self,
         interpolation_func: InterpolationFunc,
         stops: list[BlendStop],
         segment_diff_maps: list[EnrichedDiffMap],
-        parameter_setter: Any,  # ParameterSetter - avoid circular import
+        parameter_setter: ParameterSetter,
     ) -> None:
-        """
-        Initialize input controller with pre-computed diff maps.
-
-        Args:
-            interpolation_func: Per-parameter value transformer
-            stops: List of BlendStop (for segment lookup)
-            segment_diff_maps: Pre-computed enriched diff maps per segment
-            parameter_setter: For sending WebSocket messages
-        """
         self.interpolation_func = interpolation_func
         self.stops = stops
         self.segment_diff_maps = segment_diff_maps
         self.parameter_setter = parameter_setter
         self.controlled_input: BlendInputProtocol | None = None
+        self._stop_positions = [s.position for s in stops]
 
-        # Segment caching (optimization for sequential movements)
-        self.current_segment_idx: int = 0
-
-    def attach_to_input(
-        self,
-        analog_controls: list,
-        encoders: list,
-        input_id: int
-    ) -> None:
+    def attach_to_input(self, analog_controls: list, encoders: list, input_id: int) -> None:
         """
         Attach blend mode callback to analog input (expression pedal or encoder).
 
         Hijacks the value_change_callback to intercept value changes and route
         them through the interpolation system.
-
-        Args:
-            analog_controls: List of analog controls from hardware
-            encoders: List of encoders from hardware
-            input_id: Input ID to control (searches both lists)
-
-        Raises:
-            ValueError: If input_id not found or encoder doesn't support MIDI
         """
         # Search analog_controls first (expression pedals)
         for control in analog_controls:
@@ -92,10 +59,10 @@ class InputController:
         for encoder in encoders:
             if hasattr(encoder, "id") and encoder.id == input_id:
                 from pistomp.encodermidicontrol import EncoderMidiControl
+
                 if not isinstance(encoder, EncoderMidiControl):
-                    raise ValueError(
-                        f"Encoder {input_id} must be EncoderMidiControl (has MIDI support) for blend mode"
-                    )
+                    raise ValueError(f"Encoder {input_id} must be EncoderMidiControl (has MIDI support) for blend mode")
+
                 self.controlled_input = encoder
                 encoder.value_change_callback = self.handle_value_change
                 logging.info(f"Attached blend mode to encoder {input_id}")
@@ -107,7 +74,7 @@ class InputController:
         """Remove blend mode callback from input."""
         if self.controlled_input:
             input_type = type(self.controlled_input).__name__
-            input_id = getattr(self.controlled_input, 'id', '?')
+            input_id = getattr(self.controlled_input, "id", "?")
             logging.info(f"Detaching blend mode from {input_type} (id={input_id})")
             self.controlled_input.value_change_callback = None
             self.controlled_input = None
@@ -115,20 +82,11 @@ class InputController:
             logging.warning("detach_from_input called but no controlled_input attached")
 
     def reset_tracking(self) -> None:
-        """Reset state tracking (call on re-initialization)."""
-        self.current_segment_idx = 0
+        pass
 
     def _get_normalized_position(self, control: BlendInputProtocol) -> float:
-        """
-        Get normalized [0.0, 1.0] position from control.
-
-        Args:
-            control: The input control
-
-        Returns:
-            Normalized position [0.0, 1.0]
-        """
         from pistomp.encodermidicontrol import EncoderMidiControl
+
         if isinstance(control, EncoderMidiControl):
             # Encoder: MIDI value already accumulated (0-127)
             return control.midi_value / 127.0
@@ -137,16 +95,7 @@ class InputController:
             return control.last_read / 1023.0
 
     def sync_current_position(self) -> None:
-        """
-        Force update of ALL parameters based on current input position.
-
-        Called on activation to establish initial parameter state when
-        blend snapshot is empty. Sends ALL parameters (differing + non-differing)
-        to overwrite any stale values from the previous snapshot.
-
-        For differing parameters: interpolates based on current pedal position
-        For non-differing parameters: uses constant value from first stop
-        """
+        """Recalculate and update the controlled input based on current position."""
         if not self.controlled_input:
             logging.warning("Cannot sync - no controlled input attached")
             return
@@ -192,24 +141,19 @@ class InputController:
                 else:
                     logging.debug(f"Skipped constant param {instance_id}/{symbol} = {value:.3f}")
 
-        logging.info(f"Synced blend mode to position {percentage:.3f} (segment {segment_idx}): sent {diff_sent} differing + {const_sent} constant = {diff_sent + const_sent} total parameters")
+        logging.info(
+            f"Synced blend mode to position {percentage:.3f} (segment {segment_idx}): sent {diff_sent} differing + {const_sent} constant = {diff_sent + const_sent} total parameters"
+        )
 
-    def handle_value_change(self, raw_value: int, control: BlendInputProtocol) -> None:
+    def handle_value_change(self, _raw_value: int, control: BlendInputProtocol) -> None:
         """
-        Handle analog input movement (CRITICAL PATH - optimized for 10ms polling).
-
-        Called by control.refresh() when the input value changes.
-        Implements the core blend mode interpolation loop.
-
-        Args:
-            raw_value: Input value (0-1023 for expression pedal ADC, 0-127 for encoder MIDI) - ignored, read directly from control
-            control: The input control that triggered the callback
+        Handle analog input movement (critical performance path).
+        Callback from expression pedal or encoder when value changes;
+        performs interpolation and sends parameters.
         """
-        # Get normalized position from control (isinstance check done once)
         percentage = self._get_normalized_position(control)
-
-        # Find segment (use cached value as hint for optimization)
         segment_idx = self._find_segment(percentage)
+        diff_map = self.segment_diff_maps[segment_idx]
 
         # Calculate local percentage within segment
         lower = self.stops[segment_idx]
@@ -221,9 +165,6 @@ class InputController:
             local_pct = max(0.0, min(1.0, local_pct))  # Clamp to [0, 1]
         else:
             local_pct = 0.0
-
-        # Get pre-computed diff map for this segment
-        diff_map = self.segment_diff_maps[segment_idx]
 
         # Interpolate and send (ParameterSetter handles de-dupe)
         try:
@@ -238,36 +179,5 @@ class InputController:
             logging.error(f"Error in blend interpolation: {e}", exc_info=True)
             # Continue operation - don't crash the polling loop
 
-        # Log if segment changed
-        if segment_idx != self.current_segment_idx:
-            logging.debug(
-                f"Segment {self.current_segment_idx} -> {segment_idx} at {percentage:.3f}"
-            )
-            self.current_segment_idx = segment_idx
-
     def _find_segment(self, percentage: float) -> int:
-        """
-        Find segment index for percentage.
-
-        Optimized with cached current segment as hint - checks current segment first
-        before doing full search. This is fast for sequential pedal movements.
-
-        Args:
-            percentage: Global position [0.0, 1.0]
-
-        Returns:
-            Segment index (0 to len(stops)-2)
-        """
-        # Check current segment first (common case: small sequential movements)
-        if self.current_segment_idx < len(self.stops) - 1:
-            if (self.stops[self.current_segment_idx].position <= percentage <
-                    self.stops[self.current_segment_idx + 1].position):
-                return self.current_segment_idx
-
-        # Linear search (could optimize to binary search if many stops)
-        for i in range(len(self.stops) - 1):
-            if percentage < self.stops[i + 1].position:
-                return i
-
-        # At or beyond last stop - use last segment
-        return len(self.stops) - 2
+        return max(0, min(bisect_right(self._stop_positions, percentage) - 1, len(self.stops) - 2))
