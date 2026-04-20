@@ -83,9 +83,6 @@ class EncoderMidiControl(encoder.Encoder, controller.Controller):
         self.midi_value = midi_value
 
         # Blend mode callback override: if set, ONLY call callback (skip display update)
-        # XXX: When blend mode is active, we may need to update the LCD to show the
-        # encoder's current value. Consider adding a separate display update mechanism
-        # that doesn't interfere with blend mode's parameter interpolation.
         if self.value_change_callback:
             self.value_change_callback(midi_value, self)
         else:
