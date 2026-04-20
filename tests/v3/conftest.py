@@ -1,13 +1,15 @@
 """v3-specific fixtures — delegates stack construction to integration/conftest."""
+
 import json
 from collections.abc import Generator
-from pathlib import Path
+from typing import cast
 from unittest.mock import MagicMock
 
 import pytest
 import yaml
 
 import common.token as Token
+from tests.conftest import FakeWebSocketBridge
 from tests.integration.conftest import _v3_stack
 from tests.types import SystemFixture
 
@@ -26,27 +28,37 @@ def v3_system(fake_lcd, tmp_path) -> Generator[SystemFixture, None, None]:
 _BLEND_SNAPSHOTS = {
     "current": 0,
     "snapshots": [
-        {"name": "Clean", "data": {
-            "BigMuff": {"bypassed": False, "ports": {"Tone": 0.2, "Level": 0.5}, "preset": "", "parameters": {}},
-        }},
-        {"name": "Lead", "data": {
-            "BigMuff": {"bypassed": False, "ports": {"Tone": 0.8, "Level": 0.9}, "preset": "", "parameters": {}},
-        }},
+        {
+            "name": "Clean",
+            "data": {
+                "BigMuff": {"bypassed": False, "ports": {"Tone": 0.2, "Level": 0.5}, "preset": "", "parameters": {}},
+            },
+        },
+        {
+            "name": "Lead",
+            "data": {
+                "BigMuff": {"bypassed": False, "ports": {"Tone": 0.8, "Level": 0.9}, "preset": "", "parameters": {}},
+            },
+        },
     ],
 }
 
 _BLEND_CONFIG = {
-    "blend_snapshots": [{
-        "name": "Blend",
-        "input_id": 1,       # encoder id=1 exists in the default v3 config
-        "interpolation": "linear",
-        "stops": ["Clean", "Lead"],
-    }]
+    "blend_snapshots": [
+        {
+            "name": "Blend",
+            "input_id": 1,  # encoder id=1 exists in the default v3 config
+            "interpolation": "linear",
+            "stops": ["Clean", "Lead"],
+        }
+    ]
 }
 
 
 @pytest.fixture
-def blend_system(v3_system: SystemFixture, tmp_path) -> Generator[SystemFixture, None, None]:
+def blend_system(
+    v3_system: SystemFixture, tmp_path, make_plugin, make_parameter
+) -> Generator[SystemFixture, None, None]:
     """
     v3 stack with a fully prepared and activated blend mode.
 
@@ -54,6 +66,8 @@ def blend_system(v3_system: SystemFixture, tmp_path) -> Generator[SystemFixture,
       blend_rig.pedalboard/
         snapshots.json   — Clean (0) and Lead (1)
         config.yml       — blend_snapshots config using encoder id=1
+
+    Pedalboard contains a single BigMuff plugin (Tone, Level, :bypass).
 
     After setup:
       handler.blend_modes["Blend"]  — prepared BlendMode
@@ -71,10 +85,12 @@ def blend_system(v3_system: SystemFixture, tmp_path) -> Generator[SystemFixture,
         resp = MagicMock()
         resp.status_code = 200
         if "pedalboard/list" in url:
-            resp.text = json.dumps([
-                {Token.TITLE: "Blend Rig", Token.BUNDLE: str(bundle_dir)},
-                {Token.TITLE: "New Rig",   Token.BUNDLE: "/path/to/new.pedalboard"},
-            ])
+            resp.text = json.dumps(
+                [
+                    {Token.TITLE: "Blend Rig", Token.BUNDLE: str(bundle_dir)},
+                    {Token.TITLE: "New Rig", Token.BUNDLE: "/path/to/new.pedalboard"},
+                ]
+            )
         elif "snapshot/list" in url:
             # Index 2 is the blend snapshot created by sync_blend_snapshots
             resp.text = json.dumps({"0": "Clean", "1": "Lead", "2": "Blend"})
@@ -86,13 +102,22 @@ def blend_system(v3_system: SystemFixture, tmp_path) -> Generator[SystemFixture,
 
     mock_get.side_effect = get_side_effect
 
+    big_muff = make_plugin(
+        "/BigMuff",
+        category="Distortion",
+        parameters={
+            "Tone": make_parameter("Tone", "/BigMuff", value=0.2),
+            "Level": make_parameter("Level", "/BigMuff", value=0.5),
+        },
+    )
+
     pb = handler.pedalboards["/path/to/rig.pedalboard"]
     pb.bundle = str(bundle_dir)
-    pb.plugins = []
+    pb.plugins = [big_muff]
 
     handler.set_current_pedalboard(pb)
 
     # Clear WS captures from initial sync so tests start with a clean slate
-    handler.ws_bridge.sent.clear()
+    cast(FakeWebSocketBridge, handler.ws_bridge).sent.clear()
 
     yield SystemFixture(handler, hw, lcd, mock_get, mock_post)
