@@ -13,6 +13,7 @@ from unittest.mock import patch, MagicMock
 import pytest
 import yaml
 
+from tests.conftest import FakeWebSocketBridge
 from tests.types import SystemFixture
 import common.token as Token
 
@@ -43,6 +44,8 @@ def _build_stack(hw_class: Any, cfg_path: Path, fake_lcd, tmp_path) -> Generator
     with open(cfg_path) as f:
         cfg = yaml.safe_load(f)
 
+    fake_ws = FakeWebSocketBridge()
+
     with (
         patch("requests.get") as mock_get,
         patch("requests.post") as mock_post,
@@ -51,6 +54,7 @@ def _build_stack(hw_class: Any, cfg_path: Path, fake_lcd, tmp_path) -> Generator
         patch("modalapi.wifi.WifiManager"),
         patch("subprocess.check_output", return_value=b"SystemState=running"),
         patch("pistomp.lcd320x240.LcdIli9341", return_value=fake_lcd),
+        patch("modalapi.modhandler.AsyncWebSocketBridge", return_value=fake_ws),
     ):
         def get_side_effect(url, **kwargs):
             resp = MagicMock()
