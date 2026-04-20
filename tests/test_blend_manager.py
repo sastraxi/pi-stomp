@@ -147,7 +147,7 @@ def test_create_stops_invalid_position_key_raises(patched_snapshot_manager):
 def test_normalize_stops_invalid_type_raises():
     bm = _make_blend_mode({"name": "T", "input_id": 1, "stops": []})
     with pytest.raises(ValueError, match="dict or list"):
-        bm._normalize_stops_config(42)  # type: ignore[arg-type]
+        bm._normalize_stops_config(42)  # pyright: ignore[reportArgumentType]
 
 
 # ---------------------------------------------------------------------------

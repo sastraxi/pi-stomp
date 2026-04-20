@@ -186,7 +186,7 @@ def test_sync_no_blend_configs_returns_empty(mock_get, tmp_path):
 def test_sync_config_missing_name_is_skipped(mock_get, tmp_path):
     (tmp_path / "snapshots.json").write_text(json.dumps(_SNAPSHOTS))
     result = SnapshotManager.sync_blend_snapshots(
-        tmp_path, [{"input_id": 1, "stops": ["Clean", "Lead"]}], "http://localhost/"  # type: ignore[list-item]
+        tmp_path, [{"input_id": 1, "stops": ["Clean", "Lead"]}], "http://localhost/"  # pyright: ignore[reportArgumentType]
     )
     assert result == {}
     mock_get.assert_not_called()
@@ -196,7 +196,7 @@ def test_sync_config_missing_name_is_skipped(mock_get, tmp_path):
 def test_sync_config_missing_stops_is_skipped(mock_get, tmp_path):
     (tmp_path / "snapshots.json").write_text(json.dumps(_SNAPSHOTS))
     result = SnapshotManager.sync_blend_snapshots(
-        tmp_path, [{"name": "Blend", "input_id": 1}], "http://localhost/"  # type: ignore[list-item]
+        tmp_path, [{"name": "Blend", "input_id": 1}], "http://localhost/"  # pyright: ignore[reportArgumentType]
     )
     assert result == {}
     mock_get.assert_not_called()
