@@ -25,7 +25,7 @@ def _blend_encoder(hw):
 
 
 def test_blend_prepare_creates_segment_diff_map(blend_system: SystemFixture):
-    handler, *_ = blend_system
+    handler = blend_system.handler
 
     assert "Blend" in handler.blend_modes
     blend_mode = handler.blend_modes["Blend"]
@@ -43,7 +43,8 @@ def test_blend_prepare_creates_segment_diff_map(blend_system: SystemFixture):
 
 
 def test_blend_auto_activates_on_blend_snapshot(blend_system: SystemFixture):
-    handler, hw, *_ = blend_system
+    handler = blend_system.handler
+    hw = blend_system.hw
 
     assert handler.active_blend_mode is not None
     assert handler.active_blend_mode.config.get("name") == "Blend"
@@ -59,7 +60,8 @@ def test_blend_auto_activates_on_blend_snapshot(blend_system: SystemFixture):
 
 def test_blend_activate_sends_initial_params(blend_system: SystemFixture):
     """Re-activate after a manual deactivate to check what sync_current_position sends."""
-    handler, hw, *_ = blend_system
+    handler = blend_system.handler
+    hw = blend_system.hw
     assert handler.active_blend_mode
     test_ws = cast(FakeWebSocketBridge, handler.ws_bridge)
     blend_mode = handler.active_blend_mode
@@ -84,7 +86,8 @@ def test_blend_activate_sends_initial_params(blend_system: SystemFixture):
 
 def test_blend_full_sweep_reaches_lead_stop(blend_system: SystemFixture):
     """handle_value_change at midi_value=127 (100%) should send Lead stop values."""
-    handler, hw, *_ = blend_system
+    handler = blend_system.handler
+    hw = blend_system.hw
     assert handler.active_blend_mode
     test_ws = cast(FakeWebSocketBridge, handler.ws_bridge)
 
@@ -101,7 +104,8 @@ def test_blend_full_sweep_reaches_lead_stop(blend_system: SystemFixture):
 
 def test_blend_dedup_suppresses_redundant_messages(blend_system: SystemFixture):
     """Two consecutive identical positions should produce only one WS message per param."""
-    handler, hw, *_ = blend_system
+    handler = blend_system.handler
+    hw = blend_system.hw
     assert handler.active_blend_mode
     test_ws = cast(FakeWebSocketBridge, handler.ws_bridge)
 
@@ -124,7 +128,8 @@ def test_blend_dedup_suppresses_redundant_messages(blend_system: SystemFixture):
 
 
 def test_blend_deactivate_detaches_encoder(blend_system: SystemFixture):
-    handler, hw, *_ = blend_system
+    handler = blend_system.handler
+    hw = blend_system.hw
     assert handler.active_blend_mode
 
     enc = _blend_encoder(hw)
@@ -137,7 +142,8 @@ def test_blend_deactivate_detaches_encoder(blend_system: SystemFixture):
 
 
 def test_pedalboard_switch_clears_blend_modes(blend_system: SystemFixture):
-    handler, hw, *_ = blend_system
+    handler = blend_system.handler
+    hw = blend_system.hw
 
     other_pb = handler.pedalboards["/path/to/new.pedalboard"]
     other_pb.plugins = []
@@ -157,7 +163,8 @@ def test_pedalboard_switch_clears_blend_modes(blend_system: SystemFixture):
 
 
 def test_ws_pedal_snapshot_deactivates_blend(blend_system: SystemFixture):
-    handler, hw, *_ = blend_system
+    handler = blend_system.handler
+    hw = blend_system.hw
     test_ws = cast(FakeWebSocketBridge, handler.ws_bridge)
 
     enc = _blend_encoder(hw)
@@ -171,7 +178,8 @@ def test_ws_pedal_snapshot_deactivates_blend(blend_system: SystemFixture):
 
 
 def test_ws_pedal_snapshot_activates_blend(blend_system: SystemFixture):
-    handler, hw, *_ = blend_system
+    handler = blend_system.handler
+    hw = blend_system.hw
     assert handler.active_blend_mode
 
     # Manually deactivate so we can re-activate via WebSocket
@@ -194,7 +202,7 @@ def test_ws_pedal_snapshot_activates_blend(blend_system: SystemFixture):
 
 
 def test_snapshots_file_change_triggers_reprepare(blend_system: SystemFixture):
-    handler, *_ = blend_system
+    handler = blend_system.handler
     assert handler.active_blend_mode
     blend_mode = handler.active_blend_mode
     snapshots_path = blend_mode.snapshots_monitor.path
@@ -226,7 +234,7 @@ def test_lcd_reflects_blend_activation(blend_system: SystemFixture, snapshot):
 
 def test_lcd_reflects_blend_deactivation(blend_system: SystemFixture, snapshot):
     """Switching away from the Blend preset causes the LCD to update without errors."""
-    handler, *_ = blend_system
+    handler = blend_system.handler
     test_ws = cast(FakeWebSocketBridge, handler.ws_bridge)
 
     test_ws.inject("pedal_snapshot 0 Clean")
@@ -242,7 +250,8 @@ def test_blend_halfway_produces_interpolated_values(blend_system: SystemFixture)
     Stops: Clean (Tone=0.2, Level=0.5) and Lead (Tone=0.8, Level=0.9).
     At midi_value=64 (≈50%): Tone ≈ 0.502, Level ≈ 0.702.
     """
-    handler, hw, *_ = blend_system
+    handler = blend_system.handler
+    hw = blend_system.hw
     test_ws = cast(FakeWebSocketBridge, handler.ws_bridge)
     enc = _blend_encoder(hw)
     enc.midi_value = 64
@@ -265,7 +274,8 @@ def test_blend_resumes_at_encoder_position_on_activate(blend_system: SystemFixtu
     If the encoder is at 50% when the user switches to the Blend preset,
     they immediately hear the blended tone at that position — not the start stop.
     """
-    handler, hw, *_ = blend_system
+    handler = blend_system.handler
+    hw = blend_system.hw
     test_ws = cast(FakeWebSocketBridge, handler.ws_bridge)
     enc = _blend_encoder(hw)
 
@@ -289,7 +299,8 @@ def test_edited_stop_values_take_effect_in_next_sweep(blend_system: SystemFixtur
     After the user saves an edited Lead snapshot, sweeping to 100% uses the new values.
     This supplements test_snapshots_file_change_triggers_reprepare with an actual sweep.
     """
-    handler, hw, *_ = blend_system
+    handler = blend_system.handler
+    hw = blend_system.hw
     test_ws = cast(FakeWebSocketBridge, handler.ws_bridge)
 
     assert handler.active_blend_mode
@@ -325,7 +336,10 @@ def test_switching_between_blend_modes_applies_correct_initial_values(
       Blend A → Lead:  Tone=0.8, Level=0.9
       Blend B → Crunch: Tone=0.5, Level=0.7
     """
-    handler, hw, lcd, mock_get, _mock_post = v3_system
+    handler = v3_system.handler
+    hw = v3_system.hw
+    lcd = v3_system.lcd
+    mock_get = v3_system.mock_get
 
     snapshots_data = {
         "current": 0,
@@ -449,7 +463,8 @@ def test_midi_bound_param_excluded_from_blend_sweep(blend_system: SystemFixture)
     A parameter with a MIDI CC binding must never be sent during blend interpolation.
     Binding is detected during prepare(); excluded params are absent from the diff map.
     """
-    handler, hw, *_ = blend_system
+    handler = blend_system.handler
+    hw = blend_system.hw
     assert handler.current
     test_ws = cast(FakeWebSocketBridge, handler.ws_bridge)
 

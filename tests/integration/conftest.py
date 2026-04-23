@@ -100,7 +100,7 @@ def _build_stack(hw_class: Any, cfg_path: Path, fake_lcd, tmp_path) -> Generator
         mock_post.reset_mock()
         mock_post.side_effect = post_side_effect
 
-        yield SystemFixture(handler, hw, fake_lcd, mock_get, mock_post)
+        yield SystemFixture(handler, hw, fake_lcd, mock_get, mock_post, fake_ws)
 
 
 # ---------------------------------------------------------------------------

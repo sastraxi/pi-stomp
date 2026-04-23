@@ -74,7 +74,11 @@ def blend_system(
       handler.active_blend_mode     — activated, encoder id=1 hijacked
       handler.ws_bridge.sent        — cleared (ready for test assertions)
     """
-    handler, hw, lcd, mock_get, mock_post = v3_system
+    handler = v3_system.handler
+    hw = v3_system.hw
+    lcd = v3_system.lcd
+    mock_get = v3_system.mock_get
+    mock_post = v3_system.mock_post
 
     bundle_dir = tmp_path / "blend_rig.pedalboard"
     bundle_dir.mkdir()
@@ -120,4 +124,4 @@ def blend_system(
     # Clear WS captures from initial sync so tests start with a clean slate
     cast(FakeWebSocketBridge, handler.ws_bridge).sent.clear()
 
-    yield SystemFixture(handler, hw, lcd, mock_get, mock_post)
+    yield SystemFixture(handler, hw, lcd, mock_get, mock_post, v3_system.ws_bridge)
