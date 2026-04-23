@@ -175,6 +175,9 @@ class Lcd(abstract_lcd.Lcd):
         #self.main_panel.refresh()
 
     def poll_updates(self):
+        for d in self.w_parameter_dialogs.values():
+            d.tick()
+
         self.pstack.poll_updates()
 
         # Tick text widgets (scrolling animation if needed)
