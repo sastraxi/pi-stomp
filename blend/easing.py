@@ -13,74 +13,54 @@
 # You should have received a copy of the GNU General Public License
 # along with pi-stomp.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Easing functions for blend mode segment interpolation."""
+"""Easing functions that shape knob feel for blend mode."""
 
 import math
+from typing import Callable
 
 
-# Easing Function Framework
-# ==========================
-# Easing functions transform local percentage within a segment (segment mode only).
-# They provide non-linear transitions while staying within the current segment.
-#
-# Type signature: (t) -> eased_t
-# - t: float in [0.0, 1.0], local position within current segment
-# - Returns: float in [0.0, 1.0], transformed position
-#
-# Used in segment mode to shape the interpolation curve between two stops.
-# The eased value is converted back to a CC value before being sent to mod-host.
-
-
-def linear_easing(t: float) -> float:
-    """Linear easing - no transformation."""
+def linear(t: float) -> float:
     return t
 
 
-def ease_in_quad(t: float) -> float:
-    """Quadratic ease-in - slow start, accelerating finish."""
-    return t * t
-
-
-def ease_out_quad(t: float) -> float:
-    """Quadratic ease-out - fast start, decelerating finish."""
-    return 1.0 - (1.0 - t) * (1.0 - t)
-
-
-def ease_in_out_quad(t: float) -> float:
-    """Quadratic ease-in-out - slow start and finish, fast middle."""
+def smooth(t: float) -> float:
+    """Ease-in-out cubic: slow at both ends, expressive in the middle."""
     if t < 0.5:
-        return 2.0 * t * t
-    else:
-        return 1.0 - 2.0 * (1.0 - t) * (1.0 - t)
+        return 4.0 * t * t * t
+    return 1.0 - 4.0 * (1.0 - t) ** 3
 
 
-def ease_in_cubic(t: float) -> float:
-    """Cubic ease-in - very slow start, strong acceleration."""
+def build(t: float) -> float:
+    """Ease-in cubic: gradual start, rushes at the far end."""
     return t * t * t
 
 
-def ease_out_cubic(t: float) -> float:
-    """Cubic ease-out - fast start, strong deceleration."""
-    return 1.0 - (1.0 - t) * (1.0 - t) * (1.0 - t)
+def drop(t: float) -> float:
+    """Ease-out cubic: grabs immediately, fine-tunes at the far end."""
+    return 1.0 - (1.0 - t) ** 3
 
 
-def ease_in_out_cubic(t: float) -> float:
-    """Cubic ease-in-out - very slow start/finish, very fast middle."""
-    if t < 0.5:
-        return 4.0 * t * t * t
-    else:
-        return 1.0 - 4.0 * (1.0 - t) * (1.0 - t) * (1.0 - t)
-
-
-def exponential_easing(t: float) -> float:
-    """Exponential easing - extreme slow start, explosive finish."""
+def snap(t: float) -> float:
+    """Exponential: stays near start, sudden jump at the far end."""
     if t <= 0.0:
         return 0.0
     if t >= 1.0:
         return 1.0
-    return 2.0 ** (10.0 * (t - 1.0))
+    return (2.0 ** (10.0 * t) - 1.0) / (2.0 ** 10.0 - 1.0)
 
 
-def sine_easing(t: float) -> float:
-    """Sinusoidal easing - smooth, natural-feeling curve, like ease-in-out."""
-    return math.sin((t * math.pi) / 2.0)
+def bloom(t: float) -> float:
+    """Square root: immediate big shift, then plateaus."""
+    return math.sqrt(t)
+
+
+EasingFunc = Callable[[float], float]
+
+EASING_FUNCTIONS: dict[str, EasingFunc] = {
+    "linear": linear,
+    "smooth": smooth,
+    "build": build,
+    "drop": drop,
+    "snap": snap,
+    "bloom": bloom,
+}

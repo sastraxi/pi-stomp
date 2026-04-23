@@ -18,8 +18,9 @@
 import logging
 from bisect import bisect_right
 
+from blend.easing import EasingFunc
 from blend.stop import BlendStop
-from blend.types import BlendInputProtocol, EnrichedDiffMap, InterpolationFunc
+from blend.types import BlendInputProtocol, EnrichedDiffMap
 from blend.parameter_setter import ParameterSetter
 
 
@@ -28,12 +29,12 @@ class InputController:
 
     def __init__(
         self,
-        interpolation_func: InterpolationFunc,
+        easing_func: EasingFunc,
         stops: list[BlendStop],
         segment_diff_maps: list[EnrichedDiffMap],
         parameter_setter: ParameterSetter,
     ) -> None:
-        self.interpolation_func = interpolation_func
+        self.easing_func = easing_func
         self.stops = stops
         self.segment_diff_maps = segment_diff_maps
         self.parameter_setter = parameter_setter
@@ -100,27 +101,24 @@ class InputController:
             logging.warning("Cannot sync - no controlled input attached")
             return
 
-        # Get normalized position from control
-        percentage = self._get_normalized_position(self.controlled_input)
+        # Get normalized position from control and apply easing
+        t = self._get_normalized_position(self.controlled_input)
+        x = self.easing_func(t)
 
-        # Find segment for interpolation
-        segment_idx = self._find_segment(percentage)
+        # Find segment and local position within it
+        segment_idx = self._find_segment(x)
         lower = self.stops[segment_idx]
         upper = self.stops[segment_idx + 1]
         segment_range = upper.position - lower.position
 
-        if segment_range > 0:
-            local_pct = (percentage - lower.position) / segment_range
-            local_pct = max(0.0, min(1.0, local_pct))
-        else:
-            local_pct = 0.0
+        local_pct = max(0.0, min(1.0, (x - lower.position) / segment_range)) if segment_range > 0 else 0.0
 
-        # Send differing parameters (interpolated)
+        # Send differing parameters (linearly interpolated within segment)
         diff_map = self.segment_diff_maps[segment_idx]
         diff_sent = 0
         for instance_id, params in diff_map.items():
             for symbol, param_data in params.items():
-                float_value = self.interpolation_func(local_pct, param_data)
+                float_value = param_data.val_a + (param_data.val_b - param_data.val_a) * local_pct
                 if self.parameter_setter.send_parameter(instance_id, symbol, float_value):
                     diff_sent += 1
                 else:
@@ -142,7 +140,7 @@ class InputController:
                     logging.debug(f"Skipped constant param {instance_id}/{symbol} = {value:.3f}")
 
         logging.info(
-            f"Synced blend mode to position {percentage:.3f} (segment {segment_idx}): sent {diff_sent} differing + {const_sent} constant = {diff_sent + const_sent} total parameters"
+            f"Synced blend mode to position t={t:.3f} x={x:.3f} (segment {segment_idx}): sent {diff_sent} differing + {const_sent} constant = {diff_sent + const_sent} total parameters"
         )
 
     def handle_value_change(self, _raw_value: int, control: BlendInputProtocol) -> None:
@@ -151,29 +149,20 @@ class InputController:
         Callback from expression pedal or encoder when value changes;
         performs interpolation and sends parameters.
         """
-        percentage = self._get_normalized_position(control)
-        segment_idx = self._find_segment(percentage)
+        t = self._get_normalized_position(control)
+        x = self.easing_func(t)
+        segment_idx = self._find_segment(x)
         diff_map = self.segment_diff_maps[segment_idx]
 
-        # Calculate local percentage within segment
         lower = self.stops[segment_idx]
         upper = self.stops[segment_idx + 1]
         segment_range = upper.position - lower.position
+        local_pct = max(0.0, min(1.0, (x - lower.position) / segment_range)) if segment_range > 0 else 0.0
 
-        if segment_range > 0:
-            local_pct = (percentage - lower.position) / segment_range
-            local_pct = max(0.0, min(1.0, local_pct))  # Clamp to [0, 1]
-        else:
-            local_pct = 0.0
-
-        # Interpolate and send (ParameterSetter handles de-dupe)
         try:
             for instance_id, params in diff_map.items():
                 for symbol, param_data in params.items():
-                    # Apply interpolation function
-                    float_value = self.interpolation_func(local_pct, param_data)
-
-                    # Send parameter (ParameterSetter handles MIDI de-dupe and backpressure)
+                    float_value = param_data.val_a + (param_data.val_b - param_data.val_a) * local_pct
                     self.parameter_setter.send_parameter(instance_id, symbol, float_value)
         except Exception as e:
             logging.error(f"Error in blend interpolation: {e}", exc_info=True)
