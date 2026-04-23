@@ -44,6 +44,29 @@ for _mod in _PI_MODULES:
 
 
 # ---------------------------------------------------------------------------
+# Force consistent font rendering across platforms (Linux / MacOS)
+# ---------------------------------------------------------------------------
+
+
+_FONTS_DIR = PROJECT_ROOT / "fonts"
+
+
+@pytest.fixture(autouse=True)
+def force_basic_layout(monkeypatch):
+    original = ImageFont.truetype
+
+    def patched(font, size=10, **kwargs):
+        if isinstance(font, str) and not Path(font).is_absolute() and not Path(font).exists():
+            candidate = _FONTS_DIR / font
+            if candidate.exists():
+                font = str(candidate)
+        kwargs["layout_engine"] = ImageFont.Layout.BASIC
+        return original(font, size, **kwargs)
+
+    monkeypatch.setattr(ImageFont, "truetype", patched)
+
+
+# ---------------------------------------------------------------------------
 # Snapshot helpers
 # ---------------------------------------------------------------------------
 
