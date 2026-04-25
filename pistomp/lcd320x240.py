@@ -580,16 +580,17 @@ class Lcd(abstract_lcd.Lcd):
     def draw_lcd_speed_menu(self, event):
         current_speed = self.spi_speed_mhz
         items = [
-            ("24 MHz (Safe)", self.handler.set_lcd_speed, 24, current_speed==24),
-            ("48 MHz", self.handler.set_lcd_speed, 48, current_speed==48),
-            ("56 MHz", self.handler.set_lcd_speed, 56, current_speed==56),
-            ("80 MHz", self.handler.set_lcd_speed, 80, current_speed==80),
+            ("24 MHz (safe)", self.handler.set_lcd_speed, 24, current_speed==24),
+            ("48 MHz (experimental)", self.handler.set_lcd_speed, 48, current_speed==48),
+            ("56 MHz (experimental)", self.handler.set_lcd_speed, 56, current_speed==56),
+            ("80 MHz (experimental)", self.handler.set_lcd_speed, 80, current_speed==80),
         ]
         self.draw_selection_menu(items, "LCD SPI Speed", auto_dismiss=False)
 
     def show_lcd_speed_message(self, speed_mhz):
-        msg = f"LCD speed set to {speed_mhz} MHz.\n\nRestarting service..."
-        d = MessageDialog(self.pstack, msg, title="LCD Speed", width=280, height=140)
+        adc_speed = "240 kHz" if speed_mhz <= 24 else "1 MHz"
+        msg = f"LCD: {speed_mhz} MHz / ADC: {adc_speed}\n\nRestarting..."
+        d = MessageDialog(self.pstack, msg, title="SPI Speed", width=280, height=140)
         self.pstack.push_panel(d)
 
     def draw_bank_menu(self, event):
