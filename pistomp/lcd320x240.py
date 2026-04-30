@@ -28,6 +28,7 @@ from uilib import *
 from uilib.lcd_ili9341 import *
 
 from pistomp.footswitch import Footswitch  # TODO would like to avoid this module knowing such details
+from pistomp.pedalboard_config_editor import PedalboardConfigEditor
 
 #import traceback
 
@@ -93,6 +94,7 @@ class Lcd(abstract_lcd.Lcd):
         self.w_wifi = None
         self.w_wifi_ssid = None
         self.w_wifi_pw = None
+        self.w_config_edit = None
         self.w_eq = None
         self.w_power = None
         self.w_wrench = None
@@ -162,7 +164,8 @@ class Lcd(abstract_lcd.Lcd):
         if not self.main_panel_pushed:
             self.pstack.push_panel(self.main_panel)
             self.main_panel_pushed = True
-        #self.main_panel.refresh()
+        else:
+            self.pstack.refresh()
 
     def poll_updates(self):
         self.pstack.poll_updates()
@@ -173,6 +176,9 @@ class Lcd(abstract_lcd.Lcd):
     def draw_tools(self, wifi_type=None, eq_type=None, bypass_type=None, system_type=None):
         if self.w_wifi is not None:
             return
+        self.w_config_edit = ImageWidget(box=Box.xywh(180, 0, 20, 20), image_path=os.path.join(self.imagedir,
+                                  'edit_silver.png'), parent=self.main_panel, action=self.draw_config_editor)
+        self.main_panel.add_sel_widget(self.w_config_edit)
         self.w_wifi = ImageWidget(box=Box.xywh(210, 0, 20, 20), image_path=os.path.join(self.imagedir,
                                   'wifi_gray.png'), parent=self.main_panel, action=self.draw_wifi_menu)
         self.main_panel.add_sel_widget(self.w_wifi)
@@ -305,16 +311,17 @@ class Lcd(abstract_lcd.Lcd):
             items.append((name, self.handler.preset_change, i))
         self.draw_selection_menu(items, "Snapshots", auto_dismiss=True, dismiss_option=True)
 
-    def draw_selection_menu(self, items, title="", auto_dismiss=False, dismiss_option=False):
-        # items is list of touples: (item_label, callback_method, callback_arg)
-        # The below assumes that the callback takes the menu item label as an argument
+    def draw_selection_menu(self, items, title="", auto_dismiss=False, dismiss_option=False,
+                            text_halign=TextHAlign.CENTRE, on_close=None):
+        # items is list of tuples: (item_label, callback_method, callback_arg[, selected[, fgnd_color]])
         def menu_action(event, params):
             callback = params[1]
             if callback is not None:
                 callback(params[2])
 
         m = Menu(title=title, items=items, auto_destroy=True, default_item=None, max_width=180, max_height=200,
-                 auto_dismiss=auto_dismiss, dismiss_option=dismiss_option, action=menu_action)
+                 auto_dismiss=auto_dismiss, dismiss_option=dismiss_option, action=menu_action,
+                 text_halign=text_halign, on_close=on_close)
         self.pstack.push_panel(m)
         return m
 
@@ -571,6 +578,10 @@ class Lcd(abstract_lcd.Lcd):
         for k,v in self.handler.get_banks().items():
             items.append((k, self.handler.set_bank, k, k==current_bank))
         self.draw_selection_menu(items, "Bank Select", auto_dismiss=True)
+
+    def draw_config_editor(self, event, widget):
+        if event == InputEvent.CLICK:
+            PedalboardConfigEditor(self.handler, self.handler.hardware, self).open()
 
     def draw_wifi_menu(self, event, widget):
         label = "Switch to Wifi" if util.DICT_GET(self.handler.wifi_status, 'hotspot_active') else "Switch to Hotspot"
