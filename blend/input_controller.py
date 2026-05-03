@@ -59,10 +59,10 @@ class InputController:
         # Search encoders (tweak encoders)
         for encoder in encoders:
             if hasattr(encoder, "id") and encoder.id == input_id:
-                from pistomp.encodermidicontrol import EncoderMidiControl
+                from pistomp.encoder_controller import EncoderController as EncoderMidiControl
 
                 if not isinstance(encoder, EncoderMidiControl):
-                    raise ValueError(f"Encoder {input_id} must be EncoderMidiControl (has MIDI support) for blend mode")
+                    raise ValueError(f"Encoder {input_id} must be EncoderController (has MIDI support) for blend mode")
 
                 self.controlled_input = encoder
                 encoder.value_change_callback = self.handle_value_change
@@ -86,7 +86,7 @@ class InputController:
         pass
 
     def _get_normalized_position(self, control: BlendInputProtocol) -> float:
-        from pistomp.encodermidicontrol import EncoderMidiControl
+        from pistomp.encoder_controller import EncoderController as EncoderMidiControl
 
         if isinstance(control, EncoderMidiControl):
             # Encoder: MIDI value already accumulated (0-127)

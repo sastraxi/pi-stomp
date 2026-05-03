@@ -14,7 +14,7 @@ from tests.types import SystemFixture
 
 def _blend_encoder(hw):
     """Return the EncoderMidiControl with id=1 used by the blend fixture."""
-    from pistomp.encodermidicontrol import EncoderMidiControl
+    from pistomp.encoder_controller import EncoderController as EncoderMidiControl
 
     return next(e for e in hw.encoders if isinstance(e, EncoderMidiControl) and getattr(e, "id", None) == 1)
 

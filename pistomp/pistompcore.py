@@ -104,3 +104,9 @@ class Pistompcore(hardware.Hardware):
 
     def cleanup(self):
         pass
+
+    def test(self):
+        pass
+
+    def add_encoder(self, id, type, callback, longpress_callback, midi_channel, midi_cc, midiout=None):
+        raise NotImplementedError("v2 hardware does not support config-driven encoder creation")
