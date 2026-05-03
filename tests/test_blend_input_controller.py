@@ -136,10 +136,10 @@ def test_detach_clears_callback(simple_controller):
 
 
 def test_attach_non_encoder_midi_control_raises(simple_controller):
-    # A plain MagicMock in the encoders list is not an EncoderMidiControl → should raise
+    # A plain MagicMock in the encoders list is not an EncoderController → should raise
     plain_encoder = MagicMock()
     plain_encoder.id = 1
-    with pytest.raises(ValueError, match="EncoderMidiControl"):
+    with pytest.raises(ValueError, match="EncoderController"):
         simple_controller.attach_to_input([], [plain_encoder], 1)
 
 
@@ -156,7 +156,7 @@ def test_attach_missing_input_id_raises(simple_controller):
 
 def test_get_normalized_position_expression_pedal():
     ic = _make_controller([_make_stop(0.0), _make_stop(1.0)])
-    control = MagicMock(spec=[])  # plain object, not EncoderMidiControl
+    control = MagicMock(spec=[])  # plain object, not EncoderController
     control.last_read = 512
     result = ic._get_normalized_position(control)
     assert result == pytest.approx(512 / 1023.0, rel=1e-9)

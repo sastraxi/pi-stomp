@@ -89,7 +89,16 @@ class StubWifiManager:
     def disable_hotspot(self):
         pass
 
-    def configure_wifi(self, ssid, password):
+    def configure_wifi(self, name, ssid, password):
+        return None
+
+    def list_connections(self):
+        return []
+
+    def add_connection(self, ssid, psk):
+        return None
+
+    def get_psk_for(self, name):
         return None
 
 

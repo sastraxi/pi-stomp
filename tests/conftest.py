@@ -9,6 +9,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from PIL import Image, ImageFont
+from uilib.panel import LcdBase
 
 from uilib.panel import LcdBase
 
