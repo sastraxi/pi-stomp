@@ -137,26 +137,13 @@ ParameterTypeGetter = Callable[[str, str], ParameterType]
 # Pre-computed parameter data
 @dataclass
 class ParamData:
-    """
-    Pre-computed parameter data for interpolation.
+    """Pre-computed parameter data for a differing parameter between two stops."""
 
-    Includes values from neighboring stops for hermite/catmull-rom interpolation.
-    Built once at snapshot load to optimize the critical path.
-    """
-
-    val_a: float  # Value at lower stop
-    val_b: float  # Value at upper stop
-    prev_val: float | None  # Value at stops[i-1] (None if i==0)
-    next_val: float | None  # Value at stops[i+2] (None if at end)
-    segment_range: float  # upper.position - lower.position
-    param_type: ParameterType  # For future use
+    val_a: float       # Value at lower stop
+    val_b: float       # Value at upper stop
+    param_type: ParameterType
 
 
 # Enriched diff map type
 EnrichedDiffMap = dict[str, dict[str, ParamData]]  # {instance_id: {symbol: ParamData}}
 
-# Function type aliases
-EasingFunc = Callable[[float], float]
-
-# Per-parameter interpolation function: (local_pct, param_data) -> interpolated_value
-InterpolationFunc = Callable[[float, ParamData], float]

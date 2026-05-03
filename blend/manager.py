@@ -19,21 +19,7 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from blend.interpolation import (
-    # Spline interpolation
-    hermite_interpolation,
-    catmull_rom_interpolation,
-    # Easing-based interpolation
-    linear_interpolation,
-    ease_in_quad_interpolation,
-    ease_out_quad_interpolation,
-    ease_in_out_quad_interpolation,
-    ease_in_cubic_interpolation,
-    ease_out_cubic_interpolation,
-    ease_in_out_cubic_interpolation,
-    exponential_easing_interpolation,
-    sine_easing_interpolation,
-)
+from blend.easing import EASING_FUNCTIONS, EasingFunc
 from blend.parameter_setter import ParameterSetter
 from blend.input_controller import InputController
 from blend.snapshot import SnapshotManager
@@ -42,7 +28,6 @@ from blend.stop import BlendStop
 from blend.types import (
     BlendSnapshotConfig,
     EnrichedDiffMap,
-    InterpolationFunc,
     MidiBoundParams,
     NormalizedStops,
     StopData,
@@ -53,22 +38,6 @@ if TYPE_CHECKING:
     from modalapi.modhandler import Modhandler
 
 
-# Mapping of all interpolation function names
-INTERPOLATION_FUNCTIONS: dict[str, InterpolationFunc] = {
-    # Spline interpolation (uses neighbor context)
-    "hermite": hermite_interpolation,
-    "catmull_rom": catmull_rom_interpolation,
-    # Easing-based interpolation (segment-local only)
-    "linear": linear_interpolation,
-    "ease_in_quad": ease_in_quad_interpolation,
-    "ease_out_quad": ease_out_quad_interpolation,
-    "ease_in_out_quad": ease_in_out_quad_interpolation,
-    "ease_in_cubic": ease_in_cubic_interpolation,
-    "ease_out_cubic": ease_out_cubic_interpolation,
-    "ease_in_out_cubic": ease_in_out_cubic_interpolation,
-    "exponential": exponential_easing_interpolation,
-    "sine": sine_easing_interpolation,
-}
 
 
 class BlendMode:
@@ -95,7 +64,7 @@ class BlendMode:
         logging.info("Preparing blend mode...")
 
         try:
-            interpolation_func = self._validate_config()
+            easing_func = self._validate_config()
             self.stops = self._create_stops()
 
             # Extract MIDI-bound parameters to exclude from interpolation
@@ -107,12 +76,9 @@ class BlendMode:
                 lower = self.stops[segment_idx]
                 upper = self.stops[segment_idx + 1]
 
-                # Build enriched diff map with neighbor data
                 diff_map = BlendStop.build_enriched_diff_map(
                     lower,
                     upper,
-                    self.stops,
-                    segment_idx,
                     self._get_parameter_type,
                     midi_bound_params,
                 )
@@ -133,7 +99,7 @@ class BlendMode:
 
             # Initialize input controller (but don't attach yet)
             self.input_controller = InputController(
-                interpolation_func,
+                easing_func,
                 self.stops,
                 self.segment_diff_maps,
                 self.parameter_setter,
@@ -256,18 +222,17 @@ class BlendMode:
 
         return midi_params
 
-    def _validate_config(self) -> InterpolationFunc:
-        # Parse interpolation function name
-        interp_name = self.config.get("interpolation", "linear")
-        interpolation_func = INTERPOLATION_FUNCTIONS.get(interp_name)
+    def _validate_config(self) -> EasingFunc:
+        easing_name = self.config.get("interpolation", "linear")
+        easing_func = EASING_FUNCTIONS.get(easing_name)
 
-        if not interpolation_func:
+        if not easing_func:
             raise ValueError(
-                f"Invalid interpolation '{interp_name}', must be one of: {', '.join(INTERPOLATION_FUNCTIONS.keys())}"
+                f"Invalid interpolation '{easing_name}', must be one of: {', '.join(EASING_FUNCTIONS.keys())}"
             )
 
-        logging.debug(f"Config validated: interpolation={interp_name}")
-        return interpolation_func
+        logging.debug(f"Config validated: interpolation={easing_name}")
+        return easing_func
 
     def _create_stops(self) -> list[BlendStop]:
         """Load snapshots and create BlendStop objects from current config."""
