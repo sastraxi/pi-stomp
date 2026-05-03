@@ -33,7 +33,7 @@ def as_midi_value(adc_value: int):
 
 
 class AnalogMidiControl(analogcontrol.AnalogControl):
-    def __init__(self, spi, adc_channel, tolerance, midi_CC, midi_channel, midiout, type, id=None, cfg={}, autosync=False):
+    def __init__(self, spi, adc_channel, tolerance, midi_CC, midi_channel, midiout, type, id=None, cfg={}, autosync=False, value_change_callback=None):
         super(AnalogMidiControl, self).__init__(spi, adc_channel, tolerance)
         self.midi_CC = midi_CC
         self.midiout = midiout
