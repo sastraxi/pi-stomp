@@ -810,6 +810,8 @@ class Lcd(abstract_lcd.Lcd):
                             category = util.DICT_GET(v, Token.CATEGORY)
                             text_color = Category.get_category_color(category)
                             color = self.default_plugin_color
+                        else:
+                            text_color = color
 
             if control_type == Token.KNOB:
                 w = Icon(
