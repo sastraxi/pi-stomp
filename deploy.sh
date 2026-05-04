@@ -7,6 +7,7 @@ echo "Deploying Python files to pistomp..."
 scp modalapistomp.py pistomp@pistomp.local:/home/pistomp/pi-stomp/
 scp modalapi/*.py pistomp@pistomp.local:/home/pistomp/pi-stomp/modalapi/
 scp pistomp/*.py pistomp@pistomp.local:/home/pistomp/pi-stomp/pistomp/
+scp pistomp/tuner/*.py pistomp@pistomp.local:/home/pistomp/pi-stomp/pistomp/tuner/
 if [ -d blend ]; then
     scp -r blend pistomp@pistomp.local:/home/pistomp/pi-stomp/
 fi
