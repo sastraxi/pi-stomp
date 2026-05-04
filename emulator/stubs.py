@@ -21,7 +21,10 @@ StubRelay         — no-op relay; satisfies the Relay interface without GPIO.
 """
 
 
-class VirtualAudiocard:
+from pistomp.audiocard import Audiocard
+
+
+class VirtualAudiocard(Audiocard):
     """In-memory audiocard stub; holds EQ/volume/bypass state."""
 
     CAPTURE_VOLUME = "capture_volume"
@@ -63,6 +66,9 @@ class VirtualAudiocard:
 
     def set_bypass_right(self, value):
         self._bypass_right = value
+
+    def set_output_muted(self, muted: bool) -> None:
+        pass
 
 
 class StubWifiManager:
