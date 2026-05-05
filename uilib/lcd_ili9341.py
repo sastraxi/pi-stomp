@@ -13,8 +13,6 @@
 # You should have received a copy of the GNU General Public License
 # along with pi-stomp.  If not, see <https://www.gnu.org/licenses/>.
 
-import adafruit_rgb_display.ili9341 as ili9341
-
 from uilib.panel import *
 import logging
 import threading
@@ -23,6 +21,7 @@ class LcdIli9341(LcdBase):
     # XXX
     # TODO: Turn "flip" into all 90deg angle combinations
     def __init__(self, spi, cs_pin, dc_pin, reset_pin, baudrate, flip = True):
+        import adafruit_rgb_display.ili9341 as ili9341
         self.disp = ili9341.ILI9341(
             spi,
             cs=cs_pin,
