@@ -92,6 +92,24 @@ class StubWifiManager:
     def configure_wifi(self, ssid, password):
         return None
 
+    def list_connections(self):
+        return []
+
+    def scan_networks(self):
+        return []
+
+    def connect_scanned(self, ssid, psk=None):
+        return None
+
+    def connect_saved(self, name):
+        return None
+
+    def replace_psk(self, name, psk):
+        return None
+
+    def delete_connection(self, name):
+        return None
+
 
 class StubRelay:
     """No-op relay; satisfies the Relay interface without GPIO."""
