@@ -20,18 +20,21 @@ def test_wifi_menu_navigation(v3_system, snapshot):
     # Act: Open menu
     wifi_menu = WifiMenu(instance)
     wifi_menu.open()
-    
-    # Assert initial selection (NetA)
+
+    # Assert initial menu ("Nearby networks..." selected)
     snapshot("initial_menu")
-    
-    # Act: Navigate down (simulate encoder right)
-    instance.enc_step(1)
-    
-    # Assert selection (NetB)
-    snapshot("navigated_down")
-    
-    # Act: Select (simulate click)
+
+    # Act: Enter nearby submenu
     instance.pstack.input_event(InputEvent.CLICK)
-    
+
+    # Act: Navigate down to NetB
+    instance.enc_step(1)
+
+    # Assert selection (NetB selected in nearby submenu)
+    snapshot("navigated_down")
+
+    # Act: Select NetB → password dialog
+    instance.pstack.input_event(InputEvent.CLICK)
+
     # Assert password dialog
     snapshot("password_dialog")
