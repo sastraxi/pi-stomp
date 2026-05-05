@@ -54,9 +54,6 @@ class EmulatorMod(Mod):
     # Skip Pi-only system calls
     # -------------------------------------------------------------------------
 
-    def poll_wifi(self):
-        pass
-
     def poll_system_info(self):
         pass
 
