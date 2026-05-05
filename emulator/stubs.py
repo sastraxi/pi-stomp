@@ -190,6 +190,12 @@ class StubWifiManager:
         self._refresh_status()
         return None
 
+    def disconnect(self, name: str) -> Optional[bytes]:
+        if name == self._active:
+            self._active = None
+            self._refresh_status()
+        return None
+
     def connect_saved(self, name: str) -> Optional[bytes]:
         profile = next((p for p in self._saved if p['name'] == name), None)
         if profile is None:
