@@ -386,11 +386,10 @@ class Lcd(abstract_lcd.Lcd):
 
     def draw_selection_menu(self, items, title="", auto_dismiss=False, dismiss_option=False,
                             text_halign=TextHAlign.CENTRE, on_close=None):
-        # items is list of tuples: (item_label, callback_method, callback_arg[, selected[, fgnd_color]])
-        # FIXME: fgnd_color and longpress_callback_method are clashing currently
+        # items is list of tuples: (item_label, callback_method, callback_arg[, selected[, fgnd_color[, longpress_callback]]])
         def menu_action(event, params):
-            if event == InputEvent.LONG_CLICK and len(params) >= 5 and params[4] is not None:
-                params[4](params[2])
+            if event == InputEvent.LONG_CLICK and len(params) >= 6 and params[5] is not None:
+                params[5](params[2])
                 return
             callback = params[1]
             if callback is None:

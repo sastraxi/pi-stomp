@@ -49,7 +49,7 @@ class Menu(Dialog):
 
         h = 0
         for i in items:
-            # item structure: 0:name, 1:action, 2:object, 3:selected, 4:fgnd_color (optional)
+            # item structure: 0:name, 1:action, 2:object, 3:selected, 4:fgnd_color, 5:longpress_callback (all optional from 3)
             t = i[0]
             is_checked = len(i) >= 4 and i[3]
             if is_checked:

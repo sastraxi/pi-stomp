@@ -226,7 +226,7 @@ class WifiMenu:
 
     def _build_items(self, rows: list[Row], extras: list[Row], nearby: list[Row],
                      hotspot_active: bool) -> list[MenuItem]:
-        items: list[MenuItem] = [(self._row_label(r), self._on_network_tap, r, None, self._on_network_long_tap) for r in rows]
+        items: list[MenuItem] = [(self._row_label(r), self._on_network_tap, r, None, None, self._on_network_long_tap) for r in rows]
         if extras:
             items.append(("More saved...", self._open_more_saved, extras))
         if nearby:
@@ -326,7 +326,7 @@ class WifiMenu:
         self.lcd.draw_selection_menu(items, "Nearby Networks", dismiss_option=True)
 
     def _open_more_saved(self, extras: list[Row]) -> None:
-        items: list[MenuItem] = [(self._row_label(r), self._on_network_tap, r, None, self._on_network_long_tap) for r in extras]
+        items: list[MenuItem] = [(self._row_label(r), self._on_network_tap, r, None, None, self._on_network_long_tap) for r in extras]
         self.lcd.draw_selection_menu(items, "Saved Networks", dismiss_option=True)
 
     def _connect_saved(self, row: Row) -> None:
