@@ -100,7 +100,8 @@ class EmulatorModhandler(Modhandler):
         logging.info("Emulator: reload configs is a no-op")
 
     def system_toggle_hotspot(self, **kwargs):
-        pass
+        self.wifi_status['hotspot_active'] = not self.wifi_status.get('hotspot_active', False)
+        self.lcd.update_wifi(self.wifi_status)
 
     def configure_wifi_credentials(self, ssid, password):
         return None
