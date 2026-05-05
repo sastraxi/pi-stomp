@@ -45,6 +45,8 @@ class EmulatorMod(Mod):
         self.pedalboard_change_timestamp = 0
 
         self.root_uri = "http://127.0.0.1:18181/"
+        assert self.wifi_manager is not None
+        self.wifi_status = self.wifi_manager.poll() or {}
         self._window = None
 
     def set_window(self, window):

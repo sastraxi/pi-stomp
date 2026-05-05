@@ -43,6 +43,7 @@ class EmulatorModhandler(Modhandler):
 
         self.root_uri = "http://127.0.0.1:18181/"
         self.wifi_manager = StubWifiManager()
+        self.wifi_status = self.wifi_manager.poll() or {}
 
         self._window = None
 
