@@ -1,6 +1,7 @@
 """v3-specific fixtures — delegates stack construction to integration/conftest."""
 
 import json
+import time as _time
 from collections.abc import Generator
 from typing import cast
 from unittest.mock import MagicMock
@@ -9,6 +10,7 @@ import pytest
 import yaml
 
 import common.token as Token
+from modalapi.wifi import SavedConnection, ScannedNetwork
 from tests.conftest import FakeWebSocketBridge
 from tests.integration.conftest import _v3_stack
 from tests.types import SystemFixture
@@ -127,3 +129,41 @@ def blend_system(
         handler.active_blend_mode.parameter_setter.reset_tracking()
 
     yield SystemFixture(handler, hw, lcd, mock_get, mock_post, v3_system.ws_bridge)
+
+
+# ---------------------------------------------------------------------------
+# WiFi test helpers
+# ---------------------------------------------------------------------------
+
+def make_scanned(ssid: str, signal: int = 60, security: str = "WPA2",
+                 in_use: bool = False) -> ScannedNetwork:
+    return ScannedNetwork(ssid=ssid, signal=signal, security=security, in_use=in_use)
+
+
+def make_saved(ssid: str, name: str | None = None,
+               timestamp: int | None = None) -> SavedConnection:
+    return SavedConnection(
+        name=name or ssid,
+        ssid=ssid,
+        timestamp=timestamp if timestamp is not None else int(_time.time()) - 3600,
+    )
+
+
+@pytest.fixture
+def wifi_state(v3_system):
+    """Configure wifi_manager mock and wifi_status in one call.
+
+    active is the connection *name* (matches SavedConnection.name).
+    """
+    def _set(scanned=(), saved=(), active=None, hotspot=False, supported=True):
+        wm = v3_system.handler.wifi_manager
+        wm.scan_networks.return_value = list(scanned)
+        wm.list_connections.return_value = list(saved)
+        v3_system.handler.wifi_status = {
+            "wifi_supported": supported,
+            "wifi_connected": active is not None,
+            "hotspot_active": hotspot,
+            "ssid": active,
+            "connection": active,
+        }
+    return _set
