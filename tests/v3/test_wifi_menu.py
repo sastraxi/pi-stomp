@@ -285,6 +285,32 @@ def test_error_dialog_snapshot(v3_system, wifi_state, snapshot):
 
 
 # ---------------------------------------------------------------------------
+# 5.9b  test_nearby_wrong_psk_second_failure
+# ---------------------------------------------------------------------------
+
+def test_nearby_wrong_psk_second_failure(v3_system, wifi_state, snapshot):
+    """Second wrong password for a nearby network shows an error dialog, not another re-prompt."""
+    nets = [make_scanned("Net", signal=70)]
+    wifi_state(scanned=nets, saved=[])
+
+    wm_mock = v3_system.handler.wifi_manager
+    wm_mock.connect_scanned.return_value = b"secrets were required, but none were provided"
+
+    _wm, lcd = _open(v3_system)
+    _click(lcd)                              # enter "Nearby networks..."
+    _click(lcd)                              # tap Net → passphrase editor
+    _type_password(lcd, "wrongpass1")
+    _click(lcd)                              # submit → auth fail → re-prompt
+    assert isinstance(lcd.pstack.current, _PassphraseEditor)
+
+    _type_password(lcd, "wrongpass2")
+    _click(lcd)                              # submit → second auth fail → error dialog
+    snapshot("nearby_second_failure_dialog")
+
+    assert isinstance(lcd.pstack.current, MessageDialog)
+
+
+# ---------------------------------------------------------------------------
 # 5.10  test_more_saved_submenu
 # ---------------------------------------------------------------------------
 
