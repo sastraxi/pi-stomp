@@ -116,56 +116,27 @@ def test_saved_in_range_active(v3_system, wifi_state, snapshot):
 
 
 # ---------------------------------------------------------------------------
-# 5.5  test_saved_wrong_psk_retry_success
+# 5.5  test_saved_wrong_psk_shows_error
 # ---------------------------------------------------------------------------
 
-def test_saved_wrong_psk_retry_success(v3_system, wifi_state, snapshot):
-    """Saved network with stale PSK: user re-enters and succeeds."""
+def test_saved_wrong_psk_shows_error(v3_system, wifi_state, snapshot):
+    """Saved network with stale PSK: one attempt then show the error.
+
+    The user can retry via the long-press 'Replace password' submenu.
+    """
     saved = [make_saved("Home")]
     scanned = [make_scanned("Home", signal=80)]
     wifi_state(scanned=scanned, saved=saved, active=None)
 
     wm_mock = v3_system.handler.wifi_manager
     wm_mock.connect_saved.return_value = b"secrets were required, but none were provided"
-    wm_mock.replace_psk.return_value = None
 
     _wm, lcd = _open(v3_system)
-    snapshot("root_with_saved")
-
-    _click(lcd)                              # tap Home → auth fails → reprompt
-    snapshot("psk_reprompt")
-
-    _type_password(lcd, "newpassword123")
-    _click(lcd)                              # submit
-    snapshot("connected_after_replace")
-
-    wm_mock.replace_psk.assert_called_once_with("Home", "newpassword123")
-
-
-# ---------------------------------------------------------------------------
-# 5.6  test_saved_wrong_psk_second_failure
-# ---------------------------------------------------------------------------
-
-def test_saved_wrong_psk_second_failure(v3_system, wifi_state, snapshot):
-    """Second PSK attempt also fails; an error dialog is shown."""
-    saved = [make_saved("Home")]
-    scanned = [make_scanned("Home", signal=80)]
-    wifi_state(scanned=scanned, saved=saved, active=None)
-
-    wm_mock = v3_system.handler.wifi_manager
-    wm_mock.connect_saved.return_value = b"secrets were required, but none were provided"
-    wm_mock.replace_psk.return_value = b"secrets were required, but none were provided"
-
-    _wm, lcd = _open(v3_system)
-    _click(lcd)                              # tap Home → reprompt
-    _type_password(lcd, "stillwrong")
-    _click(lcd)                              # submit → error
-    snapshot("second_failure_error_dialog")
+    _click(lcd)                              # tap Home → auth fails → error dialog
+    snapshot("saved_auth_failed_dialog")
 
     assert isinstance(lcd.pstack.current, MessageDialog)
-    # Rollback is always attempted; the wrapped text widget carries the note.
-    msg_text = lcd.pstack.current.sel_list[0].text
-    assert "unchanged" in msg_text
+    wm_mock.replace_psk.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -215,17 +186,15 @@ def test_empty_psk_submit_blocked(v3_system, wifi_state, snapshot):
 # 5.9  test_error_dialogs_each_kind
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("stderr,label,reprompts", [
-    # Auth failure → re-prompts (passphrase editor re-opens, stays in nearby)
-    (b"secrets were required, but none were provided", "auth_failed",       True),
-    # Non-auth failures → error dialog over nearby submenu
-    (b"ip-config-unavailable",                         "dhcp_timeout",      False),
-    (b"connection timed out",                          "timed_out",         False),
-    (b"no network with ssid 'Net'",                    "not_found",         False),
-    (b"not authorized to control networking",          "permission_denied", False),
+@pytest.mark.parametrize("stderr,label", [
+    (b"secrets were required, but none were provided", "auth_failed"),
+    (b"ip-config-unavailable",                         "dhcp_timeout"),
+    (b"connection timed out",                          "timed_out"),
+    (b"no network with ssid 'Net'",                    "not_found"),
+    (b"not authorized to control networking",          "permission_denied"),
 ])
-def test_error_dialogs_each_kind(v3_system, wifi_state, snapshot, stderr, label, reprompts):
-    """Auth failure re-prompts; other errors show a MessageDialog over nearby submenu."""
+def test_error_dialogs_each_kind(v3_system, wifi_state, snapshot, stderr, label):
+    """Every connect failure (including auth) shows a MessageDialog — no retry."""
     nets = [make_scanned("Net", signal=70)]
     wifi_state(scanned=nets, saved=[])
 
@@ -236,37 +205,8 @@ def test_error_dialogs_each_kind(v3_system, wifi_state, snapshot, stderr, label,
     _click(lcd)                              # enter "Nearby networks..."
     _click(lcd)                              # tap Net → passphrase editor
     _type_password(lcd, "somepassword")
-    _click(lcd)                              # submit → auth re-prompt or error
+    _click(lcd)                              # submit → error dialog
     snapshot(f"error_{label}")
-
-    if reprompts:
-        assert isinstance(lcd.pstack.current, _PassphraseEditor)
-    else:
-        assert isinstance(lcd.pstack.current, MessageDialog)
-
-
-# ---------------------------------------------------------------------------
-# 5.9b  test_nearby_wrong_psk_second_failure
-# ---------------------------------------------------------------------------
-
-def test_nearby_wrong_psk_second_failure(v3_system, wifi_state, snapshot):
-    """Second wrong password for a nearby network shows an error dialog, not another re-prompt."""
-    nets = [make_scanned("Net", signal=70)]
-    wifi_state(scanned=nets, saved=[])
-
-    wm_mock = v3_system.handler.wifi_manager
-    wm_mock.connect_scanned.return_value = b"secrets were required, but none were provided"
-
-    _wm, lcd = _open(v3_system)
-    _click(lcd)                              # enter "Nearby networks..."
-    _click(lcd)                              # tap Net → passphrase editor
-    _type_password(lcd, "wrongpass1")
-    _click(lcd)                              # submit → auth fail → re-prompt
-    assert isinstance(lcd.pstack.current, _PassphraseEditor)
-
-    _type_password(lcd, "wrongpass2")
-    _click(lcd)                              # submit → second auth fail → error dialog
-    snapshot("nearby_second_failure_dialog")
 
     assert isinstance(lcd.pstack.current, MessageDialog)
 
