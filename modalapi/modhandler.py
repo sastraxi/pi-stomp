@@ -32,6 +32,7 @@ from common.parameter import Parameter, TTL_PROPERTIES, TTL_INTEGER
 import modalapi.pedalboard as Pedalboard
 import modalapi.wifi as Wifi
 import modalapi.external_midi as ExternalMidi
+from modalapi.external_midi import EXTERNAL_INSTANCE_ID
 from pistomp.lcd320x240 import Lcd
 from pistomp.hardware import Controller, Hardware
 import pistomp.settings as Settings

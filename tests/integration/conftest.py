@@ -79,6 +79,7 @@ def _build_stack(hw_class: Any, cfg_path: Path, fake_lcd, tmp_path) -> Generator
         mock_post.side_effect = post_side_effect
 
         mock_audiocard = MagicMock()
+        mock_audiocard.get_volume_parameter.return_value = 0.0
         handler = Modhandler(mock_audiocard, cwd, data_dir=str(data_dir))
 
         midiout = MagicMock()
