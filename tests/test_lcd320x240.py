@@ -127,6 +127,8 @@ def test_parameter_dialog_snapshot(lcd, snapshot):
         minimum=0.0,
         maximum=1.0,
         type=MockObject(value=0),
+        get_taper=lambda: 1,
+        format=lambda v: f"{v:.2f}",
     )
     instance.draw_parameter_dialog(mock_param)
     snapshot()
