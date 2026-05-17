@@ -143,15 +143,6 @@ class Modhandler(Handler):
         except Exception as e:
             logging.warning(f"Failed to initialize external MIDI manager: {e}")
 
-    def __del__(self):
-        logging.info("Handler cleanup")
-        if self.wifi_manager:
-            del self.wifi_manager
-        # ws_bridge.stop() lives in cleanup(), not here — join() in __del__ blows up
-        # during interpreter shutdown on Py 3.14. Daemon thread dies with the process.
-        if self.external_midi is not None:
-            self.external_midi.close()
-
     def cleanup(self):
         if self._lcd is not None:
             self._lcd.cleanup()
