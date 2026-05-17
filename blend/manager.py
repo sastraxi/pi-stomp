@@ -212,11 +212,10 @@ class BlendMode:
         pedalboard = self.handler.current.pedalboard
 
         for plugin in pedalboard.plugins:
-            instance_key = SnapshotManager.map_key_to_instance(plugin.instance_id)
             for symbol, param in plugin.parameters.items():
                 if param.binding is not None:  # Format: "channel:CC"
-                    midi_params.add((instance_key, symbol))
-                    logging.debug(f"Found MIDI binding: {instance_key}/{symbol} -> {param.binding}")
+                    midi_params.add((plugin.instance_id, symbol))
+                    logging.debug(f"Found MIDI binding: {plugin.instance_id}/{symbol} -> {param.binding}")
 
         if midi_params:
             logging.info(f"Excluding {len(midi_params)} MIDI-bound parameters from blend interpolation")
