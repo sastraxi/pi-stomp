@@ -64,13 +64,13 @@ class TunerHeaderWidget(Widget):
 
     # ── drawing ───────────────────────────────────────────────────────────────
 
-    def _draw_erase(self, image, draw, box) -> None:
+    def _draw_erase(self, ctx, frame) -> None:
         pass
 
-    def _draw(self, image, draw, real_box) -> None:
+    def _draw(self, ctx, frame) -> None:
         if self._note_label.text:
             self._note_label.render(
-                draw,
+                ctx.draw,
                 self._note_label._color or self.fgnd_color,
                 self._note_label.text,
                 x=self._note_label._x,
@@ -123,12 +123,12 @@ class TunerOffsetBar(Widget):
 
     # ── drawing ──────────────────────────────────────────────────────────────
 
-    def _draw_erase(self, image, draw, box) -> None:
+    def _draw_erase(self, ctx, frame) -> None:
         pass  # _draw handles its own background
 
-    def _draw(self, image, draw, real_box) -> None:
-        draw.rectangle(real_box.PIL_rect, fill=self.BG_COLOR)
-        self._paint_fill(draw, real_box, self._bar_px)
+    def _draw(self, ctx, frame) -> None:
+        ctx.draw.rectangle(frame.PIL_rect, fill=self.BG_COLOR)
+        self._paint_fill(ctx.draw, frame, self._bar_px)
 
     def _paint_fill(self, draw, real_box, bar_px: int) -> None:
         if bar_px == 0:
@@ -221,16 +221,17 @@ class StrobeWidget(Widget):
 
     # ── drawing ──────────────────────────────────────────────────────────────
 
-    def _draw_erase(self, image, draw, box) -> None:
+    def _draw_erase(self, ctx, frame) -> None:
         pass  # handled inside _draw
 
-    def _draw(self, image, draw, real_box) -> None:
-        draw.rectangle(real_box.PIL_rect, fill=self.BG_COLOR)
+    def _draw(self, ctx, frame) -> None:
+        draw = ctx.draw
+        draw.rectangle(frame.PIL_rect, fill=self.BG_COLOR)
 
         if self._has_reading:
-            rx0, rx1 = real_box.x0, real_box.x1
-            y0 = real_box.y0 + 1
-            y1 = real_box.y1 - 2
+            rx0, rx1 = frame.x0, frame.x1
+            y0 = frame.y0 + 1
+            y1 = frame.y1 - 2
             if y0 <= y1:
                 for i in range(self.N_STRIPES):
                     sx = (int(self._phase) + i * self.STRIPE_P) % _W
@@ -239,10 +240,10 @@ class StrobeWidget(Widget):
         bx = self.box
         if bx is None:
             return
-        rx0, rx1 = real_box.x0, max(real_box.x0, real_box.x1 - 1)
-        if real_box.y0 <= bx.y0:
+        rx0, rx1 = frame.x0, max(frame.x0, frame.x1 - 1)
+        if frame.y0 <= bx.y0:
             draw.line([(rx0, bx.y0), (rx1, bx.y0)], fill=self.RULE_COLOR)
-        if real_box.y1 >= bx.y1:
+        if frame.y1 >= bx.y1:
             draw.line([(rx0, bx.y1 - 1), (rx1, bx.y1 - 1)], fill=self.RULE_COLOR)
 
     def _paint_overlap(self, draw, sx: int, sw: int, rx0: int, rx1: int, y0: int, y1: int) -> None:
