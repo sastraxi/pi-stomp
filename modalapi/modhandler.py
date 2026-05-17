@@ -684,6 +684,12 @@ class Modhandler(Handler):
 
     def encoder_value_changed(self, param: Parameter, new_value: float, routing_info: RoutingInfo) -> None:
         if param.instance_id is None:
+            # Audio params (volume, gain) have no instance_id; can't go through
+            # display_parameter_value because draw_parameter_dialog builds its
+            # title from instance_id. Use the audio-twin dialog instead.
+            d = self.lcd.draw_audio_parameter_dialog(param, self.audio_parameter_commit)
+            if d:
+                d.update_value(new_value)
             self.audio_parameter_commit(param.symbol, new_value)
             return
         self.lcd.display_parameter_value(param, new_value)
