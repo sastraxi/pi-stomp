@@ -35,7 +35,7 @@ class EmulatorMod(Mod):
     def __init__(self, homedir):
         import modalapi.wifi as _wifi_module
         _orig_wm = _wifi_module.WifiManager
-        _wifi_module.WifiManager = lambda *a, **kw: StubWifiManager()
+        _wifi_module.WifiManager = lambda *a, **kw: StubWifiManager(on_status_change=kw.get("on_status_change"))
         try:
             super().__init__(VirtualAudiocard(), homedir)
         finally:

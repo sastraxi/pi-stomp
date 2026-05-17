@@ -1092,9 +1092,6 @@ class Modhandler(Handler):
         else:
             self.wifi_manager.enable_hotspot()
 
-    def configure_wifi_credentials(self, ssid, password):
-        return self.wifi_manager.configure_wifi(ssid, password)
-
     def _create_audio_parameter(self, name, symbol, min_val, max_val):
         value = self.audiocard.get_volume_parameter(symbol)
         info = {
