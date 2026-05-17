@@ -122,7 +122,7 @@ class FontWithGlyphs:
     Usage::
 
         font = FontWithGlyphs(base_font, {MY_CHAR: PillGlyph('P')})
-        draw_selection_menu(items, font=font)
+        Menu(rows, font=font)
     """
 
     def __init__(self, base: ImageFont.FreeTypeFont, glyphs: dict[str, Glyph]) -> None:

@@ -201,11 +201,16 @@ class Lcd(abstract_lcd.Lcd):
 
     def draw_bypass_preference(self):
         pref = self.handler.settings.get_setting(Token.BYPASS)
-        items = [("Left",  self.handler.change_bypass_preference, Token.LEFT, pref == Token.LEFT),
-                 ("Right", self.handler.change_bypass_preference, Token.RIGHT, pref == Token.RIGHT),
-                 ("Left & Right",  self.handler.change_bypass_preference, Token.LEFT_RIGHT,
-                  pref == Token.LEFT_RIGHT or pref == None)]
-        self.draw_selection_menu(items, "Bypass Preference", auto_dismiss=True)
+        change = self.handler.change_bypass_preference
+        rows = [
+            MenuRow("Left",  on_click=lambda: change(Token.LEFT),
+                    active=pref == Token.LEFT),
+            MenuRow("Right", on_click=lambda: change(Token.RIGHT),
+                    active=pref == Token.RIGHT),
+            MenuRow("Left & Right", on_click=lambda: change(Token.LEFT_RIGHT),
+                    active=pref in (Token.LEFT_RIGHT, None)),
+        ]
+        self.pstack.push_panel(Menu(rows, title="Bypass Preference", auto_dismiss=True))
 
     #
     # Title (Pedalboard and Preset)
@@ -239,51 +244,25 @@ class Lcd(abstract_lcd.Lcd):
         self.main_panel.add_sel_widget(self.w_preset)
 
     def draw_pedalboard_menu(self, event, widget):
-        items = []
+        change = self.handler.pedalboard_change
         bank_pbs = util.DICT_GET(self.handler.get_banks(), self.handler.get_bank())
-
+        rows: list[MenuRow] = []
         if bank_pbs is None:
-            # No bank so display all pedalboards as they're stored (alphabetically)
             for p in self.pedalboards:
-                items.append((p.title, self.handler.pedalboard_change, p))
+                rows.append(MenuRow(p.title, on_click=lambda p=p: change(p)))
         else:
             # Bank is set so show only those in the bank and in the order defined by the bank
             for b in bank_pbs:
                 for p in self.pedalboards:  # LAME ugly O(N2) search
                     if p.title == b:
-                        items.append((p.title, self.handler.pedalboard_change, p))
-
-        self.draw_selection_menu(items, "Pedalboards", auto_dismiss=True, dismiss_option=True)
+                        rows.append(MenuRow(p.title, on_click=lambda p=p: change(p)))
+        self.pstack.push_panel(Menu(rows, title="Pedalboards", auto_dismiss=True, dismiss_option=True))
 
     def draw_preset_menu(self, event, widget):
-        items = []
-        for (i, name) in self.current.presets.items():
-            items.append((name, self.handler.preset_change, i))
-        self.draw_selection_menu(items, "Snapshots", auto_dismiss=True, dismiss_option=True)
-
-    def draw_selection_menu(self, items, title="", auto_dismiss=False, dismiss_option=False,
-                            font=None, title_font=None, default_item=None):
-        # items is a list of tuples: (label, callback, arg) or (label, callback, arg, is_active)
-        # or (label, callback, arg, is_active, long_callback) where long_callback is called
-        # instead of callback on a long press.
-        def menu_action(event, params):
-            if event == InputEvent.LONG_CLICK and len(params) >= 5 and params[4] is not None:
-                params[4](params[2])
-                return
-            callback = params[1]
-            if callback is None:
-                return
-            callback(params[2])
-
-        extra = {}
-        if font is not None:
-            extra['font'] = font
-        if title_font is not None:
-            extra['title_font'] = title_font
-        m = Menu(title=title, items=items, auto_destroy=True, default_item=default_item, max_width=180, max_height=200,
-                 auto_dismiss=auto_dismiss, dismiss_option=dismiss_option, action=menu_action, **extra)
-        self.pstack.push_panel(m)
-        return m
+        change = self.handler.preset_change
+        rows = [MenuRow(name, on_click=lambda i=i: change(i))
+                for i, name in self.current.presets.items()]
+        self.pstack.push_panel(Menu(rows, title="Snapshots", auto_dismiss=True, dismiss_option=True))
 
     def draw_message_dialog(self, text, title="Error"):
         d = MessageDialog(self.pstack, text, title=title)
@@ -384,11 +363,10 @@ class Lcd(abstract_lcd.Lcd):
     # Parameter Editing
     #
     def draw_parameter_menu(self, plugin):
-        items = []
-        for (name, param) in sorted(plugin.parameters.items()):
-            if name != Token.COLON_BYPASS:
-                items.append((name, self.draw_parameter_dialog, param))
-        self.draw_selection_menu(items, "Parameters")
+        rows = [MenuRow(name, on_click=lambda p=param: self.draw_parameter_dialog(p))
+                for name, param in sorted(plugin.parameters.items())
+                if name != Token.COLON_BYPASS]
+        self.pstack.push_panel(Menu(rows, title="Parameters"))
 
     def draw_parameter_dialog(self, parameter, timeout=None):
         # If we already have an active dialog for the parameter, use it
@@ -400,15 +378,19 @@ class Lcd(abstract_lcd.Lcd):
         title = parameter.instance_id + ":" + parameter.name
         current_value = parameter.value
         if parameter.type == Parameter.Type.ENUMERATION:
-            items = []
-            for (label, value) in parameter.get_enum_value_list():
-                item = (label, self.parameter_commit_enum, (parameter, value), value==current_value)
-                items.append(item)
-            d = self.draw_selection_menu(items, title, auto_dismiss=True)
+            rows = [MenuRow(label,
+                            on_click=lambda v=value: self.parameter_commit(parameter, v),
+                            active=value == current_value)
+                    for label, value in parameter.get_enum_value_list()]
+            d = Menu(rows, title=title, auto_dismiss=True)
+            self.pstack.push_panel(d)
         elif parameter.type == Parameter.Type.TOGGLED:
-            items = [ ("On",  self.parameter_commit_enum, (parameter, 1), current_value==1),
-                      ("Off", self.parameter_commit_enum, (parameter, 0), current_value==0)]
-            d = self.draw_selection_menu(items, title, auto_dismiss=True)
+            rows = [MenuRow("On",  on_click=lambda: self.parameter_commit(parameter, 1),
+                            active=current_value == 1),
+                    MenuRow("Off", on_click=lambda: self.parameter_commit(parameter, 0),
+                            active=current_value == 0)]
+            d = Menu(rows, title=title, auto_dismiss=True)
+            self.pstack.push_panel(d)
         else:
             taper = 2 if parameter.type == Parameter.Type.LOGARITHMIC else 1
             d = Parameterdialog(self.pstack, parameter.name, current_value, parameter.minimum, parameter.maximum,
@@ -421,10 +403,6 @@ class Lcd(abstract_lcd.Lcd):
 
     def parameter_commit(self, parameter, value):
         self.handler.parameter_value_commit(parameter, value)
-
-    def parameter_commit_enum(self, param_value_tuple):
-        # (parameter_object, value)
-        self.parameter_commit(param_value_tuple[0], param_value_tuple[1])
 
     #
     # Footswitches
@@ -494,23 +472,29 @@ class Lcd(abstract_lcd.Lcd):
     # System Menu
     #
     def draw_system_menu(self, event, widget):
-        items = [("System info", self.draw_system_info_dialog, None),
-                 ("System shutdown", self.handler.system_menu_shutdown, None),
-                 ("System reboot",  self.handler.system_menu_reboot, None),
-                 ("Restart sound engine", self.handler.system_menu_restart_sound, None),
-                 ("Bank Select >", self.draw_bank_menu, None),
-                 ("Pedalboard Management >", self.draw_pedalboard_mgmt_menu, None)]
-        self.draw_selection_menu(items, "System Menu")
+        h = self.handler
+        rows = [
+            MenuRow("System info",             on_click=self.draw_system_info_dialog),
+            MenuRow("System shutdown",         on_click=lambda: h.system_menu_shutdown(None)),
+            MenuRow("System reboot",           on_click=lambda: h.system_menu_reboot(None)),
+            MenuRow("Restart sound engine",    on_click=lambda: h.system_menu_restart_sound(None)),
+            MenuRow("Bank Select >",           on_click=lambda: self.draw_bank_menu(None)),
+            MenuRow("Pedalboard Management >", on_click=self.draw_pedalboard_mgmt_menu),
+        ]
+        self.pstack.push_panel(Menu(rows, title="System Menu"))
 
-    def draw_pedalboard_mgmt_menu(self, arg):
-        items = [("Save current pedalboard", self.handler.system_menu_save_current_pb, None),
-                 ("Reload pedalboards", self.handler.system_menu_reload, None),
-                 ("Update sample pedalboards", self.update_sample_pedalboards, None),
-                 ("Backup data", self.handler.user_backup_data, None),
-                 ("Restore Backup data", self.handler.user_restore_data, None)]
-        self.draw_selection_menu(items, "Pedalboard Management")
+    def draw_pedalboard_mgmt_menu(self):
+        h = self.handler
+        rows = [
+            MenuRow("Save current pedalboard",    on_click=lambda: h.system_menu_save_current_pb(None)),
+            MenuRow("Reload pedalboards",         on_click=lambda: h.system_menu_reload(None)),
+            MenuRow("Update sample pedalboards",  on_click=self.update_sample_pedalboards),
+            MenuRow("Backup data",                on_click=lambda: h.user_backup_data(None)),
+            MenuRow("Restore Backup data",        on_click=lambda: h.user_restore_data(None)),
+        ]
+        self.pstack.push_panel(Menu(rows, title="Pedalboard Management"))
 
-    def update_sample_pedalboards(self, arg):
+    def update_sample_pedalboards(self):
         self.pstack.pop_panel(None)
         self.draw_info_message("updating...")
         self.main_panel.refresh()
@@ -522,7 +506,7 @@ class Lcd(abstract_lcd.Lcd):
         d = MessageDialog(self.pstack, str(result), title="Pedalboard Update", width=250, height=140)
         self.pstack.push_panel(d)
 
-    def draw_system_info_dialog(self, arg):
+    def draw_system_info_dialog(self):
         msg="Software:{}\nBuild:{}\nSystemState:{}\nTemperature:{}\nThrottled:{}".format(
             self.handler.software_version,
             self.handler.build_version,
@@ -534,22 +518,29 @@ class Lcd(abstract_lcd.Lcd):
 
     def draw_bank_menu(self, event):
         current_bank = self.handler.get_bank()
-        items = [("None (All pedalboards)", self.handler.set_bank, None, current_bank==None)]
-        for k,v in self.handler.get_banks().items():
-            items.append((k, self.handler.set_bank, k, k==current_bank))
-        self.draw_selection_menu(items, "Bank Select", auto_dismiss=True)
+        set_bank = self.handler.set_bank
+        rows = [MenuRow("None (All pedalboards)",
+                        on_click=lambda: set_bank(None),
+                        active=current_bank is None)]
+        for k in self.handler.get_banks():
+            rows.append(MenuRow(k, on_click=lambda k=k: set_bank(k),
+                                active=k == current_bank))
+        self.pstack.push_panel(Menu(rows, title="Bank Select", auto_dismiss=True))
 
     def draw_audio_menu(self, event, widget):
-        items = [("Output Volume", self.handler.system_menu_headphone_volume, None),
-                 ("Input Gain", self.handler.system_menu_input_gain, None),
-                 ("VU Calibration", self.handler.system_menu_vu_calibration, None),
-                 ("Global EQ", self.handler.system_toggle_eq, None),
-                 ("Low Band Gain", self.handler.system_menu_eq1_gain, None),
-                 ("Low-Mid Band Gain", self.handler.system_menu_eq2_gain, None),
-                 ("Mid Band Gain", self.handler.system_menu_eq3_gain, None),
-                 ("High-Mid Band Gain", self.handler.system_menu_eq4_gain, None),
-                 ("High Band Gain", self.handler.system_menu_eq5_gain, None)]
-        self.draw_selection_menu(items, "Audio Menu") 
+        h = self.handler
+        rows = [
+            MenuRow("Output Volume",      on_click=lambda: h.system_menu_headphone_volume(None)),
+            MenuRow("Input Gain",         on_click=lambda: h.system_menu_input_gain(None)),
+            MenuRow("VU Calibration",     on_click=lambda: h.system_menu_vu_calibration(None)),
+            MenuRow("Global EQ",          on_click=lambda: h.system_toggle_eq(None)),
+            MenuRow("Low Band Gain",      on_click=lambda: h.system_menu_eq1_gain(None)),
+            MenuRow("Low-Mid Band Gain",  on_click=lambda: h.system_menu_eq2_gain(None)),
+            MenuRow("Mid Band Gain",      on_click=lambda: h.system_menu_eq3_gain(None)),
+            MenuRow("High-Mid Band Gain", on_click=lambda: h.system_menu_eq4_gain(None)),
+            MenuRow("High Band Gain",     on_click=lambda: h.system_menu_eq5_gain(None)),
+        ]
+        self.pstack.push_panel(Menu(rows, title="Audio Menu"))
 
     def draw_audio_parameter_dialog(self, name, symbol, value, min, max, commit_callback):
         d = util.DICT_GET(self.w_parameter_dialogs, symbol)

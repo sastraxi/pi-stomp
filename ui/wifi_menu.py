@@ -46,7 +46,7 @@ from uilib import (
     TextWidget,
     WidgetAlign,
 )
-from uilib.menu import Menu
+from uilib.menu import Menu, MenuRow
 
 if TYPE_CHECKING:
     from pistomp.lcd320x240 import Lcd
@@ -84,7 +84,6 @@ class Row(TypedDict):
 
 
 PasswordCallback = Callable[[str], None]
-MenuItem = tuple  # (label, callback, arg) or (label, callback, arg, is_active)
 
 
 class _PassphraseEditor(RoundedPanel):
@@ -155,7 +154,8 @@ def _make_badge_font(base_name: str = 'default') -> FontWithGlyphs:
 class WifiMenu:
     """The wifi panel: scan, join, edit and forget networks; toggle hotspot.
 
-    Owned by Lcd, which exposes the panel stack and `draw_selection_menu`.
+    Owned by Lcd, which exposes the panel stack. Menus are constructed
+    directly via `uilib.menu.Menu` and pushed on the stack.
     Reads cached state from WifiManager; submits writes to its CommandQueue.
     """
 
@@ -228,10 +228,10 @@ class WifiMenu:
         scanned_ssids = {n['ssid'] for n in scanned}
         rows, _ = self._build_rows(scanned, saved_by_ssid, scanned_ssids, active_name)
         title = self._title(wifi_status, active_name)
-        items = self._build_items(rows, hotspot_active, supported)
-        self._root_menu = self.lcd.draw_selection_menu(
-            items, title, dismiss_option=True,
-            font=_make_badge_font(), default_item=default_label)
+        menu_rows = self._build_menu_rows(rows, hotspot_active, supported)
+        self._root_menu = Menu(menu_rows, title=title, dismiss_option=True,
+                               font=_make_badge_font(), default_label=default_label)
+        self._pstack.push_panel(self._root_menu)
 
     def _render_nearby_menu(self, default_label: Optional[str] = None) -> None:
         scanned = self._cached_scanned
@@ -240,12 +240,14 @@ class WifiMenu:
         active_name = util.DICT_GET(self._wifi_status, 'connection')
         _, nearby = self._build_rows(scanned, saved_by_ssid, scanned_ssids, active_name)
         if nearby:
-            items: list[MenuItem] = [(self._row_label(r), self._on_network_tap, r) for r in nearby]
+            menu_rows = [MenuRow(self._row_label(r),
+                                 on_click=lambda r=r: self._on_network_tap(r))
+                         for r in nearby]
         else:
-            items = [("Scanning...", None, None)]
-        self._nearby_menu = self.lcd.draw_selection_menu(
-            items, "Nearby Networks", dismiss_option=True,
-            font=_make_badge_font(), default_item=default_label)
+            menu_rows = [MenuRow("Scanning...")]
+        self._nearby_menu = Menu(menu_rows, title="Nearby Networks", dismiss_option=True,
+                                 font=_make_badge_font(), default_label=default_label)
+        self._pstack.push_panel(self._nearby_menu)
 
     def notify_status_change(self) -> None:
         """Handler hook after wifi_status changes. Rebuilds the root menu
@@ -264,11 +266,11 @@ class WifiMenu:
         if sel is None:
             return None
         try:
-            return menu.sel_list[sel].data[0]
+            return menu.sel_list[sel].row.label
         except (IndexError, AttributeError):
             return None
 
-    def toggle_hotspot(self, _: object = None) -> None:
+    def toggle_hotspot(self) -> None:
         was_active = bool(util.DICT_GET(self._wifi_status, 'hotspot_active'))
         self._pstack.pop_panel(None)
         self._wifi_manager.queue.submit(ToggleHotspotCmd(was_active), self._on_toggle_done)
@@ -331,14 +333,19 @@ class WifiMenu:
         rows.extend(out_of_range)
         return rows, nearby
 
-    def _build_items(self, rows: list[Row], hotspot_active: bool, supported: bool = True) -> list[MenuItem]:
-        items: list[MenuItem] = [(self._row_label(r), self._on_network_tap, r, None, self._on_network_long_tap) for r in rows]
+    def _build_menu_rows(self, rows: list[Row], hotspot_active: bool, supported: bool = True) -> list[MenuRow]:
+        menu_rows: list[MenuRow] = [
+            MenuRow(self._row_label(r),
+                    on_click=lambda r=r: self._on_network_tap(r),
+                    on_long_click=lambda r=r: self._on_network_long_tap(r))
+            for r in rows
+        ]
         if supported and not hotspot_active:
-            items.append(("Nearby networks...", self._open_nearby_menu, None))
-        items.append(("Join other network...", self._open_join_dialog, None))
+            menu_rows.append(MenuRow("Nearby networks...", on_click=self._open_nearby_menu))
+        menu_rows.append(MenuRow("Join other network...", on_click=self._open_join_dialog))
         hotspot_label = "Disable Hotspot Mode" if hotspot_active else "Switch to Hotspot Mode"
-        items.append((hotspot_label, self.toggle_hotspot, None))
-        return items
+        menu_rows.append(MenuRow(hotspot_label, on_click=self.toggle_hotspot))
+        return menu_rows
 
     def _title(self, wifi_status: WifiStatus,
                active_name: Optional[str]) -> str:
@@ -422,14 +429,15 @@ class WifiMenu:
             self._open_saved_submenu(row, include_disconnect=bool(row.get('active')))
 
     def _open_saved_submenu(self, row: Row, include_disconnect: bool = False) -> None:
-        items: list[MenuItem] = []
+        menu_rows: list[MenuRow] = []
         if include_disconnect:
-            items.append(("Disconnect", self._disconnect, row))
-        items.append(("Replace password", self._open_replace_psk_dialog, row))
-        items.append(("Forget", self._forget, row))
-        self.lcd.draw_selection_menu(items, row['ssid'], dismiss_option=True)
+            menu_rows.append(MenuRow("Disconnect", on_click=lambda: self._disconnect(row)))
+        menu_rows.append(MenuRow("Replace password",
+                                 on_click=lambda: self._open_replace_psk_dialog(row)))
+        menu_rows.append(MenuRow("Forget", on_click=lambda: self._forget(row)))
+        self._pstack.push_panel(Menu(menu_rows, title=row['ssid'], dismiss_option=True))
 
-    def _open_nearby_menu(self, _: object = None) -> None:
+    def _open_nearby_menu(self) -> None:
         self._render_nearby_menu()
         self._wifi_manager.queue.submit_scan(ScanCmd(), self._on_scan)
 
@@ -524,7 +532,7 @@ class WifiMenu:
     def _open_password_prompt(self, ssid: str, on_submit: PasswordCallback) -> None:
         _PassphraseEditor(ssid, self._pstack, on_submit)
 
-    def _open_join_dialog(self, _: object = None) -> None:
+    def _open_join_dialog(self) -> None:
         d = Dialog(width=240, height=120, auto_destroy=True, title='Join other network')
         ssid_w = TextWidget(box=Box.xywh(0, 0, 190, 0), text='', prompt='SSID :', parent=d,
                             outline=1, sel_width=3, outline_radius=5,
