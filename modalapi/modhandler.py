@@ -509,12 +509,14 @@ class Modhandler(Handler):
             sys.exit()
 
         pbs = json.loads(resp.text)
+        current_bundle = read_pedalboard_bundle(self.last_json_monitor.path)
         for pb in pbs:
             logging.info("Loading pedalboard info: %s" % pb[Token.TITLE])
             bundle = pb[Token.BUNDLE]
             title = pb[Token.TITLE]
             pedalboard = Pedalboard.Pedalboard(title, bundle, root_uri=self.root_uri)
-            pedalboard.load_bundle(bundle, self.plugin_dict)
+            if bundle == current_bundle:
+                pedalboard.load_bundle(bundle, self.plugin_dict)
             self.pedalboards[bundle] = pedalboard
             self.pedalboard_list.append(pedalboard)
             #logging.debug("dump: %s" % pedalboard.to_json())
