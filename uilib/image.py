@@ -13,45 +13,27 @@
 # You should have received a copy of the GNU General Public License
 # along with pi-stomp.  If not, see <https://www.gnu.org/licenses/>.
 
-from uilib.widget import Widget
+from uilib.widget import *
 from PIL import Image
-
 
 class ImageWidget(Widget):
     """A simple widget with an image"""
-
-    image: Image.Image
-    _image_path: str | None
-
-    def __init__(self, image: str | Image.Image, **kwargs):
+    def __init__(self, image_path, **kwargs):
         self._init_attrs(Widget.INH_ATTRS, kwargs)
-        super(ImageWidget, self).__init__(**kwargs)
-
-        if isinstance(image, str):
-            self._image_path = image
-            self.image = Image.open(self._image_path)
-        else:
-            self._image_path = None
-            self.image = image
+        super(ImageWidget,self).__init__(**kwargs)
+        self.image = Image.open(image_path)
 
     def _draw(self, ctx, frame):
         width, height = self.image.size
         offx = int((frame.width - width) / 2)
         offy = int((frame.height - height) / 2)
         loc = frame.offset((offx, offy)).topleft
-        mask = self.image if self.image.mode == "RGBA" else None
+
+        mask = self.image if self.image.mode == 'RGBA' else None
         ctx.image.paste(self.image, loc, mask)
 
-    def replace_img(self, image: str | Image.Image):
+    def replace_img(self, image_path):
         # XXX Note that the new image must be the same size as the original
-        if isinstance(image, str):
-            if image == self._image_path:
-                return
-            self._image_path = image
-            self.image = Image.open(image)
-        else:
-            if self.image is image:
-                return
-            self._image_path = None
-            self.image = image
+        self.image = Image.open(image_path)
         self.refresh()
+
