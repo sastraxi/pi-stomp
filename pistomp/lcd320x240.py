@@ -17,12 +17,14 @@ import board
 import digitalio
 import logging
 import os
+from typing import Optional
 import common.token as Token
 import common.parameter as Parameter
+from ui.wifi_menu import WifiMenu
 import pistomp.category as Category
 import pistomp.lcd as abstract_lcd
 import pistomp.switchstate as switchstate
-from PIL import ImageColor
+from PIL import Image, ImageColor
 
 from uilib import *
 from uilib.lcd_ili9341 import *
@@ -91,8 +93,15 @@ class Lcd(abstract_lcd.Lcd):
 
         # widgets
         self.w_wifi = None
-        self.w_wifi_ssid = None
-        self.w_wifi_pw = None
+        self._wifi_frames: list[Image.Image] = [
+            Image.open(os.path.join(self.imagedir, f'wifi_processing_{i}.png'))
+            for i in range(1, 4)
+        ]
+        for frame in self._wifi_frames:
+            frame.load()
+        self._wifi_tick = 0
+        self._wifi_ticks_per_frame = 2
+        self.wifi_menu: Optional[WifiMenu] = None
         self.w_eq = None
         self.w_power = None
         self.w_wrench = None
@@ -115,6 +124,8 @@ class Lcd(abstract_lcd.Lcd):
         self.pstack.push_panel(self.footswitch_panel, refresh=False)
 
         self.pedalboards = {}
+
+        self.wifi_menu = WifiMenu(self)
 
         if not display.has_system_splash:
             self.splash_show(True)
@@ -174,18 +185,22 @@ class Lcd(abstract_lcd.Lcd):
     def draw_tools(self, wifi_type=None, eq_type=None, bypass_type=None, system_type=None):
         if self.w_wifi is not None:
             return
-        self.w_wifi = ImageWidget(box=Box.xywh(210, 0, 20, 20), image_path=os.path.join(self.imagedir,
-                                  'wifi_gray.png'), parent=self.main_panel, action=self.draw_wifi_menu)
+        self.w_wifi = ImageWidget(
+            box=Box.xywh(210, 0, 20, 20),
+            image=os.path.join(self.imagedir, 'wifi_gray.png'),
+            parent=self.main_panel,
+            action=self.wifi_menu.open,
+        )
         self.main_panel.add_sel_widget(self.w_wifi)
         if self.w_eq is not None:
             return
-        self.w_eq = ImageWidget(box=Box.xywh(240, 0, 20, 20), image_path=os.path.join(self.imagedir,
+        self.w_eq = ImageWidget(box=Box.xywh(240, 0, 20, 20), image=os.path.join(self.imagedir,
                                   'eq_blue.png'), parent=self.main_panel, action=self.draw_audio_menu)
         self.main_panel.add_sel_widget(self.w_eq)
-        self.w_power = ImageWidget(box=Box.xywh(270, 0, 20, 20), image_path=os.path.join(self.imagedir,
+        self.w_power = ImageWidget(box=Box.xywh(270, 0, 20, 20), image=os.path.join(self.imagedir,
                                    'power_gray.png'), parent=self.main_panel, action=self.toggle_bypass)
         self.main_panel.add_sel_widget(self.w_power)
-        self.w_wrench = ImageWidget(box=Box.xywh(296, 0, 20, 20), image_path=os.path.join(self.imagedir,
+        self.w_wrench = ImageWidget(box=Box.xywh(296, 0, 20, 20), image=os.path.join(self.imagedir,
                              'wrench_silver.png'), parent=self.main_panel, action=self.draw_system_menu)
         self.main_panel.add_sel_widget(self.w_wrench)
 
@@ -202,55 +217,6 @@ class Lcd(abstract_lcd.Lcd):
                  ("Left & Right",  self.handler.change_bypass_preference, Token.LEFT_RIGHT,
                   pref == Token.LEFT_RIGHT or pref == None)]
         self.draw_selection_menu(items, "Bypass Preference", auto_dismiss=True)
-
-    def toggle_hotspot(self, arg1):
-        self.pstack.pop_panel(None)
-        self.draw_info_message("connecting...")
-        self.main_panel.refresh()
-        self.handler.system_toggle_hotspot()
-        self.draw_info_message("")
-        self.main_panel.refresh()
-
-    def configure_wifi(self, event, button):
-        result = self.handler.configure_wifi_credentials(self.w_wifi_ssid.text, self.w_wifi_pw.text)
-
-        # Show Error dialog if configure was not successful
-        if result is not None:
-            d = MessageDialog(self.pstack, result.decode("utf-8"), title="Error")
-            self.pstack.push_panel(d)
-        else:
-            self.pstack.pop_panel(button.parent)
-
-    def draw_wifi_dialog(self, event):
-        ssid = self.handler.wifi_manager.get_ssid()
-        ssid = ssid if ssid else "None"
-        psk = self.handler.wifi_manager.get_psk()
-        psk = psk if psk else "None"
-
-        d = Dialog(width=240, height=120, auto_destroy=True, title='Configure WiFi')
-
-        self.w_wifi_ssid = TextWidget(box=Box.xywh(0, 0, 190, 0), text=ssid, prompt='SSID :', parent=d,
-                       outline=1, sel_width=3,
-                       outline_radius=5,
-                       align=WidgetAlign.NONE, name='cancel_btn',
-                       edit_message='WiFi SSID')
-        d.add_sel_widget(self.w_wifi_ssid)
-        self.w_wifi_pw = TextWidget(box=Box.xywh(0, 30, 169, 0), text=psk, prompt='Passwd :', parent=d,
-                       outline=1,
-                       sel_width=3, outline_radius=5,
-                       align=WidgetAlign.NONE, name='cancel_btn',
-                       edit_message='Password')
-        d.add_sel_widget(self.w_wifi_pw)
-
-        b = TextWidget(box=Box.xywh(0, 90, 0, 0), text='Cancel', parent=d, outline=1, sel_width=3, outline_radius=5,
-                       action=lambda x, y: self.pstack.pop_panel(d), align=WidgetAlign.NONE, name='cancel_btn')
-        d.add_sel_widget(b)
-        b = TextWidget(box=Box.xywh(80, 90, 0, 0), text='Ok', parent=d, outline=1, sel_width=3, outline_radius=5,
-                       action=self.configure_wifi, align=WidgetAlign.NONE, name='ok_btn')
-        d.add_sel_widget(b)
-
-        self.pstack.push_panel(d)
-        d.refresh()
 
     #
     # Title (Pedalboard and Preset)
@@ -306,16 +272,27 @@ class Lcd(abstract_lcd.Lcd):
             items.append((name, self.handler.preset_change, i))
         self.draw_selection_menu(items, "Snapshots", auto_dismiss=True, dismiss_option=True)
 
-    def draw_selection_menu(self, items, title="", auto_dismiss=False, dismiss_option=False):
-        # items is list of touples: (item_label, callback_method, callback_arg)
-        # The below assumes that the callback takes the menu item label as an argument
+    def draw_selection_menu(self, items, title="", auto_dismiss=False, dismiss_option=False,
+                            font=None, title_font=None, default_item=None):
+        # items is a list of tuples: (label, callback, arg) or (label, callback, arg, is_active)
+        # or (label, callback, arg, is_active, long_callback) where long_callback is called
+        # instead of callback on a long press.
         def menu_action(event, params):
+            if event == InputEvent.LONG_CLICK and len(params) >= 5 and params[4] is not None:
+                params[4](params[2])
+                return
             callback = params[1]
-            if callback is not None:
-                callback(params[2])
+            if callback is None:
+                return
+            callback(params[2])
 
-        m = Menu(title=title, items=items, auto_destroy=True, default_item=None, max_width=180, max_height=200,
-                 auto_dismiss=auto_dismiss, dismiss_option=dismiss_option, action=menu_action)
+        extra = {}
+        if font is not None:
+            extra['font'] = font
+        if title_font is not None:
+            extra['title_font'] = title_font
+        m = Menu(title=title, items=items, auto_destroy=True, default_item=default_item, max_width=180, max_height=200,
+                 auto_dismiss=auto_dismiss, dismiss_option=dismiss_option, action=menu_action, **extra)
         self.pstack.push_panel(m)
         return m
 
@@ -573,12 +550,6 @@ class Lcd(abstract_lcd.Lcd):
             items.append((k, self.handler.set_bank, k, k==current_bank))
         self.draw_selection_menu(items, "Bank Select", auto_dismiss=True)
 
-    def draw_wifi_menu(self, event, widget):
-        label = "Switch to Wifi" if util.DICT_GET(self.handler.wifi_status, 'hotspot_active') else "Switch to Hotspot"
-        items = [("Configure WiFi", self.draw_wifi_dialog, None),
-                 (label, self.toggle_hotspot, None)]
-        self.draw_selection_menu(items, "WiFi Menu", dismiss_option = True)
-
     def draw_audio_menu(self, event, widget):
         items = [("Output Volume", self.handler.system_menu_headphone_volume, None),
                  ("Input Gain", self.handler.system_menu_input_gain, None),
@@ -642,14 +613,25 @@ class Lcd(abstract_lcd.Lcd):
 
     # Toolbar
     def update_wifi(self, wifi_status):
+        if self.w_wifi is None:
+            return
+        if self.handler.wifi_manager.queue.pending_op_count() > 0:
+            period = self._wifi_ticks_per_frame * len(self._wifi_frames)
+            self._wifi_tick = (self._wifi_tick + 1) % period
+            idx = self._wifi_tick // self._wifi_ticks_per_frame
+            self.w_wifi.replace_img(self._wifi_frames[idx])
+        else:
+            self._wifi_tick = 0
+            self.w_wifi.replace_img(self._resolved_wifi_png(wifi_status))
+
+    def _resolved_wifi_png(self, wifi_status):
         if util.DICT_GET(wifi_status, 'hotspot_active'):
             img = "wifi_orange.png"
         elif util.DICT_GET(wifi_status, 'wifi_connected'):
             img = "wifi_silver.png"
         else:
             img = "wifi_gray.png"
-        image_path = os.path.join(self.imagedir, img)
-        self.w_wifi.replace_img(image_path)
+        return os.path.join(self.imagedir, img)
 
     def update_eq(self, eq_status):
         pass
