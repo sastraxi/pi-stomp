@@ -90,11 +90,14 @@ class ContainerWidget(Widget):
         self._draw(ctx, local_frame)
         for c in self.children:
             if c.visible:
-                c._do_draw(ctx, c.box.offset(local_frame))
+                c._do_draw(ctx, c.box.offset(local_frame).deoffset(self.offset))
         self._draw_outline(ctx, local_frame)
         self._draw_selection(ctx, local_frame)
         if self.visible and self.parent is not None:
-            self._propagate_dirty(local_clip)
+            # Pass clip in our logical (pre-scroll) coords so that
+            # _propagate_dirty's deoffset(self.offset) yields image coords,
+            # and the parent ultimately sees exactly self.box dirty.
+            self._propagate_dirty(local_clip.offset(self.offset))
 
     def _do_draw(self, ctx: PaintContext, frame: Box):
         """Draw this container into the parent surface at frame."""
@@ -113,7 +116,7 @@ class ContainerWidget(Widget):
         self._draw(local_ctx, local_frame)
         for c in self.children:
             if c.visible:
-                c._do_draw(local_ctx, c.box.offset(local_frame))
+                c._do_draw(local_ctx, c.box.offset(local_frame).deoffset(self.offset))
         self._draw_outline(local_ctx, local_frame)
         self._draw_selection(local_ctx, local_frame)
 
