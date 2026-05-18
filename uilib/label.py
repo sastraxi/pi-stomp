@@ -61,10 +61,12 @@ class Label:
         self._x = rx
         if dirty is None:
             return
-        image, draw, _ = widget._focus(dirty)
-        if image is None or draw is None:
+        container, _frame, clip = widget._build_paint_target(dirty)
+        if container is None or clip is None:
             return
-        draw.rectangle(dirty.PIL_rect, fill=self._bg)
+        if clip.is_empty():
+            return
+        container.draw.rectangle(clip.PIL_rect, fill=self._bg)
         if text:
-            draw.text((rx, self._y), text, font=self._font, fill=color)
-        widget._unfocus(dirty)
+            container.draw.text((rx, self._y), text, font=self._font, fill=color)
+        container._propagate_dirty(clip)
