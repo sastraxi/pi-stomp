@@ -147,8 +147,8 @@ class Modhandler(Handler):
         logging.info("Handler cleanup")
         if self.wifi_manager:
             del self.wifi_manager
-        if self.external_midi is not None:
-            self.external_midi.close()
+        if getattr(self, "external_midi", None) is not None:
+            self.external_midi.close()  # pyright: ignore[reportOptionalMemberAccess]
         # ws_bridge.stop() lives in cleanup(), not here — join() in __del__ blows up
         # during interpreter shutdown on Py 3.14. Daemon thread dies with the process.
 
