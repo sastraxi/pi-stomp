@@ -14,7 +14,7 @@ from tests.types import SystemFixture
 
 def _blend_encoder(hw):
     """Return the EncoderMidiControl with id=1 used by the blend fixture."""
-    from pistomp.encodermidicontrol import EncoderMidiControl
+    from pistomp.encoder_controller import EncoderController as EncoderMidiControl
 
     return next(e for e in hw.encoders if isinstance(e, EncoderMidiControl) and getattr(e, "id", None) == 1)
 
@@ -68,7 +68,7 @@ def test_blend_activate_sends_initial_params(blend_system: SystemFixture):
 
     # Deactivate, reset tracking, and re-activate from position 0
     enc = _blend_encoder(hw)
-    enc.midi_value = 0
+    enc.current_step = 0
     blend_mode.deactivate()
     test_ws.sent.clear()
     blend_mode.activate()
@@ -92,7 +92,7 @@ def test_blend_full_sweep_reaches_lead_stop(blend_system: SystemFixture):
     test_ws = cast(FakeWebSocketBridge, handler.ws_bridge)
 
     enc = _blend_encoder(hw)
-    enc.midi_value = 127
+    enc.current_step = 127
 
     handler.active_blend_mode.input_controller.handle_value_change(127, enc)
 
@@ -110,7 +110,7 @@ def test_blend_dedup_suppresses_redundant_messages(blend_system: SystemFixture):
     test_ws = cast(FakeWebSocketBridge, handler.ws_bridge)
 
     enc = _blend_encoder(hw)
-    enc.midi_value = 64
+    enc.current_step = 64
 
     ic = handler.active_blend_mode.input_controller
     ic.handle_value_change(64, enc)
@@ -254,7 +254,7 @@ def test_blend_halfway_produces_interpolated_values(blend_system: SystemFixture)
     hw = blend_system.hw
     test_ws = cast(FakeWebSocketBridge, handler.ws_bridge)
     enc = _blend_encoder(hw)
-    enc.midi_value = 64
+    enc.current_step = 64
 
     assert handler.active_blend_mode
     handler.active_blend_mode.input_controller.handle_value_change(64, enc)
@@ -282,7 +282,7 @@ def test_blend_resumes_at_encoder_position_on_activate(blend_system: SystemFixtu
     assert handler.active_blend_mode
     handler.active_blend_mode.deactivate()
     handler.active_blend_mode = None
-    enc.midi_value = 64
+    enc.current_step = 64
 
     test_ws.sent.clear()
 
@@ -316,7 +316,7 @@ def test_edited_stop_values_take_effect_in_next_sweep(blend_system: SystemFixtur
     test_ws.sent.clear()
 
     enc = _blend_encoder(hw)
-    enc.midi_value = 127
+    enc.current_step = 127
     handler.active_blend_mode.input_controller.handle_value_change(127, enc)
 
     tone_values = test_ws.sent_values_for("BigMuff", "Tone")
@@ -417,7 +417,7 @@ def test_switching_between_blend_modes_applies_correct_initial_values(
 
     # Dial into Lead territory: encoder at 100%
     enc = _blend_encoder(hw)
-    enc.midi_value = 127
+    enc.current_step = 127
     handler.active_blend_mode.input_controller.handle_value_change(127, enc)
 
     test_ws = cast(FakeWebSocketBridge, handler.ws_bridge)
@@ -439,7 +439,7 @@ def test_switching_between_blend_modes_applies_correct_initial_values(
     snapshot("blend_b_full")
 
     # Roll the encoder back to ~50% — Blend B should interpolate between Clean and Crunch
-    enc.midi_value = 64
+    enc.current_step = 64
     test_ws.sent.clear()
     handler.active_blend_mode.input_controller.handle_value_change(64, enc)
 
@@ -482,7 +482,7 @@ def test_midi_bound_param_excluded_from_blend_sweep(blend_system: SystemFixture)
     test_ws.sent.clear()
 
     enc = _blend_encoder(hw)
-    enc.midi_value = 127
+    enc.current_step = 127
     blend_mode.input_controller.handle_value_change(127, enc)
 
     # Tone is MIDI-bound → excluded from diff map → must not appear in sent messages
