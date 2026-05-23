@@ -326,9 +326,11 @@ class Modhandler(Handler):
         # Tick the LCD on every 10 ms main-loop pass (~100 fps) while the
         # tuner panel is mounted. Strobe's worst-case redraw at STRIPE_W=4
         # is ~4.3 ms of SPI, well inside the 10 ms budget; typical ticks
-        # are sub-millisecond. Fall back to the default 200 ms gate
-        # otherwise.
-        return 1 if self._tuner_panel is not None else 20
+        # are sub-millisecond. Otherwise fall back to the SPI-clock-derived
+        # divisor computed by the LCD itself.
+        if self._tuner_panel is not None:
+            return 1
+        return self._lcd.poll_divisor if self._lcd is not None else 8
 
     def universal_encoder_select(self, direction):
         if self._lcd is not None:
