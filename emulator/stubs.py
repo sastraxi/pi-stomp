@@ -22,10 +22,9 @@ StubRelay         — no-op relay; satisfies the Relay interface without GPIO.
 
 
 import time
-from typing import Callable, Optional
+from typing import Optional
 
 from modalapi.wifi import SavedConnection, ScannedNetwork, WifiStatus
-from modalapi.wifi.commands import CommandQueue
 from pistomp.audiocard import Audiocard
 
 
@@ -93,7 +92,7 @@ class StubWifiManager:
         ScannedNetwork(ssid='Neighbor',   signal=28, security='WPA2',  in_use=False),
     ]
 
-    def __init__(self, on_status_change: Optional[Callable[[WifiStatus], None]] = None) -> None:
+    def __init__(self) -> None:
         now = int(time.time())
         self._saved: list[dict] = [
             {'name': 'HomeWifi',   'ssid': 'HomeWifi',   'psk': 'hunter2hunter2', 'timestamp': now},
@@ -103,8 +102,6 @@ class StubWifiManager:
         self._hotspot_active: bool = False
         self._last_status: WifiStatus = {}
         self._changed: bool = True
-        self.on_status_change: Optional[Callable[[WifiStatus], None]] = on_status_change
-        self.queue: CommandQueue = CommandQueue(self)
         self._refresh_status()
 
     def _refresh_status(self) -> None:
@@ -139,21 +136,11 @@ class StubWifiManager:
             counter += 1
         return name
 
-    def poll(self) -> None:
-        self.queue.poll()
+    def poll(self) -> Optional[WifiStatus]:
         if self._changed:
             self._changed = False
-            if self.on_status_change is not None:
-                self.on_status_change(self._last_status)
-
-    def shutdown(self) -> None:
-        try:
-            self.queue.shutdown()
-        except Exception:
-            pass
-
-    def get_cached_saved(self) -> list[SavedConnection]:
-        return self.list_connections()
+            return self._last_status
+        return None
 
     def get_ssid(self) -> Optional[str]:
         if self._active is None:
@@ -185,7 +172,7 @@ class StubWifiManager:
                                security=n['security'], in_use=(n['ssid'] == active_ssid))
                 for n in self._FAKE_SCAN]
 
-    def connect_scanned(self, ssid: str, security: str, psk: Optional[str] = None) -> Optional[bytes]:
+    def connect_scanned(self, ssid: str, psk: Optional[str] = None) -> Optional[bytes]:
         if ssid == 'BadNet':
             return b'Error: Connection activation failed: (7) Secrets were required, but not provided.'
         existing = next((p for p in self._saved if p['ssid'] == ssid), None)
@@ -209,7 +196,7 @@ class StubWifiManager:
             self._refresh_status()
         return None
 
-    def connect_saved(self, name: str, wait: bool = True, reconnect: bool = False) -> Optional[bytes]:
+    def connect_saved(self, name: str) -> Optional[bytes]:
         profile = next((p for p in self._saved if p['name'] == name), None)
         if profile is None:
             return b'Error: unknown connection ' + name.encode('utf-8')
@@ -221,9 +208,18 @@ class StubWifiManager:
         self._refresh_status()
         return None
 
-    def get_psk_for(self, name: str) -> Optional[str]:
+    def configure_wifi(self, name: str, ssid: str, password: str) -> Optional[bytes]:
         profile = next((p for p in self._saved if p['name'] == name), None)
-        return profile['psk'] if profile else None
+        if profile is None:
+            return b'Error: unknown connection ' + name.encode('utf-8')
+        new_name = self._resolve_unique_name(ssid, exclude=name)
+        if self._active == name:
+            self._active = new_name
+        profile['name'] = new_name
+        profile['ssid'] = ssid
+        profile['psk'] = password
+        self._refresh_status()
+        return None
 
     def replace_psk(self, name: str, psk: str) -> Optional[bytes]:
         profile = next((p for p in self._saved if p['name'] == name), None)
