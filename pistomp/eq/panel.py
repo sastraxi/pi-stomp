@@ -44,6 +44,11 @@ from uilib.text import Button
 from uilib.widget import Widget
 
 
+# Type alias for the per-band geometry we cache for diff-paint
+# (image_x, image_y, color_rgb, enabled).
+_NodePos = tuple[int, int, tuple[int, int, int], bool]
+
+
 # ── layout constants ────────────────────────────────────────────────────────
 
 _W = 320
@@ -78,13 +83,50 @@ INACTIVE_SHADE = 0.45
 
 # ── grid helpers ─────────────────────────────────────────────────────────────
 
-_FREQ_MAJORS_HZ = (100.0, 1000.0, 10000.0)
-_FREQ_MINORS_HZ = (20.0, 40.0, 200.0, 500.0, 2000.0, 5000.0, 20000.0)
+# Gridlines are linearly evenly spaced in pixel x. The graph's mapping
+# from x to frequency is logarithmic (see freq_to_x), so each major x
+# corresponds to whatever frequency lands there — we label that value
+# rather than picking round Hz numbers.
+_FREQ_MAJOR_STEP_PX = 80  # majors at x = 80, 160, 240
+_FREQ_MINOR_STEP_PX = 40  # minors at x = 40, 120, 200, 280
 _DB_GRID = (-18.0, -12.0, -6.0, 6.0, 12.0, 18.0)
 
-_FREQ_MAJORS_X: frozenset[int] = frozenset(int(freq_to_x(f)) for f in _FREQ_MAJORS_HZ)
-_FREQ_MINORS_X: frozenset[int] = frozenset(int(freq_to_x(f)) for f in _FREQ_MINORS_HZ)
-_FREQ_GRID_X: frozenset[int] = _FREQ_MAJORS_X | _FREQ_MINORS_X
+
+def _x_to_freq(x: int) -> float:
+    import math as _m
+    norm = x / (GRAPH_W - 1)
+    log_min = _m.log10(20.0)
+    log_max = _m.log10(20000.0)
+    return 10.0 ** (log_min + norm * (log_max - log_min))
+
+
+def _fmt_axis_freq(hz: float, with_unit: bool = False) -> str:
+    if hz < 1000.0:
+        s = f"{int(round(hz))}"
+        return f"{s}Hz" if with_unit else s
+    k = hz / 1000.0
+    if k >= 10.0:
+        return f"{int(round(k))}k"
+    return f"{k:.1f}k"
+
+
+_FREQ_MAJORS_X: tuple[int, ...] = (0,) + tuple(
+    x for x in range(_FREQ_MAJOR_STEP_PX, GRAPH_W, _FREQ_MAJOR_STEP_PX)
+)
+_FREQ_MINORS_X: tuple[int, ...] = tuple(
+    x for x in range(_FREQ_MINOR_STEP_PX, GRAPH_W, _FREQ_MINOR_STEP_PX)
+    if x not in _FREQ_MAJORS_X
+)
+_FREQ_GRID_X: frozenset[int] = frozenset(_FREQ_MAJORS_X) | frozenset(_FREQ_MINORS_X)
+
+# (label, x_of_gridline) for every vertical gridline. Only the leftmost
+# (20 Hz) carries the "Hz" suffix; the rest read as bare numbers / "Xk".
+_FREQ_LABELS: tuple[tuple[str, int], ...] = tuple(
+    (_fmt_axis_freq(_x_to_freq(x), with_unit=(x == 0)), x)
+    for x in sorted(_FREQ_GRID_X)
+)
+_DB_LABELS: tuple[tuple[str, float], ...] = (("+18dB", 18.0),)
+_AXIS_LABEL_COLOR = (110, 110, 110)
 
 
 def _db_to_y_scalar(db: float) -> int:
@@ -109,88 +151,236 @@ def bg_color(x: int, y: int) -> tuple[int, int, int]:
 
 
 class GraphWidget(Widget):
-    """Owns the curve, grid and band nodes. V1 redraws everything on
-    `refresh()`; surgical updates are TODO."""
+    """Owns the curve, grid and band nodes.
 
-    NODE_R = 2
-    HALO_R = 4
+    State-change setters (`set_state`, `set_selected`, `set_bypassed`) compute
+    the dirty x-extent against cached previous state and call `self.refresh`
+    with only that sub-box; `_draw` paints from-scratch but clips work to the
+    requested `real_box` so only changed columns are touched (and only those
+    columns are flushed over SPI by the panel stack).
 
-    def __init__(self, box: Box, **kwargs) -> None:
+    Assumes the widget spans the full panel width with image x == local x
+    (same convention used by TunerPanel's widgets).
+    """
+
+    NODE_R = 3
+    HALO_R = 6
+
+    def __init__(self, box: Box, axis_font=None, **kwargs) -> None:
         kwargs.setdefault("bkgnd_color", BG_BLACK)
         super().__init__(box=box, **kwargs)
+        self._axis_font = axis_font
         self._cache = CurveCache()
         self._state: Optional[EqState] = None
         self._selected_band: Optional[str] = None
         self._curve_y: Optional[np.ndarray] = None
+        self._node_positions: dict[str, _NodePos] = {}
         self._bypassed: bool = False
 
+    # ── state setters (self-refresh with surgical sub-box) ──────────────────
+
     def set_state(self, state: EqState) -> None:
+        new_curve_db = self._cache.compute(state)
+        new_curve_y = db_to_y(new_curve_db, GRAPH_Y0, GRAPH_Y1, DB_MAX)
+        new_nodes = self._compute_nodes(state)
+
+        old_curve = self._curve_y
+        old_nodes = self._node_positions
+
         self._state = state
-        curve_db = self._cache.compute(state)
-        self._curve_y = db_to_y(curve_db, GRAPH_Y0, GRAPH_Y1, DB_MAX)
+        self._curve_y = new_curve_y
+        self._node_positions = new_nodes
+
+        if old_curve is None:
+            return  # first paint comes from the external panel.refresh()
+
+        x_min, x_max = self._dirty_extent_for_curve(old_curve, new_curve_y)
+        x_min, x_max = self._extend_extent_for_nodes(x_min, x_max, old_nodes, new_nodes)
+        self._refresh_x_range(x_min, x_max)
 
     def set_selected(self, band_name: Optional[str]) -> None:  # type: ignore[override]
+        if band_name == self._selected_band:
+            return
+        old = self._selected_band
         self._selected_band = band_name
 
+        x_min: Optional[int] = None
+        x_max: Optional[int] = None
+        for name in (old, band_name):
+            ext = self._node_x_extent(name)
+            if ext is None:
+                continue
+            nx0, nx1 = ext
+            x_min = nx0 if x_min is None else min(x_min, nx0)
+            x_max = nx1 if x_max is None else max(x_max, nx1)
+        self._refresh_x_range(x_min, x_max)
+
     def set_bypassed(self, bypassed: bool) -> None:
+        if self._bypassed == bypassed:
+            return
         self._bypassed = bypassed
+        self.refresh()  # curve colour shifts globally — repaint everything
+
+    # ── dirty-extent helpers ────────────────────────────────────────────────
+
+    @staticmethod
+    def _dirty_extent_for_curve(
+        old: np.ndarray, new: np.ndarray,
+    ) -> tuple[Optional[int], Optional[int]]:
+        diff = np.flatnonzero(old != new)
+        if diff.size == 0:
+            return None, None
+        return int(diff[0]), int(diff[-1]) + 1
+
+    def _extend_extent_for_nodes(
+        self,
+        x_min: Optional[int],
+        x_max: Optional[int],
+        old_nodes: dict[str, _NodePos],
+        new_nodes: dict[str, _NodePos],
+    ) -> tuple[Optional[int], Optional[int]]:
+        node_r = self.HALO_R + 1
+        names = set(old_nodes) | set(new_nodes)
+        for name in names:
+            if old_nodes.get(name) == new_nodes.get(name):
+                continue
+            for n in (old_nodes.get(name), new_nodes.get(name)):
+                if n is None:
+                    continue
+                cx, _, _, _ = n
+                nx0, nx1 = cx - node_r, cx + node_r + 1
+                x_min = nx0 if x_min is None else min(x_min, nx0)
+                x_max = nx1 if x_max is None else max(x_max, nx1)
+        return x_min, x_max
+
+    def _node_x_extent(self, name: Optional[str]) -> Optional[tuple[int, int]]:
+        if name is None:
+            return None
+        pos = self._node_positions.get(name)
+        if pos is None:
+            return None
+        cx = pos[0]
+        node_r = self.HALO_R + 1
+        return cx - node_r, cx + node_r + 1
+
+    def _refresh_x_range(self, x_min: Optional[int], x_max: Optional[int]) -> None:
+        if x_min is None or x_max is None:
+            return
+        bx = self.box
+        if bx is None:
+            return
+        x_min = max(bx.x0, x_min)
+        x_max = min(bx.x1, x_max)
+        if x_min >= x_max:
+            return
+        self.refresh(Box(x_min, bx.y0, x_max, bx.y1))
+
+    @staticmethod
+    def _compute_nodes(state: EqState) -> dict[str, _NodePos]:
+        out: dict[str, _NodePos] = {}
+        for band in BANDS:
+            p = state.bands.get(band.name)
+            if p is None:
+                continue
+            cx = int(freq_to_x(p.freq))
+            cy = _ZERO_DB_Y if band.gain_sym is None else _db_to_y_scalar(p.gain_db)
+            color = BAND_COLORS[band.name]
+            if not p.enabled:
+                color = tuple(c * 6 // 10 for c in color)
+            out[band.name] = (cx, cy, color, p.enabled)
+        return out
+
+    # ── paint ───────────────────────────────────────────────────────────────
 
     def _draw_erase(self, image, draw, real_box) -> None:
-        pass
+        pass  # _draw handles its own background, clipped to real_box
 
     def _draw(self, image, draw, real_box) -> None:
+        # Widget is at panel origin (0, GRAPH_Y0) so image x == local x.
         rx0, ry0 = real_box.x0, real_box.y0
         rx1, ry1 = real_box.x1, real_box.y1
 
+        # Background fill — only the dirty rect
         draw.rectangle([rx0, ry0, rx1 - 1, ry1 - 1], fill=BG_BLACK)
 
-        for x in _FREQ_MINORS_X:
-            draw.line([(rx0 + x, ry0), (rx0 + x, ry1 - 1)], fill=GRID_DIM)
-        for x in _FREQ_MAJORS_X:
-            draw.line([(rx0 + x, ry0), (rx0 + x, ry1 - 1)], fill=GRID_DIM)
-        for db in _DB_GRID:
-            y = _db_to_y_scalar(db)
-            draw.line([(rx0, ry0 + (y - GRAPH_Y0)), (rx1 - 1, ry0 + (y - GRAPH_Y0))], fill=GRID_DIM)
-        draw.line(
-            [(rx0, ry0 + (_ZERO_DB_Y - GRAPH_Y0)), (rx1 - 1, ry0 + (_ZERO_DB_Y - GRAPH_Y0))],
-            fill=GRID_0DB,
-        )
+        # Vertical grid lines that fall in [rx0, rx1)
+        for x in _FREQ_GRID_X:
+            if rx0 <= x < rx1:
+                draw.line([(x, max(ry0, GRAPH_Y0)), (x, min(ry1, GRAPH_Y1) - 1)], fill=GRID_DIM)
 
+        # Horizontal grid lines — clip x extent to the dirty rect. Vertical
+        # is intentionally unclipped: refreshes are always full graph height,
+        # and the -18 dB grid line lands exactly on GRAPH_Y1 (the widget's
+        # exclusive bottom edge) — Pillow paints the row, the panel-stack
+        # blit captures it.
+        hx0 = max(rx0, 0)
+        hx1 = min(rx1, _W)
+        if hx0 < hx1:
+            for db in _DB_GRID:
+                y = _db_to_y_scalar(db)
+                draw.line([(hx0, y), (hx1 - 1, y)], fill=GRID_DIM)
+            draw.line([(hx0, _ZERO_DB_Y), (hx1 - 1, _ZERO_DB_Y)], fill=GRID_0DB)
+
+        # Curve — only columns within the dirty rect
         if self._curve_y is not None:
             shade = INACTIVE_SHADE if self._bypassed else 1.0
             color = tuple(int(c * shade) for c in CURVE_COLOR)
+            cx0 = max(rx0, 0)
+            cx1 = min(rx1, GRAPH_W)
             ys = self._curve_y
-            for x in range(GRAPH_W):
-                y = int(ys[x])
-                draw.point((rx0 + x, ry0 + (y - GRAPH_Y0)), fill=color)
+            for x in range(cx0, cx1):
+                draw.point((x, int(ys[x])), fill=color)
 
-        if self._state is not None:
+        # Band nodes — skip those whose bbox misses the dirty rect.
+        # Draw selected last so the halo lands on top.
+        if self._state is not None and self._node_positions:
+            node_r = self.HALO_R + 1
             ordered: list[Band] = [b for b in BANDS if b.name != self._selected_band]
             sel = next((b for b in BANDS if b.name == self._selected_band), None)
             if sel is not None:
                 ordered.append(sel)
             for band in ordered:
-                self._draw_node(draw, rx0, ry0, band, band.name == self._selected_band)
+                pos = self._node_positions.get(band.name)
+                if pos is None:
+                    continue
+                cx, cy, color, _enabled = pos
+                if cx + node_r <= rx0 or cx - node_r >= rx1:
+                    continue
+                self._paint_node(draw, cx, cy, color, band.name == self._selected_band)
 
-    def _draw_node(self, draw, ox: int, oy: int, band: Band, selected: bool) -> None:
-        assert self._state is not None
-        p = self._state.bands.get(band.name)
-        if p is None:
-            return
-        x = freq_to_x(p.freq)
-        if band.gain_sym is None:
-            y_local = _ZERO_DB_Y
-        else:
-            y_local = _db_to_y_scalar(p.gain_db)
-        cx, cy = ox + int(x), oy + (y_local - GRAPH_Y0)
+        # Axis labels (small font). Clipped to the dirty rect so they only
+        # repaint when their columns are part of the refresh.
+        if self._axis_font is not None:
+            self._paint_axis_labels(draw, rx0, rx1)
 
-        color = BAND_COLORS[band.name]
-        if not p.enabled:
-            color = tuple(c * 6 // 10 for c in color)
+    def _paint_axis_labels(self, draw, rx0: int, rx1: int) -> None:
+        font = self._axis_font
+        # dB labels at the left edge.
+        for text, db in _DB_LABELS:
+            tw, th = get_text_size(text, font)
+            x = 2
+            if x + tw <= rx0 or x >= rx1:
+                continue
+            y = _db_to_y_scalar(db)
+            if db > 0:
+                ty = y + 1
+            else:
+                ty = y - th - 1
+            draw.text((x, ty), text, fill=_AXIS_LABEL_COLOR, font=font)
+        # Freq labels along the bottom, placed to the right of each major
+        # gridline so the line itself stays unobscured.
+        for text, fx in _FREQ_LABELS:
+            tw, th = get_text_size(text, font)
+            tx = fx + 2
+            if tx + tw <= rx0 or tx >= rx1:
+                continue
+            ty = GRAPH_Y1 - th - 1
+            draw.text((tx, ty), text, fill=_AXIS_LABEL_COLOR, font=font)
 
+    def _paint_node(self, draw, cx: int, cy: int, color: tuple[int, int, int],
+                    selected: bool) -> None:
         r = self.NODE_R
         draw.ellipse([cx - r, cy - r, cx + r, cy + r], fill=color)
-
         if selected:
             hr = self.HALO_R
             draw.ellipse([cx - hr, cy - hr, cx + hr, cy + hr], outline=HALO_COLOR, width=1)
@@ -272,8 +462,8 @@ class _BandSelectable(Widget):
 
     def set_selected(self, selected: bool) -> None:  # type: ignore[override]
         self.selected = selected
-        if selected:
-            self._panel._on_band_focus(self.band)
+        # Halo and readout updates are driven by EqPanel._select_widget_idx
+        # so chrome focus correctly clears the previously-selected band.
 
     def input_event(self, event) -> bool:  # type: ignore[override]
         if event == InputEvent.CLICK:
@@ -372,7 +562,9 @@ class EqPanel(Panel):
         self._state: EqState = initial_state
         self._bypassed = bypassed
 
-        btn_font = Config().get_font("default")
+        cfg = Config()
+        btn_font = cfg.get_font("default")
+        axis_font = cfg.get_font("tiny")
         _, btn_text_h = get_text_size("Bypass", btn_font)
         btn_v_margin = max(0, (_BTN_H - btn_text_h) // 2)
 
@@ -383,6 +575,7 @@ class EqPanel(Panel):
         )
         self._graph = GraphWidget(
             box=Box.xywh(0, GRAPH_Y0, _W, GRAPH_H),
+            axis_font=axis_font,
             parent=self,
         )
 
@@ -444,7 +637,6 @@ class EqPanel(Panel):
         self._btn_bypass.refresh()
         # Curve dimming is tied to bypass — mirror TunerPanel's mute style.
         self._graph.set_bypassed(bypassed)
-        self._graph.refresh()
         self._update_readout()
 
     def _apply_bypass_style(self, bypassed: bool) -> None:
@@ -466,7 +658,6 @@ class EqPanel(Panel):
         new_bands[band.name] = new
         self._state = replace(self._state, bands=new_bands)
         self._graph.set_state(self._state)
-        self._graph.refresh()
         self._update_readout()
 
     def _update_readout(self) -> None:
@@ -487,12 +678,16 @@ class EqPanel(Panel):
         else:
             self._readout.set_message("")
 
-    # ── band-selectable callbacks ───────────────────────────────────────────
+    # ── selection routing ───────────────────────────────────────────────────
 
-    def _on_band_focus(self, band: Band) -> None:
-        self._graph.set_selected(band.name)
-        self._graph.refresh()
+    def _select_widget_idx(self, idx):  # type: ignore[override]
+        super()._select_widget_idx(idx)
+        new = self.sel_list[idx]
+        band_name = new.band.name if isinstance(new, _BandSelectable) else None
+        self._graph.set_selected(band_name)
         self._update_readout()
+
+    # ── band-selectable callbacks ───────────────────────────────────────────
 
     def _on_band_click(self, band: Band) -> None:
         p = self._state.bands[band.name]
@@ -526,7 +721,6 @@ class EqPanel(Panel):
                 self._send_param(band.gain_sym, p.gain_db)
         self._state = replace(snap)
         self._graph.set_state(self._state)
-        self._graph.refresh()
         self._update_readout()
 
     # ── Tweak1/2/3 (rotation only) ──────────────────────────────────────────

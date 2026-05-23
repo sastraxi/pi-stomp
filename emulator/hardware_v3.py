@@ -72,11 +72,8 @@ class EmulatorHardwareV3(EmulatorHardwareBase):
                 type=Token.KNOB,
                 id=id)
             enc.press_callback = self.handler.universal_encoder_sw
+            if longpress_callback:
+                enc.longpress_callback = self.handler.get_callback(longpress_callback)
             self.tweak_encoders.append(enc)
-
-        if longpress_callback:
-            lp = self.handler.get_callback(longpress_callback)
-            if lp and isinstance(enc, MockEncoderMidi):
-                enc.press_callback = lp
 
         return enc

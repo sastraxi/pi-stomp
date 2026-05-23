@@ -23,11 +23,10 @@ Layout (total 940 × 500):
 
 Keyboard shortcuts (availability depends on hardware version)
   ← / →          nav encoder left / right
-  Enter / Space  nav encoder press (click)
-  L              nav encoder long-press
+  Enter / Space  nav encoder press (click)   Ctrl+Enter = long-press
   1 / 2 / 3 / 4  footswitch 1 / 2 / 3 / 4
-  Q / W          tweak enc 1 left / right   E = press
-  A / S          tweak enc 2 left / right   D = press
+  Q / W          tweak enc 1 left / right    E = press, Ctrl+E = long-press
+  A / S          tweak enc 2 left / right    D = press, Ctrl+D = long-press
   Z / X          volume enc left / right
   ↑ / ↓          expression pedal +/-
   Esc            quit
@@ -272,16 +271,16 @@ class EmulatorWindow:
             self._draw_exp_slider()
 
         # Keyboard hints (bottom of panel) — only show what's wired up
-        hints = ["← → nav  Enter=click  L=long"]
+        hints = ["← → nav  Enter=click  Ctrl+Enter=long"]
         num_fs = len(self.hw.footswitches)
         if num_fs:
             hints.append("1-%d footswitches" % num_fs)
         tweak = getattr(self.hw, 'tweak_encoders', [])
         vol   = getattr(self.hw, 'volume_encoder', None)
         if len(tweak) >= 1:
-            hints.append("Q/W enc1  E=press")
+            hints.append("Q/W enc1  E=press  Ctrl+E=long")
         if len(tweak) >= 2:
-            hints[-1] += "  A/S enc2  D=press"
+            hints.append("A/S enc2  D=press  Ctrl+D=long")
         if vol is not None:
             hints.append("Z/X vol enc")
         if self.hw.analog_controls:
@@ -330,9 +329,10 @@ class EmulatorWindow:
         elif key == pygame.K_RIGHT and nav:
             nav.step(1)
         elif key in (pygame.K_RETURN, pygame.K_SPACE) and nav:
-            nav.press(switchstate.Value.RELEASED)
-        elif key == pygame.K_l and nav:
-            nav.press(switchstate.Value.LONGPRESSED)
+            if key == pygame.K_RETURN and (mod & pygame.KMOD_CTRL):
+                nav.press(switchstate.Value.LONGPRESSED)
+            else:
+                nav.press(switchstate.Value.RELEASED)
 
         # Footswitches
         elif key in (pygame.K_1, pygame.K_KP1):
@@ -350,7 +350,9 @@ class EmulatorWindow:
         elif key == pygame.K_w and len(tweak) >= 1:
             tweak[0].step(1)
         elif key == pygame.K_e and len(tweak) >= 1:
-            tweak[0].press(switchstate.Value.RELEASED)
+            state = (switchstate.Value.LONGPRESSED if (mod & pygame.KMOD_CTRL)
+                     else switchstate.Value.RELEASED)
+            tweak[0].press(state)
 
         # Tweak encoder 2
         elif key == pygame.K_a and len(tweak) >= 2:
@@ -358,7 +360,9 @@ class EmulatorWindow:
         elif key == pygame.K_s and len(tweak) >= 2:
             tweak[1].step(1)
         elif key == pygame.K_d and len(tweak) >= 2:
-            tweak[1].press(switchstate.Value.RELEASED)
+            state = (switchstate.Value.LONGPRESSED if (mod & pygame.KMOD_CTRL)
+                     else switchstate.Value.RELEASED)
+            tweak[1].press(state)
 
         # Volume encoder
         elif key == pygame.K_z and vol:

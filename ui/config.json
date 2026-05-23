@@ -14,6 +14,11 @@
 	    "label" : "big_bold",
 	    "name"  : "DejaVuSans-Bold.ttf",
 	    "size"  : 36
+	},
+	{
+	    "label" : "tiny",
+	    "name"  : "DejaVuSans.ttf",
+	    "size"  : 9
 	}
     ],
     "colors" : [

@@ -65,6 +65,7 @@ class MockEncoderMidi(EncoderController):
                          type=type, id=id)
         self.cfg = cfg or {'type': type, 'id': id}
         self.press_callback = None
+        self.longpress_callback = None
 
     def read_rotary(self):
         pass
@@ -73,7 +74,10 @@ class MockEncoderMidi(EncoderController):
         self.refresh(direction)
 
     def press(self, value):
-        if self.press_callback:
+        import pistomp.switchstate as switchstate
+        if value == switchstate.Value.LONGPRESSED and self.longpress_callback:
+            self.longpress_callback(value)
+        elif self.press_callback:
             self.press_callback(value)
 
 
