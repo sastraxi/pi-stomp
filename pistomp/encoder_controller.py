@@ -160,6 +160,12 @@ class EncoderController(encoder.Encoder, controller.Controller):
         """Handle encoder rotation with speed-based amplification."""
         # logging.debug(f"EncoderController.refresh: id={self.id}, type={self.type}, direction={direction}, has_param={self.parameter is not None}")
 
+        # Panel-level intercept (e.g. EQ panel hijacks Tweak1/2/3). When a
+        # panel consumes the rotation, skip MIDI send and any bound-parameter
+        # update — the panel owns this tick.
+        if self.handler.consume_tweak_rotation(self.id, rotations):
+            return
+
         # Use accumulated count as speed indicator (accumulated in 10ms poll cycle)
         abs_dir = abs(rotations)
         if abs_dir >= self.FAST_THRESHOLD:

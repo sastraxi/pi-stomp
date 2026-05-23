@@ -19,7 +19,7 @@ from pistomp.footswitch import Footswitch
 
 class Plugin:
 
-    def __init__(self, instance_id, parameters, info, category=None):
+    def __init__(self, instance_id, parameters, info, category=None, uri=None):
 
         self.instance_id = instance_id.lstrip("/")
         self.parameters = parameters
@@ -28,6 +28,10 @@ class Plugin:
         self.controllers = []
         self.has_footswitch = False
         self.category = category
+        # LV2 plugin URI (e.g. "http://gareus.org/oss/lv2/fil4#mono"). Used by
+        # full-screen panels that override the generic parameter menu for
+        # specific plugin types (see lcd320x240.plugin_event).
+        self.uri = uri
         #self.info_dict = info   # TODO could store this but not sure we need to
 
     def is_bypassed(self):

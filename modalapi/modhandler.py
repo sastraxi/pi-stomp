@@ -114,6 +114,9 @@ class Modhandler(Handler):
         self._tuner_source_factory = None
         self._tuner_muted = False
 
+        # EQ panel state (full-screen UI for x42-eq / fil4 plugins)
+        self._eq_panel = None
+
         # WebSocket bridge for MOD-UI communication
         self.ws_bridge = AsyncWebSocketBridge(
             ws_url='ws://localhost:80/websocket',
@@ -328,7 +331,7 @@ class Modhandler(Handler):
         # is ~4.3 ms of SPI, well inside the 10 ms budget; typical ticks
         # are sub-millisecond. Otherwise fall back to the SPI-clock-derived
         # divisor computed by the LCD itself.
-        if self._tuner_panel is not None:
+        if self._tuner_panel is not None or self._eq_panel is not None:
             return 1
         return self._lcd.poll_divisor if self._lcd is not None else 8
 
@@ -1240,6 +1243,100 @@ class Modhandler(Handler):
         self.settings.set_setting(Token.TUNER_MUTE, new_muted)
         if self._tuner_panel is not None:
             self._tuner_panel.set_muted(new_muted)
+
+    # ── EQ panel (x42-eq / fil4) ────────────────────────────────────────────
+
+    def show_eq_panel(self, plugin) -> None:
+        """Open the full-screen EQ panel for an x42-eq plugin instance."""
+        from pistomp.eq import FIL4_URIS
+        from pistomp.eq.bands import BANDS, PLUGIN_ENABLE_SYM
+        from pistomp.eq.curve import BandParams, EqState
+        from pistomp.eq.panel import EqPanel
+
+        if getattr(plugin, "uri", None) not in FIL4_URIS:
+            logging.warning("show_eq_panel called on non-fil4 plugin %r", plugin.uri)
+            return
+        if self._eq_panel is not None:
+            return
+
+        def _val(symbol: str, default: float) -> float:
+            p = plugin.parameters.get(symbol)
+            return float(p.value) if p is not None else default
+
+        def _snapshot() -> "EqState":
+            bands: dict[str, BandParams] = {}
+            for band in BANDS:
+                bands[band.name] = BandParams(
+                    enabled=bool(_val(band.enable_sym, 0.0)),
+                    freq=_val(band.freq_sym, 0.5 * (band.freq_min + band.freq_max)),
+                    q=_val(band.q_sym, 0.7),
+                    gain_db=_val(band.gain_sym, 0.0) if band.gain_sym else 0.0,
+                )
+            return EqState(
+                plugin_enabled=bool(_val(PLUGIN_ENABLE_SYM, 1.0)),
+                global_gain_db=_val("gain", 0.0),
+                bands=bands,
+            )
+
+        # Capture the pedalboard-saved values exactly once, on first open
+        # after pedalboard load. Subsequent panel opens reuse it so Reset
+        # always points back to what the pedalboard shipped with, even after
+        # earlier (un-saved) tweaks via this panel.
+        if getattr(plugin, "eq_pedalboard_snapshot", None) is None:
+            plugin.eq_pedalboard_snapshot = _snapshot()
+        pedalboard_snapshot = plugin.eq_pedalboard_snapshot
+        live_state = _snapshot()
+
+        instance_id = plugin.instance_id
+
+        def send_param(symbol: str, value: float) -> None:
+            self.ws_bridge.send_parameter(instance_id, symbol, value)
+            p = plugin.parameters.get(symbol)
+            if p is not None:
+                p.value = value
+
+        def on_toggle_bypass() -> None:
+            # Same path as a main-screen plugin bypass — keeps state, LED,
+            # and websocket in sync via the existing route. Look up the
+            # plugin's tile widget so toggle_plugin_bypass can recolour it.
+            widget = next(
+                (w for w in self.lcd.w_plugins if getattr(w, "object", None) is plugin),
+                None,
+            )
+            self.toggle_plugin_bypass(widget, plugin)
+            if self._eq_panel is not None:
+                self._eq_panel.set_bypassed(plugin.is_bypassed())
+
+        panel = EqPanel(
+            initial_state=live_state,
+            pedalboard_snapshot=pedalboard_snapshot,
+            send_param=send_param,
+            on_toggle_bypass=on_toggle_bypass,
+            on_dismiss=self.hide_eq_panel,
+            bypassed=plugin.is_bypassed(),
+        )
+        self._eq_panel = panel
+        self.lcd.show_eq_panel(panel)
+
+    def hide_eq_panel(self) -> None:
+        if self._eq_panel is None:
+            return
+        self.lcd.hide_eq_panel()
+        self._eq_panel = None
+
+    def consume_tweak_rotation(self, encoder_id, rotations) -> bool:
+        if self._eq_panel is None:
+            return False
+        if encoder_id not in (1, 2, 3):
+            return False
+        # When a chrome button (Back/Bypass/Reset) is selected, no band is
+        # active — let the volume encoder fall through to normal volume
+        # control. Tweak1/2 still no-op (their default is also a no-op on
+        # the EQ panel context), so intercept them silently.
+        if self._eq_panel.selected_band is None:
+            return encoder_id != 3
+        self._eq_panel.tweak_event(encoder_id, rotations)
+        return True
 
     def _toggle_tuner_input(self) -> None:
         from pistomp.tuner import TunerEngine, build_source

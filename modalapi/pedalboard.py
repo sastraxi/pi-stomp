@@ -158,6 +158,7 @@ class Pedalboard:
             # Add plugin data (from plugin registry) to global plugin dictionary
             plugin_info = {}
             category = None
+            plugin_uri = None
             prototype = self.world.find_nodes(block, self.world.ns.lv2.prototype, None)
             if len(prototype) > 0:
                 #logging.debug("prototype %s" % prototype[0])
@@ -222,7 +223,7 @@ class Pedalboard:
                             parameters[symbol] = param
 
                     #logging.debug("  Label: %s" % label)
-            inst = Plugin.Plugin(instance_id, parameters, plugin_info, category)
+            inst = Plugin.Plugin(instance_id, parameters, plugin_info, category, uri=plugin_uri)
 
             try:
                 index = plugin_order.index(block)

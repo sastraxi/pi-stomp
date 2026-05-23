@@ -138,6 +138,7 @@ class Lcd(abstract_lcd.Lcd):
         self.footswitch_panel = Panel(box=Box.xywh(0, 176, self.display_width, 64))
         self.pstack.push_panel(self.footswitch_panel, refresh=False)
         self._tuner_panel = None
+        self._eq_panel = None
 
         self.pedalboards = {}
 
@@ -199,6 +200,8 @@ class Lcd(abstract_lcd.Lcd):
         self.pstack.poll_updates()
         if self._tuner_panel is not None and self.pstack.current == self._tuner_panel:
             self._tuner_panel.tick()
+        if self._eq_panel is not None and self.pstack.current == self._eq_panel:
+            self._eq_panel.tick()
 
         if self.pstack.current == self.main_panel:
             # Update control progress bars (analog controls and encoders)
@@ -251,6 +254,16 @@ class Lcd(abstract_lcd.Lcd):
         if self._tuner_panel is not None:
             self.pstack.pop_panel(self._tuner_panel)
             self._tuner_panel = None
+
+    def show_eq_panel(self, panel) -> None:
+        self._eq_panel = panel
+        self.pstack.push_panel(panel)
+        panel.refresh()
+
+    def hide_eq_panel(self) -> None:
+        if self._eq_panel is not None:
+            self.pstack.pop_panel(self._eq_panel)
+            self._eq_panel = None
 
     #
     # Toolbar
@@ -464,7 +477,12 @@ class Lcd(abstract_lcd.Lcd):
         if event == InputEvent.CLICK:
             self.handler.toggle_plugin_bypass(widget, plugin)
         elif event == InputEvent.LONG_CLICK:
-            self.draw_parameter_menu(plugin)
+            from pistomp.eq import FIL4_URIS
+            uri = getattr(plugin, 'uri', None)
+            if uri in FIL4_URIS and hasattr(self.handler, 'show_eq_panel'):
+                self.handler.show_eq_panel(plugin)
+            else:
+                self.draw_parameter_menu(plugin)
 
 
     def color_plugin(self, widget, plugin):

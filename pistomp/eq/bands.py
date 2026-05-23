@@ -32,7 +32,7 @@ class Band:
 
 # Order = Nav cycling order
 BANDS: tuple[Band, ...] = (
-    Band("HP", "hp", "HighPass", "HPfreq", "HPQ", None, 5.0, 1250.0, 0.0, 1.4),
+    Band("HP", "hp", "HighPass", "HPfreq", "HPQ", None, 20.0, 1250.0, 0.0, 1.4),
     Band("LS", "shelf", "LSsec", "LSfreq", "LSq", "LSgain", 25.0, 400.0, 0.0625, 4.0),
     Band("B1", "peak", "sec1", "freq1", "q1", "gain1", 20.0, 2000.0, 0.0625, 4.0),
     Band("B2", "peak", "sec2", "freq2", "q2", "gain2", 40.0, 4000.0, 0.0625, 4.0),

@@ -50,9 +50,17 @@ class EmulatorHardwareV3(EmulatorHardwareBase):
     def add_encoder(self, id, type, callback, longpress_callback, midi_channel, midi_cc, midiout=None):
         """Called by Hardware.create_encoders() for each encoder in config."""
         if type == Token.VOLUME:
-            enc = MockEncoder(
-                callback=self.handler.system_menu_headphone_volume,
-                type=type, id=id)
+            # Route through the shared encoder callback so panel intercepts
+            # (e.g. EQ panel hijacking Tweak3) take effect. The default volume
+            # behaviour is wired by the handler's volume_change_callback.
+            volume_cb = self.handler.system_menu_headphone_volume
+
+            def _volume_callback(direction, _cb=volume_cb, _id=id):
+                if self.handler.consume_tweak_rotation(_id, direction):
+                    return
+                _cb(direction)
+
+            enc = MockEncoder(callback=_volume_callback, type=type, id=id)
             self.volume_encoder = enc
         else:
             enc = MockEncoderMidi(

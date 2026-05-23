@@ -96,5 +96,11 @@ class Handler:
     def set_tuner_source_factory(self, factory) -> None:
         pass
 
+    def consume_tweak_rotation(self, encoder_id, rotations) -> bool:
+        """Return True to suppress the encoder's normal MIDI/parameter
+        behaviour for this tick. Used by full-screen panels (e.g. the EQ
+        panel) that want to repurpose the Tweak encoders."""
+        return False
+
     def init_pedalboards_remote(self, url: str) -> None:
         pass
