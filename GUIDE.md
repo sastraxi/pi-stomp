@@ -276,7 +276,7 @@ Shortpress accepts string (callback name) or object with `callback` and `args` (
 # Hardwarefactory (physical interface)
 < 2.0     → Pistomp (v1: dual encoders, 3 switches, mono LCD)
 >= 2.0 < 3.0 → Pistompcore (v2: single encoder, color LCD, relay)
->= 3.0    → Pistomptre (v3: 4 encoders, LED strip, VU meters)
+>= 3.0    → Pistomptre (v3: 4 encoders, 2x LED strip for VU meters)
 ```
 
 **All inherit from `Hardware` base class** - provides common functionality:
