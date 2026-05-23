@@ -21,7 +21,7 @@ type checkers are satisfied, but bypasses any GPIO / SPI / ADC init.
 
 import pistomp.analogcontrol as analogcontrol
 import pistomp.encoder as encoder
-import pistomp.encodermidicontrol as encodermidicontrol
+from pistomp.encoder_controller import EncoderController
 import pistomp.footswitch as footswitch
 
 try:
@@ -47,37 +47,30 @@ class MockEncoder(encoder.Encoder):
         if direction != 0 and self.callback:
             self.callback(direction)
 
+    def get_display_info(self) -> dict:
+        return {"type": self.type, "id": self.id, "category": None}
+
     def press(self, value):
         if self.press_callback:
             self.press_callback(value)
 
 
-class MockEncoderMidi(encodermidicontrol.EncoderMidiControl):
+class MockEncoderMidi(EncoderController):
     """Tweak encoder with MIDI CC.  Driven externally via step() / press()."""
 
     def __init__(self, handler, callback, midi_channel, midi_CC, midiout,
                  type=None, id=None, cfg=None):
-        super().__init__(handler=handler, d_pin=None, clk_pin=None, callback=callback,
+        super().__init__(handler=handler, d_pin=None, clk_pin=None,
                          midi_CC=midi_CC, midi_channel=midi_channel, midiout=midiout,
                          type=type, id=id)
         self.cfg = cfg or {'type': type, 'id': id}
-        self.midi_value = 64
         self.press_callback = None
 
     def read_rotary(self):
         pass
 
-    def set_value(self, value):
-        self.midi_value = int(value)
-
     def step(self, direction):
-        self.midi_value = max(0, min(127, self.midi_value + direction))
-        if self.midiout and self.midi_CC is not None and _rtmidi_available:
-            self.midiout.send_message(
-                [CONTROL_CHANGE | (self.midi_channel & 0x0F),
-                 self.midi_CC, self.midi_value])
-        if self.callback:
-            self.callback(direction)
+        self.refresh(direction)
 
     def press(self, value):
         if self.press_callback:
