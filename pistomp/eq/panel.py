@@ -728,6 +728,13 @@ class _BandSelectable(Widget):
     def _draw_erase(self, image, draw, real_box) -> None:
         pass
 
+    def _draw_selection(self, image, draw, real_box) -> None:
+        # Suppress the base Widget's selection rectangle — our visual is the
+        # halo painted by the GraphWidget on the band's node. Without this
+        # override, the 1×1 widget box would paint a tiny selection square at
+        # (0,0) on first paint.
+        pass
+
 
 # ── readout formatting ──────────────────────────────────────────────────────
 
