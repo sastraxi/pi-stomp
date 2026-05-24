@@ -16,7 +16,12 @@ ps-stop
 sudo journalctl -u mod-ala-pi-stomp -f
 
 # View recent logs
-sudo journalctl -u mod-ala-pi-stomp -n 50
+```
+
+There's a small helper too.
+
+```bash
+./logs.sh -f | -n 100 | --since ...
 ```
 
 ## Deployment Workflow
