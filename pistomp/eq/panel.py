@@ -34,6 +34,7 @@ from pistomp.eq.curve import (
     CurveCache,
     EqState,
     db_to_y,
+    db_to_y_float,
     freq_to_x,
 )
 from uilib.box import Box
@@ -55,7 +56,7 @@ _W = 320
 _H = 240
 
 READOUT_Y0 = 0
-READOUT_Y1 = 18
+READOUT_Y1 = 22
 
 GRAPH_Y0 = 22
 GRAPH_Y1 = 200
@@ -76,6 +77,10 @@ BG_BLACK = (0, 0, 0)
 GRID_DIM = (45, 45, 45)
 GRID_0DB = (140, 140, 140)
 CURVE_COLOR = (220, 220, 220)
+# Line thickness in pixels, measured PERPENDICULAR to the curve. The vertical
+# extent painted at each column is CURVE_THICKNESS * sqrt(1 + slope²), so the
+# perceived weight stays constant regardless of slope.
+CURVE_THICKNESS = 1.3
 HALO_COLOR = (255, 255, 255)
 READOUT_COLOR = (200, 200, 200)
 INACTIVE_SHADE = 0.45
@@ -85,10 +90,10 @@ INACTIVE_SHADE = 0.45
 # in pixels scales with intensity up to SMEAR_H_MAX, and the top-pixel opacity
 # also scales with intensity — so flat regions (intensity ≈ 0) paint nothing
 # at all, peaks/valleys taper out, and steep slopes get a long, opaque comet.
-SMEAR_ALPHA = 0.8
-SMEAR_H_MAX = 25
+SMEAR_ALPHA = 0.65
+SMEAR_H_MAX = 22
 SMEAR_SLOPE_AT_MAX = 3
-SMEAR_EXPONENT = 1.5
+SMEAR_EXPONENT = 0.8
 # Blur the per-column |slope| with a 1D Gaussian (radius in pixels) so the
 # tail length transitions smoothly instead of flickering with the per-column
 # discrete derivative. sigma = radius / 2 is a good visual compromise.
@@ -217,7 +222,10 @@ def _smear_heights_for_curve(curve_y: np.ndarray) -> np.ndarray:
     den = np.convolve(np.ones_like(slope), _SMEAR_BLUR_KERNEL, mode="same")
     smoothed = num / den
     intensity = np.clip(smoothed / SMEAR_SLOPE_AT_MAX, 0.0, 1.0) ** SMEAR_EXPONENT
-    return np.round(intensity * SMEAR_H_MAX).astype(int)
+    # Float length — the renderer integrates a continuous opacity gradient
+    # over each row, so quantising the length here would reintroduce stair-
+    # stepping as the slope (and the float curve y) vary smoothly.
+    return intensity * SMEAR_H_MAX
 
 
 # ── GraphWidget ──────────────────────────────────────────────────────────────
@@ -247,6 +255,12 @@ class GraphWidget(Widget):
         self._state: Optional[EqState] = None
         self._selected_band: Optional[str] = None
         self._curve_y: Optional[np.ndarray] = None
+        self._curve_y_float: Optional[np.ndarray] = None
+        # Per-column y range covered by the polyline's half-segments to each
+        # neighbour — used by the AA rasterizer to spread ink across rows
+        # in proportion to the slope at that column.
+        self._curve_y_lo: Optional[np.ndarray] = None
+        self._curve_y_hi: Optional[np.ndarray] = None
         self._node_positions: dict[str, _NodePos] = {}
         self._bypassed: bool = False
         self._smear_colors: Optional[np.ndarray] = None  # (GRAPH_W, 3) or None
@@ -256,10 +270,12 @@ class GraphWidget(Widget):
 
     def set_state(self, state: EqState) -> None:
         new_curve_db = self._cache.compute(state)
-        new_curve_y = db_to_y(new_curve_db, GRAPH_Y0, GRAPH_Y1, DB_MAX)
+        new_curve_y_float = db_to_y_float(new_curve_db, GRAPH_Y0, GRAPH_Y1, DB_MAX)
+        new_curve_y = np.round(new_curve_y_float).astype(int)
+        new_y_lo, new_y_hi = self._neighbor_extents(new_curve_y_float)
         new_nodes = self._compute_nodes(state)
         new_smear_colors = _smear_colors_for_state(state)
-        new_smear_h = _smear_heights_for_curve(new_curve_y)
+        new_smear_h = _smear_heights_for_curve(new_curve_y_float)
 
         old_curve = self._curve_y
         old_nodes = self._node_positions
@@ -267,13 +283,17 @@ class GraphWidget(Widget):
         old_smear_h = self._smear_h
 
         self._state = state
-        self._curve_y = new_curve_y
-        self._node_positions = new_nodes
-        self._smear_colors = new_smear_colors
-        self._smear_h = new_smear_h
 
         if old_curve is None:
-            return  # first paint comes from the external panel.refresh()
+            # First paint: commit everything, refresh handled by panel.refresh().
+            self._curve_y = new_curve_y
+            self._curve_y_float = new_curve_y_float
+            self._curve_y_lo = new_y_lo
+            self._curve_y_hi = new_y_hi
+            self._node_positions = new_nodes
+            self._smear_colors = new_smear_colors
+            self._smear_h = new_smear_h
+            return
 
         x_min, x_max = self._dirty_extent_for_curve(old_curve, new_curve_y)
         x_min, x_max = self._extend_extent_for_smear(
@@ -285,6 +305,21 @@ class GraphWidget(Widget):
             new_smear_h,
         )
         x_min, x_max = self._extend_extent_for_nodes(x_min, x_max, old_nodes, new_nodes)
+
+        if x_min is None or x_max is None:
+            # No dirty columns — keep the committed/displayed arrays as-is so
+            # the next diff compares against what's actually on screen. This
+            # lets sub-threshold smear drift accumulate over many tweaks
+            # until it eventually crosses the visibility threshold.
+            return
+
+        self._curve_y = new_curve_y
+        self._curve_y_float = new_curve_y_float
+        self._curve_y_lo = new_y_lo
+        self._curve_y_hi = new_y_hi
+        self._node_positions = new_nodes
+        self._smear_colors = new_smear_colors
+        self._smear_h = new_smear_h
         self._refresh_x_range(x_min, x_max)
 
     def set_selected(self, band_name: Optional[str]) -> None:  # type: ignore[override]
@@ -331,15 +366,22 @@ class GraphWidget(Widget):
         old_h: Optional[np.ndarray],
         new_h: Optional[np.ndarray],
     ) -> tuple[Optional[int], Optional[int]]:
+        # Sub-perceptual tolerances. Both arrays are continuous floats now,
+        # so an exact `!=` would flag the full Gaussian kernel radius dirty
+        # for every micro-tweak even when the visible delta is below the
+        # LCD's quantisation. Threshold at ~half a pixel of comet-length
+        # change and ~2 LSBs of an 8-bit colour channel.
+        H_EPS = 0.5
+        C_EPS = 2.0
         diffs: list[np.ndarray] = []
         if (old_colors is None) != (new_colors is None):
             diffs.append(np.arange(GRAPH_W))
         elif old_colors is not None and new_colors is not None:
-            diffs.append(np.flatnonzero(np.any(old_colors != new_colors, axis=1)))
+            diffs.append(np.flatnonzero(np.any(np.abs(old_colors - new_colors) > C_EPS, axis=1)))
         if (old_h is None) != (new_h is None):
             diffs.append(np.arange(GRAPH_W))
         elif old_h is not None and new_h is not None:
-            diffs.append(np.flatnonzero(old_h != new_h))
+            diffs.append(np.flatnonzero(np.abs(old_h - new_h) > H_EPS))
         combined = np.concatenate(diffs) if diffs else np.array([], dtype=int)
         if combined.size == 0:
             return x_min, x_max
@@ -391,6 +433,20 @@ class GraphWidget(Widget):
         if x_min >= x_max:
             return
         self.refresh(Box(x_min, bx.y0, x_max, bx.y1))
+
+    @staticmethod
+    def _neighbor_extents(ys_f: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        """For each column, the y range covered by the polyline's two
+        half-segments to the immediate neighbours (column-centre to
+        midpoint with the next/prev column). Returns (y_lo, y_hi)."""
+        mids = (ys_f[:-1] + ys_f[1:]) * 0.5
+        y_left = np.empty_like(ys_f)
+        y_right = np.empty_like(ys_f)
+        y_left[0] = ys_f[0]
+        y_left[1:] = mids
+        y_right[:-1] = mids
+        y_right[-1] = ys_f[-1]
+        return np.minimum(y_left, y_right), np.maximum(y_left, y_right)
 
     @staticmethod
     def _compute_nodes(state: EqState) -> dict[str, _NodePos]:
@@ -448,39 +504,86 @@ class GraphWidget(Widget):
             cx0 = max(rx0, 0)
             cx1 = min(rx1, GRAPH_W)
             ys = self._curve_y
+            ys_f = self._curve_y_float
+            y_lo = self._curve_y_lo
+            y_hi = self._curve_y_hi
             smear_colors = self._smear_colors
             smear_h = self._smear_h
             has_smear = smear_colors is not None and smear_h is not None
+            cr, cg, cb = curve_color
             for x in range(cx0, cx1):
                 base_y = int(ys[x])
-                if has_smear:
-                    hx = int(smear_h[x])
-                else:
-                    hx = 0
-                if hx > 0:
+                hx = float(smear_h[x]) if has_smear else 0.0
+                if hx > 0.0:
                     sr, sg, sb = smear_colors[x]
                     sr *= shade
                     sg *= shade
                     sb *= shade
-                    # Top-pixel opacity tracks intensity (hx / SMEAR_H_MAX), so
-                    # gentle slopes peek through as a faint hint and steep
-                    # ones burn a full opaque comet.
                     top_alpha = SMEAR_ALPHA * hx / SMEAR_H_MAX
-                    for i in range(1, hx + 1):
-                        y = base_y + i
-                        if y >= GRAPH_Y1:
-                            break
-                        alpha = top_alpha * (1.0 - (i - 1) / hx)
-                        br, bg_, bb = bg_color(x, y)
+                    # Continuous opacity ramp α(y) = top_alpha · (1 − (y−yf)/hx)
+                    # for y ∈ [yf, yf+hx]. Per-row alpha is the integral of
+                    # that ramp over [R, R+1] (clipped to the active range),
+                    # which gives true anti-aliased rendering as yf and hx
+                    # slide through fractional values — no pop-in at integer
+                    # boundaries.
+                    yf = float(ys_f[x]) if ys_f is not None else float(base_y)
+                    end_y = yf + hx
+                    inv_2hx = 0.5 / hx
+                    R = int(math.floor(yf))
+                    R_end = int(math.floor(end_y))
+                    while R <= R_end and R < GRAPH_Y1:
+                        a = yf if R < yf else float(R)
+                        b = end_y if R + 1 > end_y else float(R + 1)
+                        if b > a:
+                            u_a = a - yf
+                            u_b = b - yf
+                            alpha = top_alpha * ((u_b - u_a) - (u_b * u_b - u_a * u_a) * inv_2hx)
+                            if alpha > 0.0 and R >= GRAPH_Y0:
+                                br, bg_, bb = bg_color(x, R)
+                                draw.point(
+                                    (x, R),
+                                    fill=(
+                                        int(br + (sr - br) * alpha),
+                                        int(bg_ + (sg - bg_) * alpha),
+                                        int(bb + (sb - bb) * alpha),
+                                    ),
+                                )
+                        R += 1
+                # Analytical line rasterization for column x. The line is
+                # treated as having unit thickness PERPENDICULAR to its
+                # direction; projected onto the column that's a vertical
+                # extent of sqrt(1 + slope²) centred on the column's mean y.
+                # Each row's coverage is its overlap with that extent (capped
+                # at 1), so fully-crossed rows always sit at full alpha and
+                # steep slopes don't visually thin out. Each pixel is then
+                # alpha-blended against bg_color so the grid bleeds through.
+                if y_lo is not None and y_hi is not None:
+                    yl = float(y_lo[x])
+                    yh = float(y_hi[x])
+                    mid = (yl + yh) * 0.5
+                    half_extent = math.sqrt(1.0 + (yh - yl) ** 2) * (CURVE_THICKNESS * 0.5)
+                    y_lo_ext = mid - half_extent
+                    y_hi_ext = mid + half_extent
+                    r_lo = int(math.floor(y_lo_ext))
+                    r_hi = int(math.floor(y_hi_ext))
+                    for ry in range(r_lo, r_hi + 1):
+                        if ry < GRAPH_Y0 or ry >= GRAPH_Y1:
+                            continue
+                        overlap = min(ry + 1, y_hi_ext) - max(ry, y_lo_ext)
+                        if overlap <= 0.0:
+                            continue
+                        a = overlap if overlap < 1.0 else 1.0
+                        br, bg_, bb = bg_color(x, ry)
                         draw.point(
-                            (x, y),
+                            (x, ry),
                             fill=(
-                                int(br + (sr - br) * alpha),
-                                int(bg_ + (sg - bg_) * alpha),
-                                int(bb + (sb - bb) * alpha),
+                                int(br + (cr - br) * a),
+                                int(bg_ + (cg - bg_) * a),
+                                int(bb + (cb - bb) * a),
                             ),
                         )
-                draw.point((x, base_y), fill=curve_color)
+                else:
+                    draw.point((x, base_y), fill=curve_color)
 
         # Band nodes — skip those whose bbox misses the dirty rect.
         # Draw selected last so the halo lands on top.
@@ -530,6 +633,11 @@ class GraphWidget(Widget):
 
     def _paint_node(self, draw, cx: int, cy: int, color: tuple[int, int, int], selected: bool) -> None:
         r = self.NODE_R
+        # 2px black ring sits between the coloured node (r=3) and the halo
+        # (inner edge r=5). Painting it for every band turns the previously
+        # transparent gap into a solid outline; for the selected band the
+        # halo lands flush on top of it.
+        draw.ellipse([cx - r - 2, cy - r - 2, cx + r + 2, cy + r + 2], fill=BG_BLACK)
         draw.ellipse([cx - r, cy - r, cx + r, cy + r], fill=color)
         if selected:
             hr = self.HALO_R

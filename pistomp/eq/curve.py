@@ -213,9 +213,15 @@ class CurveCache:
 def db_to_y(curve_db: np.ndarray, y_top: int, y_bot: int, db_max: float = 18.0) -> np.ndarray:
     """Map dB values to pixel rows in [y_top, y_bot]. y_top corresponds to
     +db_max, y_bot to -db_max. Values are clipped."""
+    return db_to_y_float(curve_db, y_top, y_bot, db_max).round().astype(int)
+
+
+def db_to_y_float(curve_db: np.ndarray, y_top: int, y_bot: int, db_max: float = 18.0) -> np.ndarray:
+    """Same mapping as `db_to_y` but returns float pixel positions — used by
+    the AA curve rasterizer, which needs sub-pixel y to anti-alias the line."""
     span = y_bot - y_top
     norm = (db_max - np.clip(curve_db, -db_max, db_max)) / (2.0 * db_max)
-    return (y_top + norm * span).round().astype(int)
+    return y_top + norm * span
 
 
 def freq_to_x(freq_hz: float | np.ndarray) -> int | np.ndarray:
