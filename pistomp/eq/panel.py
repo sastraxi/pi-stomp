@@ -80,6 +80,20 @@ HALO_COLOR = (255, 255, 255)
 READOUT_COLOR = (200, 200, 200)
 INACTIVE_SHADE = 0.45
 
+# "Comet tail" smear under the curve.
+# Per-column intensity = clip(|slope| / SMEAR_SLOPE_AT_MAX, 0, 1). Tail length
+# in pixels scales with intensity up to SMEAR_H_MAX, and the top-pixel opacity
+# also scales with intensity — so flat regions (intensity ≈ 0) paint nothing
+# at all, peaks/valleys taper out, and steep slopes get a long, opaque comet.
+SMEAR_ALPHA = 0.8
+SMEAR_H_MAX = 25
+SMEAR_SLOPE_AT_MAX = 3
+SMEAR_EXPONENT = 1.5
+# Blur the per-column |slope| with a 1D Gaussian (radius in pixels) so the
+# tail length transitions smoothly instead of flickering with the per-column
+# discrete derivative. sigma = radius / 2 is a good visual compromise.
+SMEAR_SLOPE_BLUR_RADIUS = 8
+
 
 # ── grid helpers ─────────────────────────────────────────────────────────────
 
@@ -94,6 +108,7 @@ _DB_GRID = (-18.0, -12.0, -6.0, 6.0, 12.0, 18.0)
 
 def _x_to_freq(x: int) -> float:
     import math as _m
+
     norm = x / (GRAPH_W - 1)
     log_min = _m.log10(20.0)
     log_max = _m.log10(20000.0)
@@ -110,20 +125,16 @@ def _fmt_axis_freq(hz: float, with_unit: bool = False) -> str:
     return f"{k:.1f}k"
 
 
-_FREQ_MAJORS_X: tuple[int, ...] = (0,) + tuple(
-    x for x in range(_FREQ_MAJOR_STEP_PX, GRAPH_W, _FREQ_MAJOR_STEP_PX)
-)
+_FREQ_MAJORS_X: tuple[int, ...] = (0,) + tuple(x for x in range(_FREQ_MAJOR_STEP_PX, GRAPH_W, _FREQ_MAJOR_STEP_PX))
 _FREQ_MINORS_X: tuple[int, ...] = tuple(
-    x for x in range(_FREQ_MINOR_STEP_PX, GRAPH_W, _FREQ_MINOR_STEP_PX)
-    if x not in _FREQ_MAJORS_X
+    x for x in range(_FREQ_MINOR_STEP_PX, GRAPH_W, _FREQ_MINOR_STEP_PX) if x not in _FREQ_MAJORS_X
 )
 _FREQ_GRID_X: frozenset[int] = frozenset(_FREQ_MAJORS_X) | frozenset(_FREQ_MINORS_X)
 
 # (label, x_of_gridline) for every vertical gridline. Only the leftmost
 # (20 Hz) carries the "Hz" suffix; the rest read as bare numbers / "Xk".
 _FREQ_LABELS: tuple[tuple[str, int], ...] = tuple(
-    (_fmt_axis_freq(_x_to_freq(x), with_unit=(x == 0)), x)
-    for x in sorted(_FREQ_GRID_X)
+    (_fmt_axis_freq(_x_to_freq(x), with_unit=(x == 0)), x) for x in sorted(_FREQ_GRID_X)
 )
 _DB_LABELS: tuple[tuple[str, float], ...] = (("+18dB", 18.0),)
 _AXIS_LABEL_COLOR = (110, 110, 110)
@@ -145,6 +156,68 @@ def bg_color(x: int, y: int) -> tuple[int, int, int]:
     if x in _FREQ_GRID_X:
         return GRID_DIM
     return BG_BLACK
+
+
+# ── smear (comet-tail) helpers ──────────────────────────────────────────────
+
+
+def _smear_colors_for_state(state: EqState) -> Optional[np.ndarray]:
+    """RGB color per graph column, ease-in-out interpolated across the x
+    positions of currently-enabled bands. Returns (GRAPH_W, 3) float array,
+    or None if no bands are enabled (no smear)."""
+    anchors: list[tuple[int, tuple[int, int, int]]] = []
+    for band in BANDS:
+        p = state.bands.get(band.name)
+        if p is None or not p.enabled:
+            continue
+        anchors.append((int(freq_to_x(p.freq)), BAND_COLORS[band.name]))
+    if not anchors:
+        return None
+    anchors.sort(key=lambda t: t[0])
+    xs = np.array([a[0] for a in anchors], dtype=int)
+    cs = np.array([a[1] for a in anchors], dtype=float)
+    all_x = np.arange(GRAPH_W)
+    if len(xs) == 1:
+        out = np.broadcast_to(cs[0], (GRAPH_W, 3)).copy()
+        return out
+    # For each column, find the bracketing pair [xs[i-1], xs[i]] and smoothstep
+    # between their colors. Outside the anchor range, clamp to the edge color.
+    idx = np.clip(np.searchsorted(xs, all_x, side="right"), 1, len(xs) - 1)
+    x0 = xs[idx - 1]
+    x1 = xs[idx]
+    span = np.maximum(x1 - x0, 1)
+    t = np.clip((all_x - x0) / span, 0.0, 1.0)
+    t_s = t * t * (3.0 - 2.0 * t)
+    out = cs[idx - 1] + (cs[idx] - cs[idx - 1]) * t_s[:, None]
+    out[all_x <= xs[0]] = cs[0]
+    out[all_x >= xs[-1]] = cs[-1]
+    return out
+
+
+def _gaussian_kernel_1d(radius: int) -> np.ndarray:
+    sigma = max(radius / 2.0, 1e-6)
+    x = np.arange(-radius, radius + 1, dtype=float)
+    k = np.exp(-(x * x) / (2.0 * sigma * sigma))
+    return k / k.sum()
+
+
+_SMEAR_BLUR_KERNEL: np.ndarray = _gaussian_kernel_1d(SMEAR_SLOPE_BLUR_RADIUS)
+
+
+def _smear_heights_for_curve(curve_y: np.ndarray) -> np.ndarray:
+    """Tail length per column derived from a Gaussian-smoothed local |slope|.
+    0 px (no smear) when flat, rising linearly to SMEAR_H_MAX at smoothed
+    slope ≥ SMEAR_SLOPE_AT_MAX. Smoothing avoids per-column flicker around
+    inflection points where the discrete derivative passes through zero."""
+    slope = np.abs(np.gradient(curve_y.astype(float)))
+    # Normalized convolution: at the edges the kernel hangs off the array, so
+    # divide by the kernel mass that actually landed on real samples instead
+    # of treating the off-array region as implicit zeros (which dims the ends).
+    num = np.convolve(slope, _SMEAR_BLUR_KERNEL, mode="same")
+    den = np.convolve(np.ones_like(slope), _SMEAR_BLUR_KERNEL, mode="same")
+    smoothed = num / den
+    intensity = np.clip(smoothed / SMEAR_SLOPE_AT_MAX, 0.0, 1.0) ** SMEAR_EXPONENT
+    return np.round(intensity * SMEAR_H_MAX).astype(int)
 
 
 # ── GraphWidget ──────────────────────────────────────────────────────────────
@@ -176,6 +249,8 @@ class GraphWidget(Widget):
         self._curve_y: Optional[np.ndarray] = None
         self._node_positions: dict[str, _NodePos] = {}
         self._bypassed: bool = False
+        self._smear_colors: Optional[np.ndarray] = None  # (GRAPH_W, 3) or None
+        self._smear_h: Optional[np.ndarray] = None  # (GRAPH_W,) ints, 1..SMEAR_H_MAX
 
     # ── state setters (self-refresh with surgical sub-box) ──────────────────
 
@@ -183,18 +258,32 @@ class GraphWidget(Widget):
         new_curve_db = self._cache.compute(state)
         new_curve_y = db_to_y(new_curve_db, GRAPH_Y0, GRAPH_Y1, DB_MAX)
         new_nodes = self._compute_nodes(state)
+        new_smear_colors = _smear_colors_for_state(state)
+        new_smear_h = _smear_heights_for_curve(new_curve_y)
 
         old_curve = self._curve_y
         old_nodes = self._node_positions
+        old_smear_colors = self._smear_colors
+        old_smear_h = self._smear_h
 
         self._state = state
         self._curve_y = new_curve_y
         self._node_positions = new_nodes
+        self._smear_colors = new_smear_colors
+        self._smear_h = new_smear_h
 
         if old_curve is None:
             return  # first paint comes from the external panel.refresh()
 
         x_min, x_max = self._dirty_extent_for_curve(old_curve, new_curve_y)
+        x_min, x_max = self._extend_extent_for_smear(
+            x_min,
+            x_max,
+            old_smear_colors,
+            new_smear_colors,
+            old_smear_h,
+            new_smear_h,
+        )
         x_min, x_max = self._extend_extent_for_nodes(x_min, x_max, old_nodes, new_nodes)
         self._refresh_x_range(x_min, x_max)
 
@@ -225,12 +314,40 @@ class GraphWidget(Widget):
 
     @staticmethod
     def _dirty_extent_for_curve(
-        old: np.ndarray, new: np.ndarray,
+        old: np.ndarray,
+        new: np.ndarray,
     ) -> tuple[Optional[int], Optional[int]]:
         diff = np.flatnonzero(old != new)
         if diff.size == 0:
             return None, None
         return int(diff[0]), int(diff[-1]) + 1
+
+    @staticmethod
+    def _extend_extent_for_smear(
+        x_min: Optional[int],
+        x_max: Optional[int],
+        old_colors: Optional[np.ndarray],
+        new_colors: Optional[np.ndarray],
+        old_h: Optional[np.ndarray],
+        new_h: Optional[np.ndarray],
+    ) -> tuple[Optional[int], Optional[int]]:
+        diffs: list[np.ndarray] = []
+        if (old_colors is None) != (new_colors is None):
+            diffs.append(np.arange(GRAPH_W))
+        elif old_colors is not None and new_colors is not None:
+            diffs.append(np.flatnonzero(np.any(old_colors != new_colors, axis=1)))
+        if (old_h is None) != (new_h is None):
+            diffs.append(np.arange(GRAPH_W))
+        elif old_h is not None and new_h is not None:
+            diffs.append(np.flatnonzero(old_h != new_h))
+        combined = np.concatenate(diffs) if diffs else np.array([], dtype=int)
+        if combined.size == 0:
+            return x_min, x_max
+        cmin = int(combined.min())
+        cmax = int(combined.max()) + 1
+        x_min = cmin if x_min is None else min(x_min, cmin)
+        x_max = cmax if x_max is None else max(x_max, cmax)
+        return x_min, x_max
 
     def _extend_extent_for_nodes(
         self,
@@ -321,15 +438,49 @@ class GraphWidget(Widget):
                 draw.line([(hx0, y), (hx1 - 1, y)], fill=GRID_DIM)
             draw.line([(hx0, _ZERO_DB_Y), (hx1 - 1, _ZERO_DB_Y)], fill=GRID_0DB)
 
-        # Curve — only columns within the dirty rect
+        # Curve + comet-tail smear — only columns within the dirty rect.
+        # Smear paints first (so curve and nodes land on top); each smear
+        # pixel is alpha-blended against bg_color(x, y) so grid lines bleed
+        # through the tail rather than getting erased.
         if self._curve_y is not None:
             shade = INACTIVE_SHADE if self._bypassed else 1.0
-            color = tuple(int(c * shade) for c in CURVE_COLOR)
+            curve_color = tuple(int(c * shade) for c in CURVE_COLOR)
             cx0 = max(rx0, 0)
             cx1 = min(rx1, GRAPH_W)
             ys = self._curve_y
+            smear_colors = self._smear_colors
+            smear_h = self._smear_h
+            has_smear = smear_colors is not None and smear_h is not None
             for x in range(cx0, cx1):
-                draw.point((x, int(ys[x])), fill=color)
+                base_y = int(ys[x])
+                if has_smear:
+                    hx = int(smear_h[x])
+                else:
+                    hx = 0
+                if hx > 0:
+                    sr, sg, sb = smear_colors[x]
+                    sr *= shade
+                    sg *= shade
+                    sb *= shade
+                    # Top-pixel opacity tracks intensity (hx / SMEAR_H_MAX), so
+                    # gentle slopes peek through as a faint hint and steep
+                    # ones burn a full opaque comet.
+                    top_alpha = SMEAR_ALPHA * hx / SMEAR_H_MAX
+                    for i in range(1, hx + 1):
+                        y = base_y + i
+                        if y >= GRAPH_Y1:
+                            break
+                        alpha = top_alpha * (1.0 - (i - 1) / hx)
+                        br, bg_, bb = bg_color(x, y)
+                        draw.point(
+                            (x, y),
+                            fill=(
+                                int(br + (sr - br) * alpha),
+                                int(bg_ + (sg - bg_) * alpha),
+                                int(bb + (sb - bb) * alpha),
+                            ),
+                        )
+                draw.point((x, base_y), fill=curve_color)
 
         # Band nodes — skip those whose bbox misses the dirty rect.
         # Draw selected last so the halo lands on top.
@@ -377,8 +528,7 @@ class GraphWidget(Widget):
             ty = GRAPH_Y1 - th - 1
             draw.text((tx, ty), text, fill=_AXIS_LABEL_COLOR, font=font)
 
-    def _paint_node(self, draw, cx: int, cy: int, color: tuple[int, int, int],
-                    selected: bool) -> None:
+    def _paint_node(self, draw, cx: int, cy: int, color: tuple[int, int, int], selected: bool) -> None:
         r = self.NODE_R
         draw.ellipse([cx - r, cy - r, cx + r, cy + r], fill=color)
         if selected:
@@ -433,14 +583,12 @@ class ReadoutWidget(Widget):
 
     def _draw(self, image, draw, real_box) -> None:
         if self._message is not None:
-            draw.text((real_box.x0 + 6, real_box.y0 + 1), self._message,
-                      fill=READOUT_COLOR, font=self._font)
+            draw.text((real_box.x0 + 6, real_box.y0 + 1), self._message, fill=READOUT_COLOR, font=self._font)
             return
         for key, x in _READOUT_COLS_LEFT:
             text = self._fields.get(key, "")
             if text:
-                draw.text((real_box.x0 + x, real_box.y0 + 1), text,
-                          fill=READOUT_COLOR, font=self._font)
+                draw.text((real_box.x0 + x, real_box.y0 + 1), text, fill=READOUT_COLOR, font=self._font)
         gain = self._fields.get("gain", "")
         if gain:
             tw, _ = get_text_size(gain, self._font)
