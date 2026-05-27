@@ -32,6 +32,7 @@ import logging
 def clamp(value, min_value, max_value):
     return max(min_value, min(max_value, value))
 
+
 class EncoderController(encoder.Encoder, controller.Controller):
     """
     Encoder with speed-based amplification and parameter quantization.
@@ -179,8 +180,7 @@ class EncoderController(encoder.Encoder, controller.Controller):
             return self.MAX_MULTIPLIER
 
         dt_per_detent_ms = (dt * 1000.0) / abs(rotations)
-        return clamp(self.REFERENCE_DT_MS / dt_per_detent_ms,
-                     self.MIN_MULTIPLIER, self.MAX_MULTIPLIER)
+        return clamp(self.REFERENCE_DT_MS / dt_per_detent_ms, self.MIN_MULTIPLIER, self.MAX_MULTIPLIER)
 
     def refresh(self, rotations: int) -> None:
         """Handle encoder rotation with speed-based amplification."""
@@ -199,7 +199,8 @@ class EncoderController(encoder.Encoder, controller.Controller):
         if self.value_change_callback:
             self.value_change_callback(new_value, self)
         elif self.parameter:
-            self.handler.encoder_value_changed(self.parameter, new_value, self.get_routing_info())
+            is_external = self.handler.hardware.external_port_name(self) is not None
+            self.handler.encoder_value_changed(self.parameter, new_value, is_external=is_external)
         else:
             # not bound to anything
             pass
@@ -221,10 +222,11 @@ class EncoderController(encoder.Encoder, controller.Controller):
         return self.current_step / (self.num_steps - 1)
 
     def get_display_info(self) -> controller.AnalogDisplayInfo:
-        """Get display information for LCD (analog-controls pattern)."""
-        return {
-            **super(EncoderController, self).get_display_info(),
-            "type": self.type,
-            "id": self.id,
-            "category": None,  # Set during parameter binding
-        }
+        """Get display information for LCD (analog-controls pattern). Routing-derived
+        fields (port_name, midi_cc for external) are augmented by the caller."""
+        info: controller.AnalogDisplayInfo = {"category": None}
+        if self.type is not None:
+            info["type"] = self.type
+        if self.id is not None:
+            info["id"] = self.id
+        return info

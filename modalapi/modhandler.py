@@ -32,17 +32,18 @@ import modalapi.wifi as Wifi
 import modalapi.external_midi as ExternalMidi
 from modalapi.external_midi import EXTERNAL_INSTANCE_ID
 from pistomp.lcd320x240 import Lcd
-from pistomp.hardware import Controller, Hardware
+from pistomp.hardware import Hardware
 import pistomp.settings as Settings
 from modalapi.websocket_bridge import AsyncWebSocketBridge
 from modalapi.ws_protocol import parse_message, LoadingEndMessage, PedalSnapshotMessage, WebSocketMessage
 from modalapi.pedalboard_monitor import FileChangeMonitor, read_pedalboard_bundle
 
 from pistomp.analogmidicontrol import AnalogMidiControl
-from pistomp.controller import RoutingDestination, RoutingInfo
 from pistomp.encoder_controller import EncoderController
 from pistomp.footswitch import Footswitch
 from pistomp.handler import Handler
+from pistomp.input_router import InputRouter
+from pistomp.sink import ExternalMidiSink, MidiOutSink, ModSink, ParameterUpdateSink
 from pathlib import Path
 
 
@@ -128,6 +129,11 @@ class Modhandler(Handler):
         except Exception as e:
             logging.warning(f"Failed to initialize external MIDI manager: {e}")
 
+        # Input router: built here, populated in add_hardware() once midiout and
+        # external_midi are wired up. Controllers don't fire events into it until
+        # step 3 of the router migration; sinks installed below are inert until then.
+        self.router = InputRouter()
+
     def __del__(self):
         logging.info("Handler cleanup")
         if self.wifi_manager:
@@ -177,6 +183,31 @@ class Modhandler(Handler):
         self._hardware = hardware
         hardware.external_midi = self.external_midi
         self.bind_volume_encoder()
+        self._install_default_sinks()
+
+    def _install_default_sinks(self) -> None:
+        """Populate the input router's standard sink pipeline.
+
+        Push order is bottom-to-top; dispatch runs the last-pushed sink first.
+
+        Dispatch order (top → bottom):
+            ParameterUpdateSink  → quantizer advance, parameter.value write
+            ModSink              → LCD update + conditional REST commit
+            ExternalMidiSink     → tries external; consumes on success
+            MidiOutSink          → virtual ALSA MIDI Through (fallback / default)
+
+        ModSink sits above ExternalMidiSink so handler notifications always
+        fire, even when the external send consumes the event. MidiOutSink is
+        unconditional when reached — it's the fallback for EXTERNAL-failed
+        sends and the default path for VIRTUAL-routed controllers.
+        """
+        assert self._hardware is not None, "install sinks after add_hardware"
+        assert self.router is not None, "router instantiated in __init__"
+        self.router.push(MidiOutSink(self._hardware.midiout))
+        if self.external_midi is not None:
+            self.router.push(ExternalMidiSink(self.external_midi, self._hardware))
+        self.router.push(ModSink(self, self._hardware))
+        self.router.push(ParameterUpdateSink())
 
     def bind_volume_encoder(self):
         if self.hardware is None:
@@ -517,13 +548,13 @@ class Modhandler(Handler):
                     if param.binding is not None:
                         controller = self.hardware.controllers.get(param.binding)
                         if controller is not None:
-                            routing = controller.get_routing_info()
+                            external_port = self.hardware.external_port_name(controller)
 
                             # External controllers shouldn't be bound to plugin parameters
-                            if routing.destination == RoutingDestination.EXTERNAL:
+                            if external_port is not None:
                                 logging.warning(
                                     f"Plugin parameter {plugin.name}:{param.name} is bound to external controller "
-                                    f"{param.binding} (routed to {routing.port_name}) - ignoring plugin binding"
+                                    f"{param.binding} (routed to {external_port}) - ignoring plugin binding"
                                 )
                                 continue
 
@@ -535,21 +566,17 @@ class Modhandler(Handler):
                                 controller.set_category(plugin.category)
                             else:
                                 key = "%s:%s" % (plugin.instance_id, param.name)
-                                display_info = controller.get_display_info()
-                                display_info['category'] = plugin.category
+                                display_info = self._build_display_info(controller, category=plugin.category)
                                 self.current.analog_controllers[key] = display_info
 
             # Special case for volume control
             for e in self.hardware.encoders:
                 if e.type == Token.VOLUME:
-                    display_info = e.get_display_info()
-                    self.current.analog_controllers[Token.VOLUME] = display_info
+                    self.current.analog_controllers[Token.VOLUME] = self._build_display_info(e)
 
-        # Handle all external controllers (create synthetic parameters for display)
-        for controller in self.hardware.controllers.values():
-            routing = controller.get_routing_info()
-            if routing.destination != RoutingDestination.EXTERNAL:
-                continue
+        # Handle all external controllers (create synthetic parameters for display).
+        # Iterate the routing registry directly — it's the source of truth for "what's external."
+        for controller, port_name in self.hardware.external_routing.items():
             if controller.midi_CC is None:
                 continue
 
@@ -559,11 +586,11 @@ class Modhandler(Handler):
             if controller.parameter is None:
                 if isinstance(controller, AnalogMidiControl):
                     controller.parameter = self.hardware._create_external_parameter(
-                        controller, routing.port_name, controller.midi_channel, controller.midi_CC
+                        controller, port_name, controller.midi_channel, controller.midi_CC
                     )
                 else:
                     ext_info = {
-                        Token.NAME: f"{routing.port_name} CC{controller.midi_CC}",
+                        Token.NAME: f"{port_name} CC{controller.midi_CC}",
                         Token.SYMBOL: f"external_{controller.midi_CC}",
                         Token.RANGES: {Token.MINIMUM: 0, Token.MAXIMUM: 127},
                         TTL_PROPERTIES: [TTL_INTEGER]
@@ -571,9 +598,7 @@ class Modhandler(Handler):
                     controller.bind_to_parameter(Parameter(ext_info, controller.midi_value, None, EXTERNAL_INSTANCE_ID))
 
             key = f"{controller.midi_channel}:{controller.midi_CC}"
-            display_info = controller.get_display_info()
-            display_info['category'] = 'External'
-            self.current.analog_controllers[key] = display_info
+            self.current.analog_controllers[key] = self._build_display_info(controller, category='External')
 
     def pedalboard_change(self, pedalboard=None):
         logging.info("Pedalboard change")
@@ -749,11 +774,24 @@ class Modhandler(Handler):
             if d:
                 self.lcd.enc_step_widget(d, direction)
 
-    def encoder_value_changed(self, param: Parameter, new_value: float, routing_info: RoutingInfo) -> None:
+    def encoder_value_changed(self, param: Parameter, new_value: float, *, is_external: bool) -> None:
         self.lcd.display_parameter_value(param, new_value)
-        if routing_info.destination == RoutingDestination.EXTERNAL:
+        if is_external:
             return
         self.parameter_value_commit(param, new_value)
+
+    def _build_display_info(self, controller, *, category: str | None = None) -> dict:
+        """Assemble display info dict for an analog-style controller. Combines the
+        hardware-intrinsic fields from controller.get_display_info() with the
+        routing-derived port_name/midi_cc when the controller is externally routed."""
+        info: dict = dict(controller.get_display_info())
+        if category is not None:
+            info['category'] = category
+        port_name = self.hardware.external_port_name(controller)
+        if port_name is not None:
+            info['port_name'] = port_name
+            info['midi_cc'] = controller.midi_CC
+        return info
 
     #
     # System Menu

@@ -68,6 +68,15 @@ class Hardware(ABC):
         self.ledstrip = None
         self.taptempo = taptempo.TapTempo(None)
         self.external_midi: ExternalMidiManager | None = None
+        # Routing registry: maps controller -> external port name. Hardware records
+        # the routing decision at construction time (and on reinit) from per-controller
+        # config; sinks and handler code query via external_port_name(). Controller
+        # objects are stable across reinit (mutated in place), so identity-keying is safe.
+        self.external_routing: dict[Controller, str] = {}
+
+    def external_port_name(self, controller: Controller) -> str | None:
+        """Look up external port for a controller. Returns None if virtual-routed."""
+        return self.external_routing.get(controller)
 
     def toggle_tap_tempo_enable(self, bpm: float = 0.0):
         if self.taptempo:
@@ -265,6 +274,8 @@ class Hardware(ABC):
 
             assert fs is not None, "No footswitch created for config: %s" % f
             self.footswitches.append(fs)
+            if midi_port:
+                self.external_routing[fs] = midi_port
             idx += 1
 
     def create_analog_controls(self, cfg):
@@ -313,6 +324,8 @@ class Hardware(ABC):
             self.analog_controls.append(control)
             key = format("%d:%d" % (midi_channel, midi_cc))
             self.controllers[key] = control
+            if midi_port:
+                self.external_routing[control] = midi_port
             logging.debug("Created AnalogMidiControl Input: %d, Midi Chan: %d, CC: %d" %
                           (adc_input, midi_channel, midi_cc))
 
@@ -359,6 +372,9 @@ class Hardware(ABC):
             except Exception:
                 logging.exception("Failed to create encoder with config: %s" % c)
                 continue
+
+            if midi_port:
+                self.external_routing[control] = midi_port
 
             if midi_cc is not None:
                 assert isinstance(control, EncoderController.EncoderController), "Encoder specified with MIDI CC must be of type EncoderMidiControl"
@@ -434,9 +450,11 @@ class Hardware(ABC):
                         encoder.midi_CC = midi_cc
                     if midi_port:
                         encoder.midiout = ExternalMidiOut(self.external_midi, midi_port, midi_channel, self.midiout)
+                        self.external_routing[encoder] = midi_port
                         logging.debug(f"Encoder {enc_id} routing CC {midi_cc} to external port '{midi_port}'")
                     else:
                         encoder.midiout = self.midiout
+                        self.external_routing.pop(encoder, None)
                         logging.debug(f"Encoder {enc_id} routing to virtual port")
 
         if Token.HARDWARE in cfg and Token.ANALOG_CONTROLLERS in cfg[Token.HARDWARE]:
@@ -457,9 +475,11 @@ class Hardware(ABC):
                         analog.midi_CC = midi_cc
                     if midi_port:
                         analog.midiout = ExternalMidiOut(self.external_midi, midi_port, midi_channel, self.midiout)
+                        self.external_routing[analog] = midi_port
                         logging.debug(f"Analog controller {analog_id} routing CC {midi_cc} to external port '{midi_port}'")
                     else:
                         analog.midiout = self.midiout
+                        self.external_routing.pop(analog, None)
                         logging.debug(f"Analog controller {analog_id} routing to virtual port")
 
     def __init_midi_default(self):

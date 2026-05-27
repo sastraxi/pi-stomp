@@ -17,6 +17,7 @@ from typing_extensions import override
 from typing import Any
 
 
+from rtmidi import MidiOut
 from rtmidi.midiconstants import CONTROL_CHANGE
 
 import common.util as util
@@ -33,7 +34,7 @@ def as_midi_value(adc_value: int):
 
 
 class AnalogMidiControl(analogcontrol.AnalogControl, controller.Controller):
-    def __init__(self, spi, adc_channel, tolerance, midi_CC, midi_channel, midiout, type, id=None, cfg={}, autosync=False, value_change_callback=None):
+    def __init__(self, spi, adc_channel, tolerance, midi_CC, midi_channel, midiout: MidiOut, type, id=None, cfg={}, autosync=False, value_change_callback=None):
         super(AnalogMidiControl, self).__init__(spi, adc_channel, tolerance)
         controller.Controller.__init__(self, midi_channel, midi_CC)
         self.midiout = midiout
@@ -92,9 +93,9 @@ class AnalogMidiControl(analogcontrol.AnalogControl, controller.Controller):
         return self.last_read / 1023.0
 
     def get_display_info(self) -> AnalogDisplayInfo:
-        return {
-            **super(AnalogMidiControl, self).get_display_info(),
-            'type': self.type,
-            'id': self.id,
-            'category': None,
-        }
+        """Hardware-intrinsic display info. Routing-derived fields (port_name,
+        midi_cc for external) are augmented by the caller."""
+        info: AnalogDisplayInfo = {'type': self.type, 'category': None}
+        if self.id is not None:
+            info['id'] = self.id
+        return info

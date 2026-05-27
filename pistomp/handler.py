@@ -14,12 +14,28 @@
 # along with pi-stomp.  If not, see <https://www.gnu.org/licenses/>.
 
 
+from typing import TYPE_CHECKING
+
+from common.parameter import Parameter
+from pistomp.input_router import InputRouter
+
+if TYPE_CHECKING:
+    from pistomp.hardware import Hardware
+
+
 class Handler:
 
     def __init__(self):
         self.homedir = None
         self.lcd = None
+        # Populated by subclasses that opt into router-based dispatch
+        # (v3 / Modhandler). v1 leaves this None.
+        self.router: InputRouter | None = None
         pass
+
+    @property
+    def hardware(self) -> "Hardware":
+        raise NotImplementedError()
 
     def noop(self):
         pass
@@ -61,6 +77,9 @@ class Handler:
         raise NotImplementedError()
 
     def universal_encoder_sw(self, value):
+        raise NotImplementedError()
+
+    def encoder_value_changed(self, param: Parameter, new_value: float, *, is_external: bool) -> None:
         raise NotImplementedError()
 
     def cleanup(self):

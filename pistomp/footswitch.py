@@ -88,7 +88,7 @@ class Footswitch(controller.Controller):
     def __init__(self, id, led_pin, pixel, midi_CC, midi_channel, midiout, refresh_callback,
                  gpio_input=None, adc_input=None, spi=None, taptempo=None):
         super(Footswitch, self).__init__(midi_channel, midi_CC)
-        self.id = id
+        self.id: int = id
         self.display_label = None
         self.toggled = False
         self.led = None

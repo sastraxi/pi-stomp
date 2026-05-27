@@ -33,7 +33,6 @@ from modalapi.ws_protocol import parse_message, LoadingEndMessage, PedalSnapshot
 from modalapi.pedalboard_monitor import FileChangeMonitor, read_pedalboard_bundle
 
 from pistomp.analogmidicontrol import AnalogMidiControl
-from pistomp.controller import RoutingDestination
 from pistomp.footswitch import Footswitch
 from pistomp.handler import Handler
 from enum import Enum
@@ -634,13 +633,13 @@ class Mod(Handler):
                     if param.binding is not None:
                         controller = self.hardware.controllers.get(param.binding)
                         if controller is not None:
-                            routing = controller.get_routing_info()
+                            external_port = self.hardware.external_port_name(controller)
 
                             # External controllers shouldn't be bound to plugin parameters
-                            if routing.destination == RoutingDestination.EXTERNAL:
+                            if external_port is not None:
                                 logging.warning(
                                     f"Plugin parameter {plugin.name}:{param.name} is bound to external controller "
-                                    f"{param.binding} (routed to {routing.port_name}) - ignoring plugin binding"
+                                    f"{param.binding} (routed to {external_port}) - ignoring plugin binding"
                                 )
                                 continue
 

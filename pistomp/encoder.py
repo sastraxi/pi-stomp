@@ -15,7 +15,6 @@
 
 import threading
 
-from functools import partial
 from gpiozero import Button   # TODO consider using Encoder class instead
 
 class Encoder:
@@ -51,11 +50,11 @@ class Encoder:
             with self._lock:
                 self.direction += d
 
-    def __init__(self, d_pin, clk_pin, callback, type=None, id=None, **kw):
+    def __init__(self, d_pin, clk_pin, callback, type: str | None=None, id=None, **kw):
         self.d_pin = d_pin
         self.clk_pin = clk_pin
         self.callback = callback
-        self.type = type
+        self.type: str | None = type
         self.id = id
 
         # It works fine without a lock since this is just dumb UI, but let's be correct..
