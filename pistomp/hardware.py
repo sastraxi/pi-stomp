@@ -26,16 +26,15 @@ from common.parameter import TTL_PROPERTIES, TTL_INTEGER
 from pistomp.analogcontrol import AnalogControl
 import pistomp.analogmidicontrol as AnalogMidiControl
 import pistomp.encoder as Encoder
-import pistomp.encoder_controller as EncoderController
 import pistomp.footswitch as Footswitch
-import pistomp.gpioswitch as gpioswitch
 import pistomp.taptempo as taptempo
 
 from abc import ABC, abstractmethod
 from modalapi.external_midi import ExternalMidiOut, ExternalMidiManager, EXTERNAL_INSTANCE_ID
+from pistomp.input.sink import InputSink
 import pistomp.relay as Relay
 
-Controller = Union[AnalogMidiControl.AnalogMidiControl, EncoderController.EncoderController, Footswitch.Footswitch]
+Controller = Union[AnalogMidiControl.AnalogMidiControl, Encoder.Encoder, Footswitch.Footswitch]
 
 
 class Hardware(ABC):
@@ -61,8 +60,6 @@ class Hardware(ABC):
         self.encoders = []
         self.controllers: dict[str, Controller] = {}
         self.footswitches: list[Footswitch.Footswitch] = []
-        self.encoder_switches = []
-        self.encoder_switch_map: dict[int, gpioswitch.GpioSwitch] = {}
         self.indicators = []
         self.debounce_map = None
         self.ledstrip = None
@@ -77,6 +74,24 @@ class Hardware(ABC):
     def external_port_name(self, controller: Controller) -> str | None:
         """Look up external port for a controller. Returns None if virtual-routed."""
         return self.external_routing.get(controller)
+
+    def is_external(self, controller: Controller) -> bool:
+        return controller in self.external_routing
+
+    def register_sink(self, sink: InputSink) -> None:
+        """Assign `sink` as the default dispatch target for every controller
+        owned by this hardware. Called by v3 Handler.add_hardware after this
+        Hardware is fully constructed. v1 never calls this — its controllers
+        keep `sink = None` and take their legacy inline paths."""
+        for ac in self.analog_controls:
+            if hasattr(ac, "sink"):
+                ac.sink = sink
+        for enc in self.encoders:
+            if hasattr(enc, "sink"):
+                enc.sink = sink
+        for fs in self.footswitches:
+            if hasattr(fs, "sink"):
+                fs.sink = sink
 
     def toggle_tap_tempo_enable(self, bpm: float = 0.0):
         if self.taptempo:
@@ -102,8 +117,8 @@ class Hardware(ABC):
             c.refresh()
         for e in self.encoders:
             e.read_rotary()
-        for es in self.encoder_switches:
-            es.poll()
+            if hasattr(e, "poll"):
+                e.poll()
         s = None
         for s in self.footswitches:
             s.poll()
@@ -330,8 +345,8 @@ class Hardware(ABC):
                           (adc_input, midi_channel, midi_cc))
 
     @abstractmethod
-    def add_encoder(self, id, type, callback, longpress_callback, midi_channel, midi_cc, shortpress_config=None, midiout=None) -> Encoder.Encoder | EncoderController.EncoderController:
-        # This should be implemented by hardware subclasses that support tweak encoders (Tre at least)
+    def add_encoder(self, id, type, callback, longpress_callback, midi_channel, midi_cc, shortpress_config=None, midiout=None) -> Encoder.Encoder:
+        # Implemented by hardware subclasses that support tweak encoders (Tre at least)
         ...
 
     def create_encoders(self, cfg):
@@ -377,7 +392,7 @@ class Hardware(ABC):
                 self.external_routing[control] = midi_port
 
             if midi_cc is not None:
-                assert isinstance(control, EncoderController.EncoderController), "Encoder specified with MIDI CC must be of type EncoderMidiControl"
+                assert isinstance(control, Encoder.Encoder), "Encoder specified with MIDI CC must be an Encoder"
                 key = format("%d:%d" % (midi_channel, midi_cc))
                 self.controllers[key] = control
                 logging.debug("Created Encoder: %d, Midi Chan: %d, CC: %d" % (id, midi_channel, midi_cc))
@@ -590,9 +605,9 @@ class Hardware(ABC):
             enc_id = Util.DICT_GET(enc_cfg, Token.ID)
             if enc_id is None:
                 continue
-            sw = self.encoder_switch_map.get(enc_id)
-            if sw is None:
+            enc = next((e for e in self.encoders if getattr(e, "id", None) == enc_id), None)
+            if enc is None or not hasattr(enc, "set_longpress"):
                 continue
             if Token.LONGPRESS in enc_cfg:
                 lp_name = enc_cfg[Token.LONGPRESS]
-                sw.longpress_callback = self.handler.get_callback(lp_name) if lp_name else None
+                enc.set_longpress(self.handler.get_callback(lp_name) if lp_name else None)

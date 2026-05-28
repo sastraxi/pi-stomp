@@ -15,12 +15,21 @@
 
 from abc import ABC, abstractmethod
 
+from pistomp.input.event import ControllerEvent
+
 
 class Lcd(ABC):
 
     def __init__(self, cwd, handler=None, flip=False):
         # expects cwd (current working directory)
         pass
+
+    def handle(self, event: ControllerEvent) -> bool:
+        """Input dispatch hook. Default returns False (LCD doesn't intercept).
+        Panels override or wrap this when they want to consume controller
+        events for their own UI. See INPUT_ROUTER.md."""
+        del event
+        return False
 
     @abstractmethod
     def splash_show(self, boot=True):

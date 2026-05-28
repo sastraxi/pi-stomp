@@ -20,8 +20,6 @@ import pistomp.analogVU as AnalogVU
 import common.token as Token
 import common.util as Util
 import pistomp.encoder as Encoder
-import pistomp.encoder_controller as EncoderController
-import pistomp.gpioswitch as gpioswitch
 import pistomp.hardware as hardware
 import pistomp.ledstrip as Ledstrip
 
@@ -95,32 +93,26 @@ class Pistomptre(hardware.Hardware):
         if enc_pins is None:
             raise ValueError("Cannot create encoder object for id:", id)
 
-        # map the id to the actual pins
         d_pin = Util.DICT_GET(enc_pins, 'D')
         clk_pin = Util.DICT_GET(enc_pins, 'CLK')
         sw_pin = Util.DICT_GET(enc_pins, 'SW')
 
-        if midiout is None:
-            midiout = self.midiout
-
+        # Volume encoders have no MIDI CC; tweak encoders are KNOB-typed.
         if type == Token.VOLUME:
-            enc = EncoderController.EncoderController(self.handler, d_pin=d_pin, clk_pin=clk_pin,
-                                                      midi_channel=midi_channel, midi_CC=None,
-                                                      midiout=midiout, type=type, id=id)
+            enc_type, enc_cc = type, None
         else:
-            enc = EncoderController.EncoderController(self.handler, d_pin=d_pin, clk_pin=clk_pin,
-                                                      midi_channel=midi_channel, midi_CC=midi_cc,
-                                                      midiout=midiout, type=Token.KNOB, id=id)
+            enc_type, enc_cc = Token.KNOB, midi_cc
 
-        if sw_pin is not None:
-            longpress = self.handler.get_callback(longpress_callback)
-            enc_sw = gpioswitch.GpioSwitch(sw_pin, None, None, callback=self.handler.universal_encoder_sw,
-                                           longpress_callback=longpress)
-            self.encoder_switches.append(enc_sw)
-            if id is not None:
-                self.encoder_switch_map[id] = enc_sw
+        longpress = self.handler.get_callback(longpress_callback) if longpress_callback else None
 
-        return enc
+        return Encoder.Encoder(
+            d_pin=d_pin, clk_pin=clk_pin,
+            midi_channel=midi_channel, midi_CC=enc_cc,
+            type=enc_type, id=id,
+            sw_pin=sw_pin,
+            shortpress=self.handler.universal_encoder_sw if sw_pin is not None else None,
+            longpress=longpress,
+        )
 
     def init_encoders(self):
         enc = Encoder.Encoder(NAV_PIN_D, NAV_PIN_CLK, callback=self.handler.universal_encoder_select)

@@ -133,29 +133,19 @@ def test_footswitch_disabled_does_not_respond(v3_system: SystemFixture):
 
 
 # ---------------------------------------------------------------------------
-# encoder_switch_map — NEW: expected to fail until fix lands
+# Encoder longpress — the button is absorbed into Encoder; check _longpress.
 # ---------------------------------------------------------------------------
 
-def test_encoder_switch_map_exists(v3_system: SystemFixture):
-    """Hardware exposes encoder_switch_map populated at init time."""
-    hw = v3_system.hw
+def _enc(hw, enc_id):
+    return next(e for e in hw.encoders if getattr(e, "id", None) == enc_id)
 
-    assert hasattr(hw, "encoder_switch_map"), "encoder_switch_map attribute missing from Hardware"
-    assert 1 in hw.encoder_switch_map, "encoder id 1 missing from encoder_switch_map"
-    assert 2 in hw.encoder_switch_map, "encoder id 2 missing from encoder_switch_map"
-
-
-# ---------------------------------------------------------------------------
-# Encoder longpress — NEW: expected to fail until fix lands
-# ---------------------------------------------------------------------------
 
 def test_encoder_longpress_set_from_default(v3_system: SystemFixture):
     """Enc1 longpress callback matches default_config (previous_snapshot) after boot."""
     hw = v3_system.hw
     handler = v3_system.handler
 
-    enc1_sw = hw.encoder_switch_map[1]
-    assert enc1_sw.longpress_callback is handler.callbacks["previous_snapshot"]
+    assert _enc(hw, 1)._longpress is handler.callbacks["previous_snapshot"]
 
 
 def test_encoder_longpress_override(v3_system: SystemFixture):
@@ -165,8 +155,7 @@ def test_encoder_longpress_override(v3_system: SystemFixture):
 
     hw.reinit(_cfg(encoders=[{"id": 1, "longpress": "toggle_bypass"}]))
 
-    enc1_sw = hw.encoder_switch_map[1]
-    assert enc1_sw.longpress_callback is handler.callbacks["toggle_bypass"]
+    assert _enc(hw, 1)._longpress is handler.callbacks["toggle_bypass"]
 
 
 def test_encoder_longpress_reset_to_default(v3_system: SystemFixture):
@@ -177,8 +166,7 @@ def test_encoder_longpress_reset_to_default(v3_system: SystemFixture):
     hw.reinit(_cfg(encoders=[{"id": 1, "longpress": "toggle_bypass"}]))
     hw.reinit(None)
 
-    enc1_sw = hw.encoder_switch_map[1]
-    assert enc1_sw.longpress_callback is handler.callbacks["previous_snapshot"]
+    assert _enc(hw, 1)._longpress is handler.callbacks["previous_snapshot"]
 
 
 def test_encoder_longpress_suppress_with_none(v3_system: SystemFixture):
@@ -187,8 +175,7 @@ def test_encoder_longpress_suppress_with_none(v3_system: SystemFixture):
 
     hw.reinit(_cfg(encoders=[{"id": 1, "longpress": None}]))
 
-    enc1_sw = hw.encoder_switch_map[1]
-    assert enc1_sw.longpress_callback is None
+    assert _enc(hw, 1)._longpress is None
 
 
 def test_encoder_unmentioned_keeps_default(v3_system: SystemFixture):
@@ -198,5 +185,4 @@ def test_encoder_unmentioned_keeps_default(v3_system: SystemFixture):
 
     hw.reinit(_cfg(encoders=[{"id": 2, "longpress": "toggle_bypass"}]))
 
-    enc1_sw = hw.encoder_switch_map[1]
-    assert enc1_sw.longpress_callback is handler.callbacks["previous_snapshot"]
+    assert _enc(hw, 1)._longpress is handler.callbacks["previous_snapshot"]

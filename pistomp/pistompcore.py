@@ -22,7 +22,6 @@
 # A new version with different controls should have a new separate subclass
 
 import pistomp.encoder as Encoder
-import pistomp.gpioswitch as gpioswitch
 import pistomp.hardware as hardware
 import pistomp.relay as Relay
 
@@ -76,12 +75,15 @@ class Pistompcore(hardware.Hardware):
         self.mod.add_lcd(Lcd.Lcd(self.mod.homedir, self.mod, flip=True))
 
     def init_encoders(self):
-        top_enc = Encoder.Encoder(TOP_ENC_PIN_D, TOP_ENC_PIN_CLK, callback=self.mod.universal_encoder_select)
-        self.encoders.append(top_enc)
-        enc_sw = gpioswitch.GpioSwitch(
-            1, None, None, callback=self.mod.universal_encoder_sw, longpress_callback=self.mod.universal_encoder_sw
+        top_enc = Encoder.Encoder(
+            TOP_ENC_PIN_D,
+            TOP_ENC_PIN_CLK,
+            callback=self.mod.universal_encoder_select,
+            sw_pin=1,
+            shortpress=self.mod.universal_encoder_sw,
+            longpress=self.mod.universal_encoder_sw,
         )
-        self.encoder_switches.append(enc_sw)
+        self.encoders.append(top_enc)
         # XXX: user-added encoders via config are not supported here yet (see v3).
 
     def init_relays(self):

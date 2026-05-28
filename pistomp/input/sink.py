@@ -13,14 +13,20 @@
 # You should have received a copy of the GNU General Public License
 # along with pi-stomp.  If not, see <https://www.gnu.org/licenses/>.
 
-from pistomp.sink.parameter_update import ParameterUpdateSink
-from pistomp.sink.midi_emit import MidiOutSink
-from pistomp.sink.external_midi import ExternalMidiSink
-from pistomp.sink.mod import ModSink
+"""InputSink protocol. See INPUT_ROUTER.md.
 
-__all__ = [
-    "ParameterUpdateSink",
-    "MidiOutSink",
-    "ExternalMidiSink",
-    "ModSink",
-]
+One method. Returning True means "I fully handled this event; do nothing
+further." Returning False is informational only — there is no automatic
+forwarding. Sinks compose by writing the forwarding they want, in code.
+"""
+
+from __future__ import annotations
+
+import abc
+
+from pistomp.input.event import ControllerEvent
+
+
+class InputSink(abc.ABC):
+    @abc.abstractmethod
+    def handle(self, event: ControllerEvent) -> bool: ...

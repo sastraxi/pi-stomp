@@ -3,7 +3,7 @@
 from unittest.mock import MagicMock
 
 import pistomp.switchstate as switchstate
-from pistomp.encoder_controller import EncoderController
+from pistomp.encoder import Encoder
 import common.token as Token
 from tests.types import SystemFixture
 
@@ -34,15 +34,18 @@ def test_v3_bind_footswitch_to_plugin(v3_system: SystemFixture, make_plugin):
 
 
 def test_v3_bind_encoder_midi_to_plugin(v3_system: SystemFixture, make_plugin):
-    """bind_current_pedalboard() populates analog_controllers for EncoderController bindings."""
+    """bind_current_pedalboard() populates analog_controllers for Encoder bindings."""
     handler = v3_system.handler
     hw = v3_system.hw
 
-    enc = next((v for v in hw.controllers.values() if isinstance(v, EncoderController)), None)
+    enc = next(
+        (v for v in hw.controllers.values() if isinstance(v, Encoder) and v.midi_CC is not None),
+        None,
+    )
     if enc is None:
         import pytest
 
-        pytest.skip("No EncoderController in default config")
+        pytest.skip("No MIDI-bound Encoder in default config")
 
     binding_key = next(k for k, v in hw.controllers.items() if v is enc)
 

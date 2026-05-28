@@ -19,6 +19,7 @@ import json
 import logging
 from typing import TypedDict
 from common.parameter import Parameter
+from pistomp.input.sink import InputSink
 from rtmidi import MidiOut
 
 
@@ -49,11 +50,14 @@ class Controller:
         self.midi_CC: int | None = midi_CC
         self.parameter: Parameter | None = None
         self.hardware_name: str | None = None
-        # type is not declared here — it conflicts with encoder.Encoder.type in EncoderController's MRO.
-        # Subclasses that carry type must declare it themselves.
+        self.type: str | None = None
         self.midi_min: int = 0
         self.midi_max: int = 127
         self.midi_value: int = 0
+        # Default sink for dispatched events. v3 hardware sets this via
+        # Hardware.register_sink during add_hardware. v1 leaves it None and
+        # controllers take their legacy inline path.
+        self.sink: InputSink | None = None
 
     def to_json(self) -> str:
         return json.dumps(self, default=lambda o: o.__dict__, sort_keys=True, indent=4)

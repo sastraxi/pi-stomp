@@ -110,7 +110,7 @@ class Footswitch(controller.Controller):
 
         self.gpio_switch = None
         if gpio_input is not None:
-            self.gpio_switch = gpioswitch.GpioSwitch(gpio_input, midi_channel, midi_CC, self.pressed,
+            self.gpio_switch = gpioswitch.GpioSwitch(gpio_input, self.pressed,
                                                      taptempo = self.taptempo)
 
         self.adc_switch = None

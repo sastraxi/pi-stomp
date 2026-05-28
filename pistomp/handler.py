@@ -16,22 +16,18 @@
 
 from typing import TYPE_CHECKING
 
-from common.parameter import Parameter
-from pistomp.input_router import InputRouter
+from pistomp.input.event import ControllerEvent
+from pistomp.input.sink import InputSink
 
 if TYPE_CHECKING:
     from pistomp.hardware import Hardware
 
 
-class Handler:
+class Handler(InputSink):
 
     def __init__(self):
         self.homedir = None
         self.lcd = None
-        # Populated by subclasses that opt into router-based dispatch
-        # (v3 / Modhandler). v1 leaves this None.
-        self.router: InputRouter | None = None
-        pass
 
     @property
     def hardware(self) -> "Hardware":
@@ -79,7 +75,9 @@ class Handler:
     def universal_encoder_sw(self, value):
         raise NotImplementedError()
 
-    def encoder_value_changed(self, param: Parameter, new_value: float, *, is_external: bool) -> None:
+    def handle(self, event: ControllerEvent) -> bool:
+        """Default sink for v3 controllers. v1 leaves controller.sink = None
+        and uses the legacy inline path."""
         raise NotImplementedError()
 
     def cleanup(self):

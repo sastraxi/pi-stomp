@@ -39,11 +39,16 @@ from modalapi.ws_protocol import parse_message, LoadingEndMessage, PedalSnapshot
 from modalapi.pedalboard_monitor import FileChangeMonitor, read_pedalboard_bundle
 
 from pistomp.analogmidicontrol import AnalogMidiControl
-from pistomp.encoder_controller import EncoderController
+from pistomp.encoder import Encoder
 from pistomp.footswitch import Footswitch
 from pistomp.handler import Handler
-from pistomp.input_router import InputRouter
-from pistomp.sink import ExternalMidiSink, MidiOutSink, ModSink, ParameterUpdateSink
+from pistomp.input.event import (
+    AnalogEvent,
+    ControllerEvent,
+    EncoderEvent,
+    SwitchEvent,
+)
+from rtmidi.midiconstants import CONTROL_CHANGE
 from pathlib import Path
 
 
@@ -129,11 +134,6 @@ class Modhandler(Handler):
         except Exception as e:
             logging.warning(f"Failed to initialize external MIDI manager: {e}")
 
-        # Input router: built here, populated in add_hardware() once midiout and
-        # external_midi are wired up. Controllers don't fire events into it until
-        # step 3 of the router migration; sinks installed below are inert until then.
-        self.router = InputRouter()
-
     def __del__(self):
         logging.info("Handler cleanup")
         if self.wifi_manager:
@@ -183,61 +183,93 @@ class Modhandler(Handler):
         self._hardware = hardware
         hardware.external_midi = self.external_midi
         self.bind_volume_encoder()
-        self._install_default_sinks()
-
-    def _install_default_sinks(self) -> None:
-        """Populate the input router's standard sink pipeline.
-
-        Push order is bottom-to-top; dispatch runs the last-pushed sink first.
-
-        Dispatch order (top → bottom):
-            ParameterUpdateSink  → quantizer advance, parameter.value write
-            ModSink              → LCD update + conditional REST commit
-            ExternalMidiSink     → tries external; consumes on success
-            MidiOutSink          → virtual ALSA MIDI Through (fallback / default)
-
-        ModSink sits above ExternalMidiSink so handler notifications always
-        fire, even when the external send consumes the event. MidiOutSink is
-        unconditional when reached — it's the fallback for EXTERNAL-failed
-        sends and the default path for VIRTUAL-routed controllers.
-        """
-        assert self._hardware is not None, "install sinks after add_hardware"
-        assert self.router is not None, "router instantiated in __init__"
-        self.router.push(MidiOutSink(self._hardware.midiout))
-        if self.external_midi is not None:
-            self.router.push(ExternalMidiSink(self.external_midi, self._hardware))
-        self.router.push(ModSink(self, self._hardware))
-        self.router.push(ParameterUpdateSink())
+        hardware.register_sink(self)
 
     def bind_volume_encoder(self):
+        """Bind the volume-typed encoder to an audio Parameter so it has the
+        right range and quantization. Routing of value changes to the audio
+        card happens in `handle()`, not via a callback."""
         if self.hardware is None:
             return
         for enc in self.hardware.encoders:
-            if enc.type == Token.VOLUME and isinstance(enc, EncoderController):
-                value = self.audiocard.get_volume_parameter(self.audiocard.MASTER)
-                info = {
-                    Token.NAME: "Output Volume",
-                    Token.SYMBOL: self.audiocard.MASTER,
-                    Token.RANGES: {
-                        Token.MINIMUM: -25.75,
-                        Token.MAXIMUM: 6.0
-                    }
-                }
-                volume_param = Parameter(info, value, None)
-                volume_param.unit_symbol = "dB"
-                enc.bind_to_parameter(volume_param)
-                self.volume_parameter = volume_param
+            if enc.type != Token.VOLUME or not isinstance(enc, Encoder):
+                continue
+            value = self.audiocard.get_volume_parameter(self.audiocard.MASTER)
+            info = {
+                Token.NAME: "Output Volume",
+                Token.SYMBOL: self.audiocard.MASTER,
+                Token.RANGES: {Token.MINIMUM: -25.75, Token.MAXIMUM: 6.0},
+            }
+            volume_param = Parameter(info, value, None)
+            volume_param.unit_symbol = "dB"
+            enc.bind_to_parameter(volume_param)
+            self.volume_parameter = volume_param
+            logging.info(f"Bound volume encoder to audio parameter: {volume_param.name}")
+            break
 
-                def volume_change_callback(new_value, encoder):
-                    self.audiocard.set_volume_parameter(self.audiocard.MASTER, new_value)
-                    encoder.parameter.value = new_value
-                    d = self.lcd.draw_audio_parameter_dialog(encoder.parameter, self.audio_parameter_commit)
-                    if d is not None:
-                        d.update_value(new_value)
+    # ── InputSink: default dispatch for v3 controllers ───────────────
 
-                enc.value_change_callback = volume_change_callback
-                logging.info(f"Bound volume encoder to audio parameter: {volume_param.name}")
-                break
+    def handle(self, event: ControllerEvent) -> bool:
+        """Default sink. The LCD gets first crack (panels can intercept);
+        if not consumed, dispatch by event type. Returns True if handled.
+
+        This is plain code on purpose: no sink stack, no priority list.
+        The ordering (display → commit → emit) is a property of the code
+        you see here, not the framework."""
+        if self._lcd is not None and self._lcd.handle(event):
+            return True
+        if isinstance(event, EncoderEvent):
+            return self._handle_encoder(event)
+        if isinstance(event, AnalogEvent):
+            return self._handle_analog(event)
+        if isinstance(event, SwitchEvent):
+            return self._handle_switch(event)
+        return False
+
+    def _handle_encoder(self, event: EncoderEvent) -> bool:
+        c = event.controller
+        # Volume encoder bypasses the mod-host commit path — there is no
+        # backing plugin parameter, just the audio card.
+        if c.type == Token.VOLUME and c.parameter is not None:
+            self.audiocard.set_volume_parameter(self.audiocard.MASTER, event.new_value)
+            d = self.lcd.draw_audio_parameter_dialog(c.parameter, self.audio_parameter_commit)
+            if d is not None:
+                d.update_value(event.new_value)
+            return True
+
+        if c.parameter is not None:
+            self.lcd.display_parameter_value(c.parameter, event.new_value)
+            if not self.hardware.is_external(c):
+                self.parameter_value_commit(c.parameter, event.new_value)
+
+        self._emit_midi(c, event.new_midi_value)
+        return True
+
+    def _handle_analog(self, event: AnalogEvent) -> bool:
+        self._emit_midi(event.controller, event.midi_value)
+        return True
+
+    def _handle_switch(self, event: SwitchEvent) -> bool:
+        # Encoder buttons today route via the legacy callbacks the Encoder was
+        # constructed with. Footswitch chord resolution (Appendix A) moves to
+        # a Handler-owned helper in step 5; until then the Footswitch's own
+        # poll path handles its own callbacks and doesn't dispatch here.
+        del event
+        return True
+
+    def _emit_midi(self, controller, midi_value: int) -> None:
+        """Send a CC. Tries the external port if routed; falls back to virtual."""
+        if controller.midi_CC is None:
+            return
+        cc = [controller.midi_channel | CONTROL_CHANGE, controller.midi_CC, int(midi_value)]
+        port_name = self.hardware.external_port_name(controller)
+        if port_name is not None and self.external_midi is not None:
+            try:
+                if self.external_midi.send_cc(port_name, controller.midi_channel, controller.midi_CC, int(midi_value)):
+                    return
+            except Exception as e:
+                logging.warning(f"External CC send failed on {port_name}: {e}")
+        self.hardware.midiout.send_message(cc)
 
     def add_lcd(self, lcd):
         self._lcd = lcd
@@ -532,7 +564,7 @@ class Modhandler(Handler):
 
         # Clear previous parameter bindings from all controllers except volume encoder
         for controller in self.hardware.controllers.values():
-            if getattr(controller, 'type', None) != Token.VOLUME:
+            if controller.type != Token.VOLUME:
                 controller.parameter = None
 
         # Clear analog controllers display data
@@ -581,8 +613,8 @@ class Modhandler(Handler):
                 continue
 
             # Create synthetic parameter if not already bound.
-            # AnalogMidiControl uses EXTERNAL_INSTANCE_ID so parameter_value_commit can guard it;
-            # EncoderController routes through encoder_value_changed instead.
+            # AnalogMidiControl gets EXTERNAL_INSTANCE_ID so parameter_value_commit can guard it;
+            # encoders skip the commit path entirely via hardware.is_external() inside Handler.handle.
             if controller.parameter is None:
                 if isinstance(controller, AnalogMidiControl):
                     controller.parameter = self.hardware._create_external_parameter(
@@ -773,12 +805,6 @@ class Modhandler(Handler):
             d = self.lcd.draw_parameter_dialog(param)
             if d:
                 self.lcd.enc_step_widget(d, direction)
-
-    def encoder_value_changed(self, param: Parameter, new_value: float, *, is_external: bool) -> None:
-        self.lcd.display_parameter_value(param, new_value)
-        if is_external:
-            return
-        self.parameter_value_commit(param, new_value)
 
     def _build_display_info(self, controller, *, category: str | None = None) -> dict:
         """Assemble display info dict for an analog-style controller. Combines the

@@ -14,19 +14,20 @@
 # along with pi-stomp.  If not, see <https://www.gnu.org/licenses/>.
 
 import logging
+import queue
+import time
+
 from gpiozero import Button
 
-import pistomp.controller as controller
 import pistomp.switchstate as switchstate
-import pistomp.taptempo as taptempo
 
-import time
-import queue
 
-class GpioSwitch(controller.Controller):
+class GpioSwitch:
+    """Raw GPIO press detector. Not a Controller — pure event source.
+    The owning object (Footswitch or Encoder) is responsible for any
+    MIDI / event-dispatch behavior."""
 
-    def __init__(self, gpio_input, midi_channel, midi_CC, callback, longpress_callback=None, taptempo=None):
-        super(GpioSwitch, self).__init__(midi_channel, midi_CC)
+    def __init__(self, gpio_input, callback, longpress_callback=None, taptempo=None):
         self.gpio_input = gpio_input
         self.cur_tstamp = None
         self.events = queue.Queue()
@@ -44,43 +45,36 @@ class GpioSwitch(controller.Controller):
         self.button.when_pressed = self._gpio_down
 
     def __del__(self):
-        self.button.close()
+        try:
+            self.button.close()
+        except Exception:
+            pass
 
     def _gpio_down(self, gpio):
-        # This is run from a separate thread, timestamp pressed and queue an event
-        #
-        # I considered using a dual edge callback and handle the timestamp here
-        # to queue long/short press events, but in practice, I noticed dual edge
-        # is rather unreliable with such a long debounce, we often don't get the
-        # rising edge callback at all. So let's just timestamp and we'll handle
-        # everything from the poller thread
-        #
+        # Runs from a gpiozero thread: just timestamp + queue. Dual-edge
+        # callbacks are unreliable with our long debounce, so we poll the
+        # release from the main loop.
         t = time.monotonic()
         self.events.put(t)
         if self.taptempo:
             self.taptempo.stamp(t)
 
     def poll(self):
-        # Grab press event if any
         if not self.events.empty():
             new_tstamp = self.events.get_nowait()
         else:
             new_tstamp = None
 
-        # If we were a already pressed and waiting for a release, drop it, it's easier
-        # that way and we should be polling fast enough for this not to matter.
-        # Otherwise record it
+        # If we were already pressed and waiting for release, drop the new
+        # press event — easier and the poll rate makes it irrelevant.
         if self.cur_tstamp is None:
             self.cur_tstamp = new_tstamp
 
-        # Are we waiting for release ?
         if self.cur_tstamp is None:
             return
 
         time_pressed = time.monotonic() - self.cur_tstamp
 
-        # If it's a long press, process as soon as we reach the threshold, otherwise
-        # check the GPIO input
         if time_pressed > self.long_press_threshold:
             state = switchstate.Value.LONGPRESSED
         elif not self.button.is_pressed:
