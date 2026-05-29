@@ -371,7 +371,7 @@ class Widget:
         
     def _notify_detach(self, widget):
         if self.parent:
-            self.parent.notify_detach(widget)
+            self.parent._notify_detach(widget)
 
     def refresh(self, box = None):
         """Refresh widget (and children)
