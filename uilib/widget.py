@@ -447,6 +447,12 @@ class Widget:
         # It's ok for widgets to not have anything to draw, some are pure rectangles
         pass
 
+    def sel_children(self):
+        """Selection-tree expansion. Default: only self.
+        Return a list of children in desired iteration order.
+        """
+        return [self]
+
     def input_event(self, event):
         if (event == InputEvent.CLICK or event == InputEvent.LONG_CLICK) and self.action is not None:
             if self.object is not None:

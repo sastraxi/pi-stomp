@@ -18,7 +18,7 @@ from typing import Callable, Optional
 
 from modalapi.layout import Layout, LayoutEdge, LayoutNode
 from uilib.box import Box
-from uilib.panel import Panel
+from uilib.container import ContainerWidget
 from uilib.widget import Widget
 
 
@@ -37,13 +37,13 @@ DEFAULT_WIRE_COLORS: tuple[tuple[int, int, int], tuple[int, int, int]] = (
 TileFactory = Callable[[LayoutNode, Box], Widget]
 
 
-class GridPanel(Panel):
-    """A Panel that arranges LayoutNodes on a column-major grid.
+class GridPanel(ContainerWidget):
+    """A container that arranges LayoutNodes on a column-major grid.
 
-    Selection iteration is column-major (insertion order). Only "plugin"
-    nodes are added to the selectable list — sources, sinks, and dummies
-    are skipped entirely (no widget created), making holes show as empty
-    cells the selection naturally jumps over.
+    Tiles are exposed to a host Panel's selection traversal via
+    `sel_children()` in column-major order. Only "plugin" nodes get a
+    widget — sources, sinks, dummies and holes are skipped, so the outer
+    selection naturally jumps over empty cells.
     """
 
     def __init__(
@@ -60,6 +60,7 @@ class GridPanel(Panel):
         self.visible_cols = visible_cols
         self.wire_colors = wire_colors
         self.tile_widgets: dict[str, Widget] = {}
+        self.tile_order: list[Widget] = []  # column-major insertion order
         self._build(tile_factory)
 
     # ------------------------------------------------------------------ #
@@ -97,21 +98,39 @@ class GridPanel(Panel):
     # ------------------------------------------------------------------ #
 
     def _build(self, tile_factory: TileFactory) -> None:
-        # Column-major insertion → default Panel.sel_next walks top-to-bottom
-        # within a column, then jumps to the top of the next column.
+        # Column-major insertion → outer Panel's flat traversal walks
+        # top-to-bottom within a column, then jumps to the top of the next.
         for layer_idx, col in enumerate(self.layout.cols):
             for row_idx, node in enumerate(col):
                 if node is None or node.kind != "plugin":
                     continue  # holes, sources, sinks, dummies: no tile widget
                 box = self.cell_box(layer_idx, row_idx)
                 widget = tile_factory(node, box)
-                # tile_factory should attach the widget to this panel as its
-                # parent so coords resolve correctly. Defensive: attach here
-                # if it didn't.
                 if widget.parent is None:
                     widget.attach(self)
-                self.add_sel_widget(widget)
+                widget.selectable = True
                 self.tile_widgets[node.id] = widget
+                self.tile_order.append(widget)
+
+    # ------------------------------------------------------------------ #
+    # Selection: expose tiles to the parent panel via sel_children so the
+    # outer flat traversal walks them column-major as if they were direct
+    # entries in the parent's sel_list.
+    # ------------------------------------------------------------------ #
+
+    def sel_children(self):
+        return list(self.tile_order)
+
+    def _notify_detach(self, widget):
+        """A tile detaching at runtime must be removed from tile_order and
+        tile_widgets so the outer panel's flat sel traversal (which calls
+        our sel_children()) stops yielding a detached widget."""
+        if widget in self.tile_order:
+            self.tile_order.remove(widget)
+            for nid, w in list(self.tile_widgets.items()):
+                if w is widget:
+                    del self.tile_widgets[nid]
+                    break
 
     # ------------------------------------------------------------------ #
     # Public API.

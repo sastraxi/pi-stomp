@@ -103,23 +103,16 @@ def _conn(
 
 
 def _make_panel(layout, panel_stack):
-    # Build the panel with a placeholder factory; attach to the stack first
-    # so child widgets inherit needed attributes.
-    panel = GridPanel.__new__(GridPanel)
-    # Bypass __init__ tile build until after stack attach
     from uilib.panel import Panel
 
-    Panel.__init__(panel, box=Box.xywh(0, 78, 320, 120))
-    panel.layout = layout
-    panel.visible_cols = 4
-    panel.tile_widgets = {}
-    panel_stack.push_panel(panel, refresh=False)
+    host = Panel(box=Box.xywh(0, 0, 320, 240))
+    panel_stack.push_panel(host, refresh=False)
 
     def tile_factory(node, box):
-        return TextWidget(box=box, text=node.id, parent=panel)
+        # parent set inside GridPanel._build via widget.attach(self) fallback.
+        return TextWidget(box=box, text=node.id)
 
-    panel._build(tile_factory)
-    return panel
+    return GridPanel(layout, tile_factory, box=Box.xywh(0, 78, 320, 120), parent=host)
 
 
 def test_iteration_order_is_column_major(panel_stack) -> None:
@@ -134,7 +127,7 @@ def test_iteration_order_is_column_major(panel_stack) -> None:
     panel = _make_panel(layout, panel_stack)
 
     # Only plugins get widgets — sources/sinks/dummies skipped.
-    ids = [w.text for w in panel.sel_list]
+    ids = [w.text for w in panel.sel_children()]  # pyright: ignore[reportAttributeAccessIssue]
     # capture_1 column has no widgets; A and B both in plugin column;
     # column-major insertion = layer iter outer, row iter inner.
     plugin_cols = [[n.id for n in c if n and n.kind == "plugin"] for c in layout.cols]
@@ -152,7 +145,7 @@ def test_holes_and_dummies_excluded_from_selection(panel_stack) -> None:
     layout = build_layout(["A", "B", "D"], conns)
     panel = _make_panel(layout, panel_stack)
     # Only A, B, D are selectable. The dummy in B's column is not.
-    ids = sorted(w.text for w in panel.sel_list)
+    ids = sorted(w.text for w in panel.sel_children())  # pyright: ignore[reportAttributeAccessIssue]
     assert ids == ["A", "B", "D"]
 
 
@@ -162,6 +155,65 @@ def test_widget_for_returns_tile(panel_stack) -> None:
     panel = _make_panel(layout, panel_stack)
     assert panel.widget_for("A") is not None
     assert panel.widget_for("nonexistent") is None
+
+
+def test_gridpanel_tiles_traverse_via_outer_panel(panel_stack) -> None:
+    """A GridPanel sitting in main_panel.sel_list should expose its tiles
+    column-major to the outer panel's flat traversal — same UX as if those
+    tiles had been added to main_panel directly."""
+    from uilib.panel import Panel
+    from uilib.text import TextWidget
+
+    main = Panel(box=Box.xywh(0, 0, 320, 240))
+    panel_stack.push_panel(main, refresh=False)
+
+    conns = [
+        _conn("capture_1", "A", EndpointKind.SOURCE, EndpointKind.PLUGIN),
+        _conn("capture_1", "B", EndpointKind.SOURCE, EndpointKind.PLUGIN),
+        _conn("A", "C"),
+        _conn("B", "C"),
+    ]
+    layout = build_layout(["A", "B", "C"], conns)
+    grid = GridPanel(
+        layout,
+        lambda node, box: TextWidget(box=box, text=node.id),
+        box=Box.xywh(0, 78, 320, 120),
+        parent=main,
+    )
+
+    # Add a sibling leaf before the grid and one after, to verify "in-and-out".
+    before = TextWidget(box=Box.xywh(0, 0, 10, 10), text="<", parent=main)
+    after = TextWidget(box=Box.xywh(0, 210, 10, 10), text=">", parent=main)
+    main.add_sel_widget(before)
+    main.add_sel_widget(grid)
+    main.add_sel_widget(after)
+
+    main.sel_widget(before)
+    # Outer flat list: before, A, B, C, after
+    expected_texts = ["<", "A", "B", "C", ">"]
+    actual = [w.text for w in main._flat_sel()]
+    assert actual == expected_texts
+
+    assert main.sel_ref is not None
+    seen = [main.sel_ref.text]
+    for _ in range(4):
+        main.sel_next()
+        seen.append(main.sel_ref.text)
+    assert seen == expected_texts
+
+
+def test_detaching_a_tile_prunes_it_from_selection(panel_stack) -> None:
+    """Tiles inside a GridPanel are not in its sel_list — they're surfaced via
+    sel_children. If a tile detaches at runtime, GridPanel must scrub its own
+    bookkeeping so the outer panel's flat traversal stops yielding it."""
+    conns = [_conn("A", "B")]
+    layout = build_layout(["A", "B"], conns)
+    panel = _make_panel(layout, panel_stack)
+    a_tile = panel.widget_for("A")
+    assert a_tile is not None and a_tile in panel.sel_children()
+    a_tile.detach()
+    assert a_tile not in panel.sel_children()
+    assert panel.widget_for("A") is None
 
 
 # --------------------------------------------------------------------------- #
