@@ -83,11 +83,11 @@ class Lcd(abstract_lcd.Lcd):
         self.plugin_width = 78
         self.plugin_height = 29
         self.plugin_label_length = 7
-        self.footswitch_height = 60
-        self.footswitch_width = 56
+        self.footswitch_height = 32
+        self.footswitch_width = 80
         # space between footswitch icons where index is the footswitch count
         #                                0    1    2    3    4   5   6   7
-        self.footswitch_pitch_options = [120, 120, 120, 128, 86, 65, 65, 65]
+        self.footswitch_pitch_options = [120, 120, 120, 128, 80, 65, 65, 65]
         self.footswitch_pitch = None
         self.footswitch_slots = {}
 
@@ -111,9 +111,9 @@ class Lcd(abstract_lcd.Lcd):
         self.pstack = PanelStack(display, image_format='RGB', use_dimming=True)  # TODO use dimming without loosing FS's
         self.splash_panel = Panel(box=Box.xywh(0, 0, self.display_width, self.display_height))
         self.pstack.push_panel(self.splash_panel, refresh=False)
-        self.main_panel = Panel(box=Box.xywh(0, 0, self.display_width, 170))
+        self.main_panel = Panel(box=Box.xywh(0, 0, self.display_width, 208))
         self.main_panel_pushed = False
-        self.footswitch_panel = Panel(box=Box.xywh(0, 176, self.display_width, 64))
+        self.footswitch_panel = Panel(box=Box.xywh(0, 208, self.display_width, self.footswitch_height))
         self.pstack.push_panel(self.footswitch_panel, refresh=False)
 
         self.pedalboards = {}
@@ -444,8 +444,8 @@ class Lcd(abstract_lcd.Lcd):
                 x = self.get_footswitch_pitch() * fs_id
                 self.footswitch_slots[fs_id] = label
                 color = self.get_plugin_color(plugin)
-                p = FootswitchWidget(Box.xywh(x, y, self.plugin_width, self.plugin_height), self.small_font,
-                             label, color, plugin.is_bypassed(), parent=self.footswitch_panel, object=c)
+                p = FootswitchWidget(Box.xywh(x, y, self.footswitch_width, self.footswitch_height),
+                             fs_id, label, color, plugin.is_bypassed(), parent=self.footswitch_panel, object=c)
                 self.w_footswitches.append(p)
                 self.footswitch_panel.add_widget(p)
                 break
@@ -459,8 +459,8 @@ class Lcd(abstract_lcd.Lcd):
             label = "" if dl is None else dl
             y = 0
             x = self.get_footswitch_pitch() * slot
-            p = FootswitchWidget(Box.xywh(x, y, self.plugin_width, self.plugin_height), self.small_font,
-                                 label, None, True, parent=self.footswitch_panel, object=fs)
+            p = FootswitchWidget(Box.xywh(x, y, self.footswitch_width, self.footswitch_height),
+                                 slot, label, None, True, parent=self.footswitch_panel, object=fs)
             self.w_footswitches.append(p)
             self.footswitch_panel.add_widget(p)
         self.footswitch_panel.refresh()

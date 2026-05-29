@@ -13,57 +13,55 @@
 # You should have received a copy of the GNU General Public License
 # along with pi-stomp.  If not, see <https://www.gnu.org/licenses/>.
 
-from uilib.widget import *
+from uilib.config import Config
+from uilib.widget import Widget
+
 
 class FootswitchWidget(Widget):
+    """Minimal footswitch indicator: a colored top bar with a centered label.
 
-    def __init__(self, box, font, label, color, is_bypassed, **kwargs):
+    Accent color is the configured footswitch color when ON, or DIMMED_BG when
+    OFF. Unbound slots show "FS{n}" as a placeholder.
+    """
+
+    DIMMED_BG = (90, 90, 90)  # #5a5a5a
+    DEFAULT_COLOR = (255, 255, 255)
+    BAR_BORDER = (58, 58, 58)  # #3a3a3a — 1px line below the bar
+
+    BAR_H = 3
+    BAR_TO_LABEL = 1
+
+    def __init__(self, box, num, label, color, is_bypassed, **kwargs):
         self._init_attrs(Widget.INH_ATTRS, kwargs)
-        super(FootswitchWidget,self).__init__(box, **kwargs)
-        self.font = font
+        super(FootswitchWidget, self).__init__(box, **kwargs)
+        self.font = Config().get_font("footswitch")
+        self.num = num
         self.label = label
         self.color = color
         self.is_bypassed = is_bypassed
-        self.draw = None
-        self.footswitch_ring_width = 7
-        self.background = (0, 0, 0)  # TODO get palette from parent?
-        self.foreground = (255, 255, 255)
-        self.color_plugin_bypassed = (80, 80, 80)
 
     def _draw(self, image, draw, real_box):
-        self.xy1 = (real_box.x0, real_box.y0)
-        self.xy2 = (real_box.x0 + 60, real_box.y0 + 40)  # TODO should these offsets be here?
-        self.draw = draw
+        x0, y0 = real_box.x0, real_box.y0
+        w, h = real_box.width, real_box.height
 
-        # halo
-        self._draw_halo()
+        is_on = not self.is_bypassed
+        accent = (self.color if self.color is not None else self.DEFAULT_COLOR) if is_on else self.DIMMED_BG
 
-        # cap bottom
-        fx1 = self.xy1[0] + 10
-        fy1 = self.xy2[1] - 34
-        fx2 = self.xy2[0] - 10
-        fy2 = fy1 + 16
-        draw.ellipse(((fx1, fy1), (fx2, fy2)), fill=self.background, outline="gray", width=2)
+        # Top bar — full widget width with a 1px dark divider beneath it.
+        draw.rectangle([(x0, y0), (x0 + w - 1, y0 + self.BAR_H - 1)], fill=accent)
+        draw.rectangle([(x0, y0 + self.BAR_H), (x0 + w - 1, y0 + self.BAR_H)], fill=self.BAR_BORDER)
 
-        # cap top
-        fy1 -= 6
-        fy2 -= 6
-        draw.ellipse(((fx1, fy1), (fx2, fy2)), fill=self.background, outline="gray", width=2)
+        assert self.font
+        text = self.label if self.label else chr(ord("A") + self.num)
+        bbox = self.font.getbbox(text)
+        tw = bbox[2] - bbox[0]
+        th = bbox[3] - bbox[1]
 
-        # label
-        draw.text((self.xy1[0], self.xy2[1]), self.label, self.foreground, self.font)
-
-    def _draw_halo(self):
-        hx1 = self.xy1[0] + 2
-        hy1 = self.xy1[1] + 10
-        hx2 = self.xy2[0] - 2
-        hy2 = self.xy2[1] - 2
-        color = self.color_plugin_bypassed if self.is_bypassed else self.color
-        self.draw.ellipse(((hx1, hy1), (hx2, hy2)), fill=None, outline=color, width=self.footswitch_ring_width)
+        label_area_top = y0 + self.BAR_H + 1 + self.BAR_TO_LABEL
+        label_area_h = h - (self.BAR_H + 1 + self.BAR_TO_LABEL)
+        tx = x0 + (w - tw) // 2 - bbox[0]
+        ty = label_area_top + (label_area_h - th) // 2 - bbox[1]
+        draw.text((tx, ty), text, fill=accent, font=self.font)
 
     def toggle(self, is_bypassed):
         self.is_bypassed = is_bypassed
-        self._draw_halo()
-
-
-
