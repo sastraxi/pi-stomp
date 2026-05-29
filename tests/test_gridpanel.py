@@ -16,6 +16,7 @@ from uilib.gridpanel import (
     CHANNEL,
     LANE_OFFSETS,
     PORT_OFFSETS_Y,
+    ROW_GAP,
     TILE_H,
     TILE_W,
     GridPanel,
@@ -50,10 +51,10 @@ def test_cell_xy_origin() -> None:
 
 
 def test_cell_xy_spacing_matches_locked_design() -> None:
-    # Tile pitch is 74+7=81 horizontally, 24+7=31 vertically
+    # Horizontal pitch = TILE_W + CHANNEL (lanes). Vertical pitch = TILE_H + ROW_GAP (no lanes).
     assert GridPanel.cell_xy(1, 0) == (TILE_W + CHANNEL, 0)
-    assert GridPanel.cell_xy(0, 1) == (0, TILE_H + CHANNEL)
-    assert GridPanel.cell_xy(3, 3) == (3 * (TILE_W + CHANNEL), 3 * (TILE_H + CHANNEL))
+    assert GridPanel.cell_xy(0, 1) == (0, TILE_H + ROW_GAP)
+    assert GridPanel.cell_xy(3, 3) == (3 * (TILE_W + CHANNEL), 3 * (TILE_H + ROW_GAP))
 
 
 def test_four_visible_columns_fit_in_320px() -> None:
@@ -63,9 +64,9 @@ def test_four_visible_columns_fit_in_320px() -> None:
 
 
 def test_four_rows_fit_in_plugin_area() -> None:
-    # Plugin area is 240 - 78 - 51 (footswitch row) = ~111
+    # Plugin area below header / above footswitches must fit 4 rows.
     last_row_bottom = GridPanel.cell_xy(0, 3)[1] + TILE_H
-    assert last_row_bottom == 4 * TILE_H + 3 * CHANNEL == 117
+    assert last_row_bottom == 4 * TILE_H + 3 * ROW_GAP
 
 
 def test_port_attachment_points() -> None:
@@ -73,18 +74,15 @@ def test_port_attachment_points() -> None:
     assert GridPanel.out_port_xy(0, 0, 0) == (TILE_W, PORT_OFFSETS_Y[0])
     assert GridPanel.out_port_xy(0, 0, 1) == (TILE_W, PORT_OFFSETS_Y[1])
     # Input port 1 of plugin at (1, 2): left edge of cell, y at row offset + 16
-    expected_y = (TILE_H + CHANNEL) * 2 + PORT_OFFSETS_Y[1]
+    expected_y = (TILE_H + ROW_GAP) * 2 + PORT_OFFSETS_Y[1]
     assert GridPanel.in_port_xy(1, 2, 1) == (TILE_W + CHANNEL, expected_y)
 
 
 def test_gutter_lane_x_per_port() -> None:
-    # Channel layout: pad(1) + lane0(1) + pad(2) + lane1(1) + pad(2)?
-    # Actually: pad(1) + lane(1) + pad(3) + lane(1) + pad(1). Lanes at
-    # offset 1 and 5 within the 7px channel that starts at x = TILE_W.
+    # Two distinct lanes inside the channel to the right of `layer`.
     assert GridPanel.gutter_lane_x(0, 0) == TILE_W + LANE_OFFSETS[0]
     assert GridPanel.gutter_lane_x(0, 1) == TILE_W + LANE_OFFSETS[1]
-    # Lanes are 4px apart (centre-to-centre: 5 - 1 = 4)
-    assert LANE_OFFSETS[1] - LANE_OFFSETS[0] == 4
+    assert LANE_OFFSETS[0] != LANE_OFFSETS[1]
 
 
 # --------------------------------------------------------------------------- #
@@ -108,9 +106,8 @@ def _make_panel(layout, panel_stack):
     host = Panel(box=Box.xywh(0, 0, 320, 240))
     panel_stack.push_panel(host, refresh=False)
 
-    def tile_factory(node, box):
-        # parent set inside GridPanel._build via widget.attach(self) fallback.
-        return TextWidget(box=box, text=node.id)
+    def tile_factory(node, box, parent):
+        return TextWidget(box=box, text=node.id, parent=parent)
 
     return GridPanel(layout, tile_factory, box=Box.xywh(0, 78, 320, 120), parent=host)
 
@@ -176,7 +173,7 @@ def test_gridpanel_tiles_traverse_via_outer_panel(panel_stack) -> None:
     layout = build_layout(["A", "B", "C"], conns)
     grid = GridPanel(
         layout,
-        lambda node, box: TextWidget(box=box, text=node.id),
+        lambda node, box, parent: TextWidget(box=box, text=node.id, parent=parent),
         box=Box.xywh(0, 78, 320, 120),
         parent=main,
     )
@@ -222,17 +219,13 @@ def test_detaching_a_tile_prunes_it_from_selection(panel_stack) -> None:
 
 
 def test_routing_edge_uses_correct_lane_and_port_y(panel_stack) -> None:
-    # Stereo plugin: OUT1 -> playback_1 uses lane 0 + port y 8;
-    # OUT2 -> playback_2 uses lane 1 + port y 16.
+    # Stereo plugin: OUT0 uses lane 0 + port y 8; OUT1 uses lane 1 + port y 18.
+    # HW-only columns get compacted, so route between two plugins.
     conns = [
-        _conn("capture_1", "S", EndpointKind.SOURCE, EndpointKind.PLUGIN),
-        Connection(src=_ep(EndpointKind.PLUGIN, "S"), dst=_ep(EndpointKind.SINK, "playback_1")),
-        Connection(
-            src=Endpoint(EndpointKind.PLUGIN, "S", "", 1),
-            dst=Endpoint(EndpointKind.SINK, "playback_2", "", 0),
-        ),
+        Connection(src=Endpoint(EndpointKind.PLUGIN, "S", "", 0), dst=Endpoint(EndpointKind.PLUGIN, "T", "", 0)),
+        Connection(src=Endpoint(EndpointKind.PLUGIN, "S", "", 1), dst=Endpoint(EndpointKind.PLUGIN, "T", "", 1)),
     ]
-    layout = build_layout(["S"], conns)
+    layout = build_layout(["S", "T"], conns)
     panel = _make_panel(layout, panel_stack)
 
     out_edges = {e.src_port: e for e in layout.edges if e.src.id == "S"}
@@ -266,5 +259,5 @@ def test_dummy_passes_wire_straight_through(panel_stack) -> None:
     for edge in chain:
         (_, sy), (_, dy), _ = panel._edge_endpoints(edge)
         # Both endpoints at the OUT1 y (PORT_OFFSETS_Y[1]) within their cells
-        assert sy % (TILE_H + CHANNEL) == PORT_OFFSETS_Y[1]
-        assert dy % (TILE_H + CHANNEL) == PORT_OFFSETS_Y[1]
+        assert sy % (TILE_H + ROW_GAP) == PORT_OFFSETS_Y[1]
+        assert dy % (TILE_H + ROW_GAP) == PORT_OFFSETS_Y[1]

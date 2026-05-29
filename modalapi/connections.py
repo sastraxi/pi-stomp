@@ -6,6 +6,7 @@ walk that feeds into `build_connection` lives in `modalapi.pedalboard`.
 
 from __future__ import annotations
 
+import urllib.parse
 from dataclasses import dataclass
 from enum import Enum
 from typing import Iterable, Optional
@@ -46,7 +47,6 @@ class Connection:
 
 def split_port_uri(port_uri: str, bundlepath: str) -> tuple[str, str]:
     """Strip bundle prefix and split a port URI into (endpoint_id, port_symbol).
-
     Examples:
         ".../bundle/ChorusI/out" -> ("ChorusI", "out")
         ".../bundle/capture_1"   -> ("capture_1", "")
@@ -54,6 +54,7 @@ def split_port_uri(port_uri: str, bundlepath: str) -> tuple[str, str]:
     rel = port_uri
     if "://" in rel:
         rel = rel.split("://", 1)[1]
+    rel = urllib.parse.unquote(rel)
     bp = bundlepath.rstrip("/")
     if bp and bp in rel:
         rel = rel.split(bp, 1)[1].lstrip("/")

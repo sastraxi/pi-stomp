@@ -25,7 +25,9 @@ import pistomp.switchstate as switchstate
 from PIL import ImageColor
 
 from uilib import *
+from uilib.gridpanel import GridPanel
 from uilib.lcd_ili9341 import *
+from modalapi.layout import build_layout
 
 from pistomp.footswitch import Footswitch  # TODO would like to avoid this module knowing such details
 
@@ -101,6 +103,7 @@ class Lcd(abstract_lcd.Lcd):
         self.w_pedalboard = None
         self.w_preset = None
         self.w_plugins = []
+        self.grid_panel: Optional[GridPanel] = None
         self.w_footswitches = []
         self.w_controls = []
         self.w_splash = None
@@ -293,35 +296,45 @@ class Lcd(abstract_lcd.Lcd):
     # Plugins
     #
     def draw_plugins(self):
-        x = 0
-        y = 78
-        per_row = 4
-        i = 1
-        # erase currently rendered plugins and footswitches first
+        # Tear down the previous render. The GridPanel destroys its tile
+        # children; the outer panel's sel traversal stops yielding them
+        # because GridPanel.sel_children() reads its (now-empty) tile_order.
         for w in self.w_footswitches:
             w.destroy()
         self.w_footswitches = []
-        for w in self.w_plugins:
-            w.destroy()
+        if self.grid_panel is not None:
+            self.main_panel.del_sel_widget(self.grid_panel)
+            self.grid_panel.destroy()
+            self.grid_panel = None
         self.w_plugins = []
 
-        for plugin in self.current.pedalboard.plugins:
+        plugins = self.current.pedalboard.plugins
+        plugins_by_id = {p.instance_id.lstrip("/"): p for p in plugins}
+        layout = build_layout(plugins_by_id.keys(), self.current.pedalboard.connections)
+
+        def tile_factory(node, box, parent):
+            plugin = plugins_by_id[node.id]
             label = plugin.instance_id.replace('/', "")[:self.plugin_label_length]
             label = label.replace("_", "")
-            label = self.shorten_name(label, self.plugin_width)
-            p = TextWidget(box=Box.xywh(x, y, self.plugin_width, self.plugin_height), text=label, outline_radius=5,
-                           parent=self.main_panel, action=self.plugin_event, object=plugin)
-            p.set_font(self.small_font)
-            self.color_plugin(p, plugin)
-            self.main_panel.add_sel_widget(p)
-            self.w_plugins.append(p)
+            label = self.shorten_name(label, box.width)
+            # parent MUST be passed in ctor: attaching later wipes the
+            # explicit colors color_plugin() sets via inherited-attr resolution.
+            tile = TextWidget(box=box, text=label, outline_radius=5,
+                              parent=parent, action=self.plugin_event, object=plugin)
+            tile.set_font(self.small_font)
+            self.color_plugin(tile, plugin)
+            self.w_plugins.append(tile)
+            return tile
 
-            pos = (i % per_row)
-            x = (self.plugin_width + 2) * pos
-            if pos == 0:
-                y = y + self.plugin_height + 2
-            i += 1
+        # Grid area: below title (y=78), above footswitch panel (y=208).
+        self.grid_panel = GridPanel(
+            layout, tile_factory,
+            box=Box.xywh(0, 78, self.display_width, 130),
+            parent=self.main_panel,
+        )
+        self.main_panel.add_sel_widget(self.grid_panel)
 
+        for plugin in plugins:
             if plugin.has_footswitch:
                 self.draw_footswitch(plugin)
 

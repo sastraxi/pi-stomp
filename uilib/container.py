@@ -125,12 +125,25 @@ class ContainerWidget(Widget):
         self._do_draw(self.image, self.draw, self.box.norm())
 
         # Update into parent container (call the parent refresh who will do the job)
+        # orig_box must be in widget-local image coords (matches _unfocus's
+        # convention); real_box is in parent coords. Passing self.box for both
+        # crops the wrong region out of widget.image whenever self.box.x0/y0 != 0.
         if self.visible and self.parent != None:
-            self.parent._compose(self, self.box, self.box)
+            self.parent._compose(self, self.box.norm(), self.box)
 
     def _do_draw(self, image, draw, real_box):
         # We replace the base Widget implementation because of how we deal with
-        # offsets: The erase and outline aren't offsetted, the rest is
+        # offsets: The erase and outline aren't offsetted, the rest is.
+        #
+        # When invoked as a *child* of another widget (image is not our own
+        # backing image), render into our own image+draw first, then paste the
+        # result into the parent. Drawing children directly into the parent
+        # image and then pasting self.image on top would wipe their pixels.
+        if image is not self.image and self.image is not None:
+            self._do_draw(self.image, self.draw, self.box.norm())
+            image.paste(self.image, real_box.rect)
+            return
+
         off_real_box = real_box.deoffset(self.offset)
         self._draw_erase(image, draw, real_box)
         self._draw(image, draw, off_real_box)
@@ -139,10 +152,6 @@ class ContainerWidget(Widget):
             c._do_draw(image, draw, crb)
         self._draw_outline(image, draw, real_box)
         self._draw_selection(image, draw, real_box)
-
-        # Then update the parent unless we are drawing ourselves
-        if image is not self.image:
-            image.paste(self.image, real_box.rect)
 
     def scroll(self, offset):
         print(offset)

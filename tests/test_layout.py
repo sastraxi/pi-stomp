@@ -52,7 +52,8 @@ def test_linear_chain_full_layout_has_no_dummies() -> None:
         _conn("B", "playback_1", EndpointKind.PLUGIN, EndpointKind.SINK),
     ]
     layout = build_layout(["A", "B"], conns)
-    assert layout.n_cols == 4
+    # Hardware-only columns (capture_1, playback_1) are compacted out.
+    assert layout.n_cols == 2
     assert layout.n_rows == 1
     assert all(c[0] is not None for c in layout.cols)
     assert not any(n.kind == "dummy" for n in (c[0] for c in layout.cols) if n)
@@ -89,19 +90,19 @@ def test_skip_layer_edge_inserts_dummies() -> None:
 
 
 def test_stereo_ports_preserved_in_edges() -> None:
+    # Insert a plugin on each side of S so the stereo edges stay between
+    # plugins (HW-only columns are compacted away).
     conns = [
-        _conn("capture_1", "S", EndpointKind.SOURCE, EndpointKind.PLUGIN, 0, 0),
-        _conn("capture_2", "S", EndpointKind.SOURCE, EndpointKind.PLUGIN, 0, 1),
-        _conn("S", "playback_1", EndpointKind.PLUGIN, EndpointKind.SINK, 0, 0),
-        _conn("S", "playback_2", EndpointKind.PLUGIN, EndpointKind.SINK, 1, 0),
+        _conn("In", "S", src_port=0, dst_port=0),
+        _conn("In", "S", src_port=1, dst_port=1),
+        _conn("S", "Out", src_port=0, dst_port=0),
+        _conn("S", "Out", src_port=1, dst_port=1),
     ]
-    layout = build_layout(["S"], conns)
-    # OUT1 of S goes to playback_1; OUT2 of S goes to playback_2
+    layout = build_layout(["In", "S", "Out"], conns)
     out_edges = [e for e in layout.edges if e.src.id == "S"]
-    assert {(e.src_port, e.dst.id) for e in out_edges} == {(0, "playback_1"), (1, "playback_2")}
-    # Both captures fan into S with distinct dst_ports
+    assert {(e.src_port, e.dst_port) for e in out_edges} == {(0, 0), (1, 1)}
     in_edges = [e for e in layout.edges if e.dst.id == "S"]
-    assert {(e.src.id, e.dst_port) for e in in_edges} == {("capture_1", 0), ("capture_2", 1)}
+    assert {(e.src_port, e.dst_port) for e in in_edges} == {(0, 0), (1, 1)}
 
 
 def test_dummy_carries_src_port_for_colour() -> None:

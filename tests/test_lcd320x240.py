@@ -8,6 +8,7 @@ from unittest.mock import patch, MagicMock
 import pytest
 
 from tests.conftest import PROJECT_ROOT
+from tests import pedalboard_fixtures
 from pistomp.lcd320x240 import Lcd
 import common.token as Token
 
@@ -58,7 +59,7 @@ def setup_main_ui(instance):
             instance_id="chorus", is_bypassed=lambda: False, category="Modulator", has_footswitch=False, controllers=[]
         ),
     ]
-    mock_pedalboard = MockObject(title="Rock Rig", plugins=plugins)
+    mock_pedalboard = MockObject(title="Rock Rig", plugins=plugins, connections=[])
     mock_current = MockObject(
         pedalboard=mock_pedalboard,
         presets={0: "Clean", 1: "Lead"},
@@ -86,7 +87,7 @@ def test_main_panel_snapshot(lcd, snapshot):
 
 def test_analog_assignments_snapshot(lcd, snapshot):
     instance, _ = lcd
-    mock_pedalboard = MockObject(title="Analog Test", plugins=[])
+    mock_pedalboard = MockObject(title="Analog Test", plugins=[], connections=[])
     mock_current = MockObject(
         pedalboard=mock_pedalboard,
         presets={0: "Clean"},
@@ -137,7 +138,7 @@ def test_update_footswitch_off_snapshot(lcd, snapshot):
     instance, _ = lcd
     mock_fs = MockObject(id=0, toggled=True, get_display_label=lambda: "Dist", color="Red")
     mock_current = MockObject(
-        pedalboard=MockObject(title="PB", plugins=[]), presets={0: "Clean"}, preset_index=0, analog_controllers={}
+        pedalboard=MockObject(title="PB", plugins=[], connections=[]), presets={0: "Clean"}, preset_index=0, analog_controllers={}
     )
     instance.link_data(pedalboards=[], current=mock_current, footswitches=[mock_fs])
     instance.draw_main_panel()
@@ -150,7 +151,7 @@ def test_update_footswitch_on_snapshot(lcd, snapshot):
     instance, _ = lcd
     mock_fs = MockObject(id=1, toggled=False, get_display_label=lambda: "Drive", color="Orange")
     mock_current = MockObject(
-        pedalboard=MockObject(title="PB", plugins=[]), presets={0: "Clean"}, preset_index=0, analog_controllers={}
+        pedalboard=MockObject(title="PB", plugins=[], connections=[]), presets={0: "Clean"}, preset_index=0, analog_controllers={}
     )
     instance.link_data(pedalboards=[], current=mock_current, footswitches=[mock_fs])
     instance.draw_main_panel()
@@ -197,9 +198,28 @@ def test_tap_tempo_snapshot(lcd, snapshot):
     instance, _ = lcd
     mock_fs = MockObject(id=2, toggled=True, get_display_label=lambda: "120")
     mock_current = MockObject(
-        pedalboard=MockObject(title="BPM Test", plugins=[]), presets={0: "Clean"}, preset_index=0, analog_controllers={}
+        pedalboard=MockObject(title="BPM Test", plugins=[], connections=[]), presets={0: "Clean"}, preset_index=0, analog_controllers={}
     )
     instance.link_data(pedalboards=[], current=mock_current, footswitches=[mock_fs])
     instance.draw_main_panel()
     instance.update_footswitch(mock_fs)
     snapshot()
+
+
+def _setup_pedalboard(instance, pb):
+    mock_current = MockObject(
+        pedalboard=pb,
+        presets={0: "Clean"},
+        preset_index=0,
+        analog_controllers={},
+    )
+    mock_footswitches = [MockObject(id=i, toggled=False, get_display_label=lambda: "") for i in range(4)]
+    instance.link_data(pedalboards=[pb], current=mock_current, footswitches=mock_footswitches)
+    instance.draw_main_panel()
+
+
+@pytest.mark.parametrize("topology", ["blank", "linear", "parallel", "stereo"])
+def test_routing_snapshot(lcd, snapshot, topology):
+    instance, _ = lcd
+    _setup_pedalboard(instance, pedalboard_fixtures.REGISTRY[topology]())
+    snapshot(topology)

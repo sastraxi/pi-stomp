@@ -46,6 +46,16 @@ def test_split_handles_missing_scheme() -> None:
     assert split_port_uri(f"{BUNDLE}/stereo/inL", BUNDLE) == ("stereo", "inL")
 
 
+def test_split_handles_url_encoded_bundle_path() -> None:
+    # lilv URL-encodes spaces in file:// URIs. The raw bundlepath stored on
+    # the Pedalboard object isn't encoded — split_port_uri must reconcile.
+    # Regression: previously this returned ("", "...") for every port,
+    # collapsing every connection onto a single node and creating a fake cycle.
+    bundle_with_space = "/Users/cam/Documents/MOD Desktop/pedalboards/Doom_Bass.pedalboard"
+    encoded = "file:///Users/cam/Documents/MOD%20Desktop/pedalboards/Doom_Bass.pedalboard/HighPassFilter/Out1"
+    assert split_port_uri(encoded, bundle_with_space) == ("HighPassFilter", "Out1")
+
+
 def test_classify() -> None:
     assert classify_endpoint("capture_1") == EndpointKind.SOURCE
     assert classify_endpoint("playback_2") == EndpointKind.SINK

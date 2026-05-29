@@ -15,11 +15,12 @@ Algorithm (Sugiyama-lite):
 
 from __future__ import annotations
 
+import logging
+
 from dataclasses import dataclass, field
 from typing import Iterable, Literal, Optional
 
 from modalapi.connections import Connection, EndpointKind, audio_connections
-
 
 NodeKind = Literal["plugin", "source", "sink", "dummy"]
 
@@ -115,12 +116,12 @@ def longest_path_layers(
             preds[c.dst.id].append(c.src.id)
             succs[c.src.id].append(c.dst.id)
 
-    # Iterative longest-path on a DAG: repeat until fixpoint. For pedalboards
-    # (≤20 nodes), this is trivially cheap.
+    # Iterative longest-path on a DAG. LV2 pedalboard graphs are acyclic by
+    # construction, so longest path ≤ N nodes — bound the loop accordingly
+    # so a parser bug can't hang the UI thread.
     for n in nodes.values():
         n.layer = 0
-    changed = True
-    while changed:
+    for _ in range(len(nodes) + 1):
         changed = False
         for nid, n in nodes.items():
             if not preds[nid]:
@@ -129,6 +130,10 @@ def longest_path_layers(
             if new_layer != n.layer:
                 n.layer = new_layer
                 changed = True
+        if not changed:
+            break
+    else:
+        logging.warning("layout.longest_path_layers: graph appears cyclic; rendering with partial assignment")
 
     # Pin sinks to the rightmost layer.
     max_layer = max((n.layer for n in nodes.values()), default=0)
@@ -229,6 +234,29 @@ def barycentric_order(
                 sort_by(succs, layer)
 
 
+def _compact_hw_only_columns(
+    nodes: dict[str, LayoutNode],
+    edges: list[LayoutEdge],
+) -> tuple[dict[str, LayoutNode], list[LayoutEdge]]:
+    """Drop all source/sink nodes (and any column they leave empty) and
+    renumber remaining layers contiguously. Edges touching dropped nodes are
+    removed — wires from capture/to playback aren't visualised today; the
+    leftmost plugin's input port already implies "audio in", same for outputs.
+
+    We drop hw nodes *unconditionally*, not just hw-only columns: a leaf
+    plugin pinned at layer 0 alongside capture nodes would otherwise leave
+    a phantom row where a wire emanates from an invisible source cell.
+    """
+    kept_nodes = {nid: n for nid, n in nodes.items() if n.kind in ("plugin", "dummy")}
+    groups = _layer_groups(kept_nodes)
+    keep_layers = [i for i, g in enumerate(groups) if g]
+    old_to_new = {old: new for new, old in enumerate(keep_layers)}
+    for n in kept_nodes.values():
+        n.layer = old_to_new[n.layer]
+    kept_edges = [e for e in edges if e.src.id in kept_nodes and e.dst.id in kept_nodes]
+    return kept_nodes, kept_edges
+
+
 def build_layout(
     plugin_instance_ids: Iterable[str],
     connections: Iterable[Connection],
@@ -238,6 +266,12 @@ def build_layout(
     longest_path_layers(base_nodes, connections)
     nodes, edges = insert_dummies(base_nodes, connections)
     barycentric_order(nodes, edges)
+    nodes, edges = _compact_hw_only_columns(nodes, edges)
+    # Re-pack rows after dropping hardware-only layers so each layer starts at row 0.
+    for layer in _layer_groups(nodes):
+        layer.sort(key=lambda n: n.row)
+        for i, n in enumerate(layer):
+            n.row = i
 
     groups = _layer_groups(nodes)
     n_rows = max((len(g) for g in groups), default=0)
