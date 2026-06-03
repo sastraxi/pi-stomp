@@ -21,8 +21,6 @@ import threading
 import time
 from typing import Callable, List, Optional
 
-from gpiozero import Button
-
 import common.util as util
 import pistomp.controller as controller
 import pistomp.gpioswitch as gpioswitch
@@ -83,12 +81,16 @@ class Encoder(controller.Controller):
         self.id = id
 
         self._lock = threading.Lock()
-        self.data = Button(d_pin)
-        self.data.when_pressed = self._gpio_callback
-        self.data.when_released = self._gpio_callback
-        self.clk = Button(clk_pin)
-        self.clk.when_pressed = self._gpio_callback
-        self.clk.when_released = self._gpio_callback
+        self.data = None
+        self.clk = None
+        if d_pin is not None:
+            from gpiozero import Button   # TODO consider using Encoder class instead
+            self.data = Button(d_pin)
+            self.data.when_pressed = self._gpio_callback
+            self.data.when_released = self._gpio_callback
+            self.clk = Button(clk_pin)
+            self.clk.when_pressed = self._gpio_callback
+            self.clk.when_released = self._gpio_callback
 
         self.prevNextCode = 0
         self.store = 0
@@ -120,11 +122,10 @@ class Encoder(controller.Controller):
         logging.debug(f"Encoder init: id={id}, midi_CC={midi_CC}, sw_pin={sw_pin}")
 
     def __del__(self):
-        try:
+        if self.data is not None:
             self.data.close()
+        if self.clk is not None:
             self.clk.close()
-        except Exception:
-            pass
 
     # ── Raw GPIO decode ──────────────────────────────────────────────
 

@@ -17,8 +17,6 @@ import logging
 import queue
 import time
 
-from gpiozero import Button
-
 import pistomp.switchstate as switchstate
 
 
@@ -41,6 +39,7 @@ class GpioSwitch:
         # TODO with the move to gpiozero.button, we could take advantage of its methods for detecting release,
         # hold, etc. (when_released, when_held).  But experiments with those async events caused issues with
         # the LCD refresh timing.  So for now, we'll just poll like we did before when using RPi.GPIO
+        from gpiozero import Button
         self.button = Button(gpio_input, bounce_time=0.008)
         self.button.when_pressed = self._gpio_down
 
