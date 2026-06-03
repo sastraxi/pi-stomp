@@ -15,7 +15,6 @@
 
 import logging
 import time
-import gpiozero as GPIO
 import sys
 from typing_extensions import override
 from rtmidi.midiconstants import CONTROL_CHANGE
@@ -119,6 +118,7 @@ class Footswitch(controller.Controller):
 
         if led_pin is not None:
             try:
+                import gpiozero as GPIO
                 self.led = GPIO.LED(led_pin)
             except Exception as e:
                 logging.error("Initializing LED for footswitch %d: %s" % (id, str(e)))
