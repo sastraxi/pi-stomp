@@ -16,7 +16,6 @@
 import logging
 import os
 from typing import Union
-import spidev
 import sys
 
 import common.token as Token
@@ -84,6 +83,7 @@ class Hardware(ABC):
         return 240_000 if lcd_mhz <= 24 else 1_000_000
 
     def init_spi(self):
+        import spidev
         self.spi = spidev.SpiDev()
         self.spi.open(0, 1)  # Bus 0, CE1
         self.spi.max_speed_hz = self._adc_speed()
