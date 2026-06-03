@@ -13,8 +13,6 @@
 # You should have received a copy of the GNU General Public License
 # along with pi-stomp.  If not, see <https://www.gnu.org/licenses/>.
 
-import board
-import digitalio
 import logging
 import os
 from typing import Optional
@@ -39,7 +37,7 @@ PARAMETER_DIALOG_TIMEOUT = 1.0
 
 class Lcd(abstract_lcd.Lcd):
 
-    def __init__(self, cwd, handler=None, flip=False, spi_speed_mhz=24):
+    def __init__(self, cwd, handler=None, flip=False, display=None, spi_speed_mhz=24):
         self.cwd = cwd
         self.imagedir = os.path.join(cwd, "images")
         Config(os.path.join(cwd, 'ui', 'config.json'))
@@ -55,12 +53,15 @@ class Lcd(abstract_lcd.Lcd):
         self.poll_divisor = max(1, round(frame_time_ms / 10.0))
 
         # TODO would be good to decouple the actual LCD hardware.  This file should work for any 320x240 display
-        display = LcdIli9341(board.SPI(),
-                             digitalio.DigitalInOut(board.CE0),
-                             digitalio.DigitalInOut(board.D6),
-                             digitalio.DigitalInOut(board.D5),
-                             spi_speed_mhz * 1_000_000,
-                             flip)
+        if display is None:
+            import board
+            import digitalio
+            display = LcdIli9341(board.SPI(),
+                                 digitalio.DigitalInOut(board.CE0),
+                                 digitalio.DigitalInOut(board.D6),
+                                 digitalio.DigitalInOut(board.D5),
+                                 spi_speed_mhz * 1_000_000,
+                                 flip)
 
         # Colors
         self.background = (0, 0, 0)
@@ -659,9 +660,11 @@ class Lcd(abstract_lcd.Lcd):
         self.splash_panel.refresh()
 
     def cleanup(self):
-        self.pstack.pop_panel(None)  # current panel
-        self.pstack.pop_panel(self.footswitch_panel)
-        if self.main_panel_pushed:
+        if self.pstack.current is not None:
+            self.pstack.pop_panel(None)
+        if self.footswitch_panel in self.pstack.stack:
+            self.pstack.pop_panel(self.footswitch_panel)
+        if self.main_panel_pushed and self.main_panel in self.pstack.stack:
             self.pstack.pop_panel(self.main_panel)
         if self.w_splash is not None:
             self.w_splash.set_foreground(self.color_splash_down)
