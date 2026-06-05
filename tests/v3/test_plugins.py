@@ -144,32 +144,41 @@ def test_v3_toggle_plugin_bypass_via_footswitch(v3_system: SystemFixture, make_p
     assert hw.footswitches[0].toggled is True
 
 
-def test_v3_preset_change_plugin_update(v3_system: SystemFixture, make_plugin, snapshot):
-    """preset_change_plugin_update() GETs bypass state for each plugin and refreshes LCD."""
+def test_v3_snapshot_change_updates_bypass_via_websocket(v3_system, make_plugin, snapshot):
+    """After preset_change(), bypass state comes from WebSocket PluginBypassMessage
+    drained immediately after the REST call, not from REST pi_stomp_get."""
     handler = v3_system.handler
     hw = v3_system.hw
+    ws_bridge = v3_system.ws_bridge
     mock_get = v3_system.mock_get
 
     assert handler.current
     assert handler.lcd
 
-    plugin = make_plugin("fuzz", bypassed=False)
+    plugin = make_plugin("fuzz", category="Distortion", bypassed=False, has_footswitch=False)
     handler.current.pedalboard.plugins = [plugin]
     handler.lcd.link_data(handler.pedalboard_list, handler.current, hw.footswitches)
     handler.lcd.draw_main_panel()
+    snapshot("active")
 
     def get_side_effect(url, **kwargs):
         resp = MagicMock()
         resp.status_code = 200
-        resp.text = "true" if "pi_stomp_get" in url else "{}"
+        resp.text = "{}"
         return resp
 
     mock_get.side_effect = get_side_effect
 
-    handler.preset_change_plugin_update()
+    handler.current.presets[0] = "Clean"
 
+    # Inject WS bypass message (simulates mod-ui sending it synchronously
+    # during snapshot_load, before the REST response returns)
+    ws_bridge.inject("param_set /graph/fuzz :bypass 1.0")
+    handler.preset_change(0)
+
+    # _drain_ws_messages() inside preset_change() processed the WS message
     assert plugin.is_bypassed()
-    snapshot()
+    snapshot("bypassed")
 
 
 # ---------------------------------------------------------------------------
@@ -321,38 +330,6 @@ def test_v3_parameter_instance_id_strips_leading_slash():
 def test_v3_parameter_instance_id_none_preserved():
     param = Parameter({"shortName": "Gain", "symbol": "gain", "ranges": {}}, 0.5, None, None)
     assert param.instance_id is None
-
-
-def test_v3_rest_bypass_url_uses_slash_before_instance_id(v3_system, get_urls):
-    """preset_change_plugin_update() constructs REST URLs with /graph/
-    prefix, producing '/graph/{id}/:bypass' — never '/graph{id}/:bypass'."""
-    handler = v3_system.handler
-    mock_get = v3_system.mock_get
-
-    plugin = Plugin("CollisionDrive", {}, None, "Distortion")
-    bypass_param = Parameter(
-        {"shortName": "bypass", "symbol": ":bypass", "ranges": {"minimum": 0, "maximum": 1}},
-        False,
-        None,
-        "CollisionDrive",
-    )
-    plugin.parameters[":bypass"] = bypass_param
-    handler.current.pedalboard.plugins = [plugin]
-
-    def get_side_effect(url, **kwargs):
-        resp = MagicMock()
-        resp.status_code = 200
-        resp.text = "false"
-        return resp
-
-    mock_get.side_effect = get_side_effect
-
-    handler.preset_change_plugin_update()
-
-    bypass_urls = [u for u in get_urls(mock_get) if "pi_stomp_get" in u and ":bypass" in u]
-    assert len(bypass_urls) == 1
-    assert "/graph/CollisionDrive/:bypass" in bypass_urls[0]
-    assert "/graphCollisionDrive" not in bypass_urls[0]
 
 
 def test_v3_websocket_send_parameter_uses_canonical_id(v3_system):

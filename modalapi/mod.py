@@ -502,13 +502,16 @@ class Mod(Handler):
                         self.lcd.refresh_plugins()
                         break
 
-    def poll_modui_changes(self):
-        """Poll for changes from MOD-UI: websockets and file watching"""
+    def _drain_ws_messages(self):
         for msg in self.ws_bridge.get_received_messages():
             try:
                 self._handle_ws_message(parse_message(msg))
             except Exception as e:
                 logging.error(f"Error handling WebSocket message '{msg}': {e}")
+
+    def poll_modui_changes(self):
+        """Poll for changes from MOD-UI: websockets and file watching"""
+        self._drain_ws_messages()
 
         # Check for pedalboard change via last.json
         if self.last_json_monitor.check_for_change():
@@ -728,9 +731,16 @@ class Mod(Handler):
             logging.error("Bad Rest request: %s status: %d" % (url, resp.status_code))
         self.current.preset_index = index
 
-        #load of the preset might have changed plugin bypass status
-        self.preset_change_plugin_update()
-        self.bot_encoder_mode = BotEncoderMode.DEFAULT
+        # mod-ui sends WS bypass messages synchronously during snapshot_load,
+        # before the REST response returns. Drain now so plugin state is
+        # correct before we draw the LCD.
+        self._drain_ws_messages()
+
+        self.lcd.draw_tools(SelectedType.WIFI, SelectedType.EQ, SelectedType.BYPASS, SelectedType.SYSTEM)
+        self.lcd.draw_analog_assignments(self.current.analog_controllers)
+        self.lcd.draw_plugins(self.current.pedalboard.plugins)
+        self.lcd.draw_bound_plugins(self.current.pedalboard.plugins, self.hardware.footswitches)
+        self.lcd.draw_plugin_select()
 
     def preset_incr_and_change(self):
         if self.universal_encoder_mode == UniversalEncoderMode.LOADING:
@@ -755,23 +765,6 @@ class Mod(Handler):
         if self.preset_select_index(index):
             self.preset_change()
         self.universal_encoder_mode = UniversalEncoderMode.DEFAULT
-
-    def preset_change_plugin_update(self):
-        # Now that the preset has changed on the host, update plugin bypass indicators
-        for p in self.current.pedalboard.plugins:
-            uri = self.root_uri + "effect/parameter/pi_stomp_get//graph/" + p.instance_id + "/:bypass"
-            try:
-                resp = req.get(uri)
-                if resp.status_code == 200:
-                    p.set_bypass(resp.text == "true")
-            except:
-                logging.error("failed to get bypass value for: %s" % p.instance_id)
-                continue
-        self.lcd.draw_tools(SelectedType.WIFI, SelectedType.EQ, SelectedType.BYPASS, SelectedType.SYSTEM)
-        self.lcd.draw_analog_assignments(self.current.analog_controllers)
-        self.lcd.draw_plugins(self.current.pedalboard.plugins)
-        self.lcd.draw_bound_plugins(self.current.pedalboard.plugins, self.hardware.footswitches)
-        self.lcd.draw_plugin_select()
 
     #
     # Plugin Stuff

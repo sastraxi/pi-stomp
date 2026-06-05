@@ -110,6 +110,8 @@ class Lcd(abstract_lcd.Lcd):
 
         self.supports_toolbar = False
 
+        self.plugins = []
+
     def poll_updates(self):
         pass  # lcdgfx pushes eagerly on every refresh call
 
@@ -172,6 +174,8 @@ class Lcd(abstract_lcd.Lcd):
         self._lcd.show()
 
     def refresh_plugins(self):
+        for p in self.plugins:
+            self.draw[p.lcd_xyz[2]].line(p.bypass_indicator_xy, not p.is_bypassed(), self.plugin_bypass_thickness)
         self.refresh_zone(2)
         self.refresh_zone(4)
         self.refresh_zone(6)
@@ -220,7 +224,7 @@ class Lcd(abstract_lcd.Lcd):
         y = 2
         menu_list = list(sorted(menu_items))
         for i in menu_list:
-            if idx is 0:
+            if idx == 0:
                 self.menu_draw.text((x, y), "%s" % menu_items[i][Token.NAME], True, self.small_font)
                 x = 8   # indent after first element (back button)
             else:
@@ -410,6 +414,9 @@ class Lcd(abstract_lcd.Lcd):
         plugin.bypass_indicator_xy = bypass_indicator_xy
         self.draw[zone].line(bypass_indicator_xy, not plugin.is_bypassed(), self.plugin_bypass_thickness)
 
+        if plugin not in self.plugins:
+            self.plugins.append(plugin)
+
         return x2
 
     def draw_bound_plugins(self, plugins, footswitches):
@@ -441,6 +448,9 @@ class Lcd(abstract_lcd.Lcd):
         self.refresh_zone(7)
 
     def draw_plugins(self, plugins):
+        # Full plugin redraw starts here — clear the tracked list since
+        # draw_plugin will re-populate it (including from draw_bound_plugins).
+        self.plugins = []
         y = 0
         x = 0
         xwrap = 110  # scroll if exceeds this width
