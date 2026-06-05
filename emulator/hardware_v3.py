@@ -47,7 +47,7 @@ class EmulatorHardwareV3(EmulatorHardwareBase):
         cfg = self.default_cfg.copy()
         self.create_encoders(cfg)
 
-    def add_encoder(self, id, type, callback, longpress_callback, midi_channel, midi_cc):
+    def add_encoder(self, id, type, callback, longpress_callback, midi_channel, midi_cc, midiout=None):
         """Called by Hardware.create_encoders() for each encoder in config."""
         if type == Token.VOLUME:
             enc = MockEncoder(
@@ -60,7 +60,7 @@ class EmulatorHardwareV3(EmulatorHardwareBase):
                 callback=callback,
                 midi_channel=midi_channel,
                 midi_CC=midi_cc,
-                midiout=self.midiout,
+                midiout=midiout or self.midiout,
                 type=Token.KNOB,
                 id=id)
             enc.press_callback = self.handler.universal_encoder_sw
