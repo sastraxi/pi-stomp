@@ -35,7 +35,7 @@ from pistomp.lcd320x240 import Lcd
 from pistomp.hardware import Controller, Hardware
 import pistomp.settings as Settings
 from modalapi.websocket_bridge import AsyncWebSocketBridge
-from modalapi.ws_protocol import parse_message, LoadingEndMessage, PedalSnapshotMessage, PluginBypassMessage, WebSocketMessage
+from modalapi.ws_protocol import parse_message, LoadingEndMessage, PedalSnapshotMessage, PluginBypassMessage, AddPluginMessage, WebSocketMessage
 from modalapi.pedalboard_monitor import FileChangeMonitor, read_pedalboard_bundle
 
 from pistomp.analogmidicontrol import AnalogMidiControl
@@ -82,6 +82,12 @@ class Modhandler(Handler):
 
         # Stores snapshot index from loading_end until pedalboard change is detected
         self.next_pedalboard_preset_index = None
+
+        # Latest known plugin bypass states keyed by canonical instance_id, fed by
+        # WebSocket add/param_set messages. mod-ui broadcasts these on every load
+        # (and on ws connect), often before set_current_pedalboard() has rebuilt
+        # the plugin objects, so we stash them here and re-apply once current exists.
+        self.plugin_bypass_state: dict[str, bool] = {}
 
         # Backup
         self.backup_dir = "/media/usb0/backups"
@@ -301,14 +307,37 @@ class Modhandler(Handler):
                 self.current.preset_index = msg.snapshot_id
                 self.lcd.draw_title()
 
-        elif isinstance(msg, PluginBypassMessage):
-            if self.current is not None:
-                for plugin in self.current.pedalboard.plugins:
-                    if plugin.instance_id == msg.instance:
-                        logging.debug(f"WebSocket: Plugin {msg.instance} bypass -> {msg.bypassed}")
-                        plugin.set_bypass(msg.bypassed)
-                        self.lcd.refresh_plugins()
-                        break
+        elif isinstance(msg, (PluginBypassMessage, AddPluginMessage)):
+            # Both carry an authoritative bypass state for a plugin instance.
+            # AddPluginMessage arrives on load/connect; PluginBypassMessage on
+            # snapshot or manual toggle. Treat them identically.
+            self._record_plugin_bypass(msg.instance, msg.bypassed)
+
+    def _record_plugin_bypass(self, instance: str, bypassed: bool):
+        """Remember a plugin's bypass state and apply it to current if present."""
+        self.plugin_bypass_state[instance] = bypassed
+        if self.current is None:
+            return
+        for plugin in self.current.pedalboard.plugins:
+            if plugin.instance_id == instance:
+                logging.debug(f"WebSocket: Plugin {instance} bypass -> {bypassed}")
+                plugin.set_bypass(bypassed)
+                self.lcd.refresh_plugins()
+                break
+
+    def _apply_known_bypass_states(self):
+        """Overlay stashed bypass states onto the current pedalboard's plugins.
+
+        Called after (re)building current. LILV parses bypass from the "Default"
+        snapshot, which is wrong when mod is running another snapshot; the WS
+        add/param_set broadcasts hold the truth, captured in plugin_bypass_state.
+        """
+        if self.current is None:
+            return
+        for plugin in self.current.pedalboard.plugins:
+            known = self.plugin_bypass_state.get(plugin.instance_id)
+            if known is not None and known != bool(plugin.is_bypassed()):
+                plugin.set_bypass(known)
 
     def _drain_ws_messages(self):
         for msg in self.ws_bridge.get_received_messages():
@@ -441,6 +470,14 @@ class Modhandler(Handler):
         # Initialize the data and draw on LCD
         self.bind_current_pedalboard()
         self.load_current_presets()
+
+        # LILV gives us the "Default" snapshot's bypass values; reconcile with the
+        # live state mod-ui broadcast via WebSocket add/param_set (see
+        # plugin_bypass_state). On a pedalboard change those messages were drained
+        # before this rebuild; at cold boot they arrive shortly after ws connect and
+        # are applied live by _record_plugin_bypass on the next poll.
+        self._apply_known_bypass_states()
+
         self.lcd.link_data(self.pedalboard_list, self.current, self.hardware.footswitches)
         self.lcd.draw_main_panel()
         self.lcd.update_wifi(self.wifi_status)

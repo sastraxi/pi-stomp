@@ -2,6 +2,7 @@
 
 from modalapi.ws_protocol import (
     AddHwPortMessage,
+    AddPluginMessage,
     LoadingEndMessage,
     LoadingStartMessage,
     PedalSnapshotMessage,
@@ -194,6 +195,34 @@ def test_plugin_bypass_nonzero_is_true():
 def test_param_set_non_bypass_is_unknown():
     # Regular param_set (non-bypass symbol) should not parse as PluginBypassMessage
     msg = parse_message("param_set /graph/CollisionDrive/DRIVE 0.75")
+    assert isinstance(msg, UnknownMessage)
+
+
+# ---------------------------------------------------------------------------
+# add /graph/{instance} {uri} {x} {y} {bypassed} {sversion} {buildEnv}
+# ---------------------------------------------------------------------------
+
+
+def test_add_plugin_bypassed():
+    msg = parse_message("add /graph/Tremolo http://x.org/trem 10.0 20.0 1 1.2 0")
+    assert msg == AddPluginMessage(instance="Tremolo", bypassed=True)
+
+
+def test_add_plugin_active():
+    msg = parse_message("add /graph/CollisionDrive http://x.org/cd 0.0 0.0 0 1.0 1")
+    assert msg == AddPluginMessage(instance="CollisionDrive", bypassed=False)
+
+
+def test_add_plugin_strips_graph_prefix():
+    msg = parse_message("add /graph/fuzz http://x.org/fuzz 5.0 5.0 0 1.0 0")
+    assert isinstance(msg, AddPluginMessage)
+    assert msg.instance == "fuzz"
+
+
+def test_add_plugin_too_short_is_unknown():
+    # Internal "add {uri} {id}" form (not the broadcast graph form) must not
+    # be misread as a plugin-state message.
+    msg = parse_message("add http://x.org/fuzz 7")
     assert isinstance(msg, UnknownMessage)
 
 

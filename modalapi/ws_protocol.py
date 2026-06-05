@@ -89,6 +89,19 @@ class PluginBypassMessage:
 
 
 @dataclass
+class AddPluginMessage:
+    """Plugin added to the graph (received as add /graph/{instance} ...).
+
+    Broadcast by mod-ui on every pedalboard load and on WebSocket connect
+    (report_current_state). Carries the plugin's *live* bypass state, which is
+    the authoritative source on load — LILV only knows the "Default" snapshot.
+    """
+
+    instance: str  # canonical bare form, e.g. "CollisionDrive"
+    bypassed: bool
+
+
+@dataclass
 class UnknownMessage:
     """Message type we don't handle yet."""
 
@@ -105,6 +118,7 @@ WebSocketMessage = Union[
     RemoveHwPortMessage,
     TrueBypassMessage,
     PluginBypassMessage,
+    AddPluginMessage,
     UnknownMessage,
 ]
 
@@ -166,6 +180,15 @@ def parse_message(raw_message: str) -> WebSocketMessage:
                         )
             case ["add_hw_port", port_name]:
                 return AddHwPortMessage(port_name=port_name, port_type="", is_output=False, title="", index=0)
+
+            # Format: add /graph/{instance} {uri} {x} {y} {bypassed} {sversion} {buildEnv}
+            # Field index 3 of the trailing args is the live bypass state.
+            case ["add", path, rest]:
+                fields = rest.split(" ")
+                if len(fields) >= 4:
+                    instance = path.removeprefix("/graph/")
+                    return AddPluginMessage(instance=instance, bypassed=float(fields[3]) != 0.0)
+                return UnknownMessage(raw=raw_message)
 
             # Format: remove_hw_port /graph/{name}
             case ["remove_hw_port", port_name, *_]:

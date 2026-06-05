@@ -181,6 +181,55 @@ def test_v3_snapshot_change_updates_bypass_via_websocket(v3_system, make_plugin,
     snapshot("bypassed")
 
 
+def test_v3_add_message_reconciles_bypass_on_current(v3_system, make_plugin):
+    """An `add` broadcast (load / ws connect) updates a live plugin's bypass.
+
+    LILV parsed the plugin as active ("Default" snapshot); mod-ui reports it
+    bypassed via the add message, which must win.
+    """
+    handler = v3_system.handler
+    ws_bridge = v3_system.ws_bridge
+
+    assert handler.current
+    plugin = make_plugin("trem", category="Modulation", bypassed=False, has_footswitch=False)
+    handler.current.pedalboard.plugins = [plugin]
+    assert not plugin.is_bypassed(), "sanity: starts active (LILV default)"
+
+    ws_bridge.inject("add /graph/trem http://x.org/trem 0.0 0.0 1 1.0 0")
+    handler._drain_ws_messages()
+
+    assert plugin.is_bypassed()
+    assert handler.plugin_bypass_state["trem"] is True
+
+
+def test_v3_add_message_applied_to_pedalboard_built_after_arrival(v3_system, make_plugin):
+    """Bypass arriving before the plugin object exists is stashed and applied.
+
+    On a pedalboard change, mod-ui broadcasts `add` (synchronously, on load)
+    before set_current_pedalboard() rebuilds the plugin objects. The drain
+    records the state into plugin_bypass_state; _apply_known_bypass_states()
+    overlays it once the new plugins exist.
+    """
+    handler = v3_system.handler
+    ws_bridge = v3_system.ws_bridge
+
+    assert handler.current
+
+    # add arrives while the plugin is not yet part of current (simulates the
+    # pre-rebuild ordering in poll_modui_changes)
+    handler.current.pedalboard.plugins = []
+    ws_bridge.inject("add /graph/delay http://x.org/delay 0.0 0.0 1 1.0 0")
+    handler._drain_ws_messages()
+    assert handler.plugin_bypass_state["delay"] is True
+
+    # Now the rebuild produces the plugin from LILV (active); overlay corrects it
+    plugin = make_plugin("delay", category="Delay", bypassed=False, has_footswitch=False)
+    handler.current.pedalboard.plugins = [plugin]
+    handler._apply_known_bypass_states()
+
+    assert plugin.is_bypassed()
+
+
 # ---------------------------------------------------------------------------
 # Parameter editing
 # ---------------------------------------------------------------------------
