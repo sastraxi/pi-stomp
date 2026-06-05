@@ -100,14 +100,17 @@ def _make_enc_midi(midi_CC=70, midi_channel=0):
 
 
 def test_tweak_encoder_step_emits_midi_and_invokes_callback():
-    enc, midiout, cb = _make_enc_midi(midi_CC=70, midi_channel=2)
+    enc, midiout, _ = _make_enc_midi(midi_CC=70, midi_channel=2)
+    cb = MagicMock()
+    enc.value_change_callback = cb
     assert enc.midi_value == 64
 
     enc.step(3)
 
     assert enc.midi_value == 67
     midiout.send_message.assert_called_once_with([CONTROL_CHANGE | 2, 70, 67])
-    cb.assert_called_once_with(3)
+    cb.assert_called_once()
+    assert cb.call_args.args[1] is enc
 
 
 def test_tweak_encoder_clamps_to_midi_range():
@@ -133,7 +136,7 @@ def test_tweak_encoder_set_value_seeds_midi_value():
     assert enc.midi_value == 100
 
     enc.set_value(33.7)
-    assert enc.midi_value == 33  # int() truncates
+    assert enc.midi_value == 34  # EncoderController snaps to nearest step
 
 
 # ---------------------------------------------------------------------------
