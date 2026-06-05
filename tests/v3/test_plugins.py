@@ -230,6 +230,47 @@ def test_v3_add_message_applied_to_pedalboard_built_after_arrival(v3_system, mak
     assert plugin.is_bypassed()
 
 
+def test_v3_loading_end_reapplies_known_bypass(v3_system, make_plugin):
+    """loading_end (sent on every load and ws reconnect) re-applies stashed state."""
+    handler = v3_system.handler
+    ws_bridge = v3_system.ws_bridge
+
+    assert handler.current
+    plugin = make_plugin("verb", category="Reverb", bypassed=False, has_footswitch=False)
+    handler.current.pedalboard.plugins = [plugin]
+    # State already known (e.g. recorded on a previous connect) but plugin still active
+    handler.plugin_bypass_state["verb"] = True
+
+    ws_bridge.inject("loading_end 0")
+    handler._drain_ws_messages()
+
+    assert plugin.is_bypassed()
+
+
+def test_v3_sync_state_from_websocket_drains_until_loading_end(v3_system, make_plugin):
+    """sync_state_from_websocket() applies the connect-time dump and stops at loading_end."""
+    handler = v3_system.handler
+    ws_bridge = v3_system.ws_bridge
+
+    assert handler.current
+    plugin = make_plugin("fuzz", category="Distortion", bypassed=False, has_footswitch=False)
+    handler.current.pedalboard.plugins = [plugin]
+
+    # Simulate mod-ui's report_current_state dump terminated by loading_end
+    ws_bridge.inject("add /graph/fuzz http://x.org/fuzz 0.0 0.0 1 1.0 0")
+    ws_bridge.inject("loading_end 0")
+
+    assert handler.sync_state_from_websocket(timeout_s=1.0) is True
+    assert plugin.is_bypassed()
+
+
+def test_v3_sync_state_from_websocket_times_out_without_loading_end(v3_system):
+    """sync_state_from_websocket() returns False (no hang) if mod-ui never replies."""
+    handler = v3_system.handler
+
+    assert handler.sync_state_from_websocket(timeout_s=0.05) is False
+
+
 # ---------------------------------------------------------------------------
 # Parameter editing
 # ---------------------------------------------------------------------------

@@ -23,6 +23,7 @@ import requests as req
 from requests import Response
 import subprocess
 import sys
+import time
 import yaml
 
 from typing import cast, Any
@@ -277,6 +278,10 @@ class Modhandler(Handler):
             logging.debug(f"WebSocket: Pedalboard loading finished, snapshot={msg.snapshot_id}")
             # Sometimes mod-ui sends us -1 for preset index, but shows 0 anyway ("Default")
             self.next_pedalboard_preset_index = max(0, msg.snapshot_id)
+            # loading_end terminates mod-ui's state dump (on every load and ws
+            # (re)connect). The preceding add/param_set messages have populated
+            # plugin_bypass_state, so re-apply now to self-heal on reconnects.
+            self._apply_known_bypass_states()
 
         elif isinstance(msg, PedalSnapshotMessage):
             if self.next_pedalboard_preset_index is not None:
@@ -340,11 +345,34 @@ class Modhandler(Handler):
                 plugin.set_bypass(known)
 
     def _drain_ws_messages(self):
+        saw_loading_end = False
         for msg in self.ws_bridge.get_received_messages():
             try:
-                self._handle_ws_message(parse_message(msg))
+                parsed = parse_message(msg)
+                self._handle_ws_message(parsed)
+                if isinstance(parsed, LoadingEndMessage):
+                    saw_loading_end = True
             except Exception as e:
                 logging.error(f"Error handling WebSocket message '{msg}': {e}")
+        return saw_loading_end
+
+    def sync_state_from_websocket(self, timeout_s=2.0):
+        """Drain mod-ui's connect-time state dump at startup, before the main loop.
+
+        On connect, mod-ui synchronously pushes the full graph (add /graph/...
+        with live bypass) terminated by loading_end. We block only until that
+        sentinel arrives (milliseconds on localhost) rather than waiting a fixed
+        interval, so the first LCD paint reflects real bypass state instead of the
+        LILV "Default" snapshot. Bounded by timeout_s in case mod-ui is slow/down.
+        """
+        deadline = time.monotonic() + timeout_s
+        while time.monotonic() < deadline:
+            if self._drain_ws_messages():
+                logging.info("Initial WebSocket state synced (loading_end received)")
+                return True
+            time.sleep(0.01)
+        logging.warning("Timed out waiting for initial WebSocket state sync")
+        return False
 
     def poll_modui_changes(self):
         """Poll for changes from MOD-UI: websockets and file watching"""

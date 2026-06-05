@@ -144,6 +144,12 @@ def main():
         else:
             handler.set_current_pedalboard(handler.pedalboards[current_pedal_board_bundle])
 
+        # Reconcile plugin bypass with mod-ui's live state. LILV only gave us the
+        # "Default" snapshot; mod-ui pushes the real state (terminated by
+        # loading_end) the instant our WebSocket connects. Drain it now so the
+        # first LCD paint is correct instead of flashing stale bypass indicators.
+        handler.sync_state_from_websocket()
+
         # Load system info.  This can take a few seconds
         handler.system_info_load()
 

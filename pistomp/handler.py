@@ -39,6 +39,11 @@ class Handler:
     def poll_modui_changes(self):
         raise NotImplementedError()
 
+    def sync_state_from_websocket(self, timeout_s=2.0) -> bool:
+        # No-op for handlers without a WebSocket bridge (v1/v2). Modhandler
+        # overrides this to drain mod-ui's connect-time state dump at startup.
+        return False
+
     def preset_incr_and_change(self):
         raise NotImplementedError()
 
