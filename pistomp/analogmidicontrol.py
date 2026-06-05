@@ -68,6 +68,8 @@ class AnalogMidiControl(analogcontrol.AnalogControl, controller.Controller):
         logging.debug("AnalogControl Sending CC event %s" % cc)
         self.midiout.send_message(cc)
 
+        # Update last_read BEFORE the callback so get_normalized_value() reflects
+        # the new position when blend mode re-reads the control inside the callback.
         self.last_read = value
 
         if self.value_change_callback:
