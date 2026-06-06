@@ -23,6 +23,7 @@ import pistomp.analogcontrol as analogcontrol
 import pistomp.controller as controller
 from pistomp.controller import AnalogDisplayInfo
 from pistomp.input.event import AnalogEvent
+from pistomp.input.sink import InputSink
 
 import logging
 
@@ -42,6 +43,7 @@ class AnalogMidiControl(analogcontrol.AnalogControl, controller.Controller):
         self.type = type
         self.id = id
         self.last_read = 0
+        self.sink: InputSink | None = None
         self.value = None
         self.cfg: dict[str, Any] = cfg or {}
 

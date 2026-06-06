@@ -124,7 +124,7 @@ class Mod(Handler):
 
         self.plugin_dict = {}
 
-        self.hardware = None
+        self._hardware = None
 
         self.top_encoder_mode = TopEncoderMode.DEFAULT
         self.bot_encoder_mode = BotEncoderMode.DEFAULT
@@ -216,8 +216,13 @@ class Mod(Handler):
     # Hardware
     #
 
+    @property
+    def hardware(self):
+        assert self._hardware is not None, "Hardware has not been initialized"
+        return self._hardware
+
     def add_hardware(self, hardware):
-        self.hardware = hardware
+        self._hardware = hardware
         hardware.external_midi = self.external_midi
 
     def add_lcd(self, lcd):
