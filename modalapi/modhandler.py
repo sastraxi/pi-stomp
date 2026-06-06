@@ -707,7 +707,7 @@ class Modhandler(Handler):
             # EncoderController routes through encoder_value_changed instead.
             if controller.parameter is None:
                 if isinstance(controller, AnalogMidiControl):
-                    controller.parameter = self.hardware._create_external_parameter(
+                    controller.parameter = self.hardware.create_external_parameter(
                         controller, routing.port_name, controller.midi_channel, controller.midi_CC
                     )
                 else:
