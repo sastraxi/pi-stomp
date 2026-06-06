@@ -754,8 +754,8 @@ class Modhandler(Handler):
             # encoders skip the commit path entirely via hardware.is_external() inside Handler.handle.
             if controller.parameter is None:
                 if isinstance(controller, AnalogMidiControl):
-                    controller.parameter = self.hardware._create_external_parameter(
-                        controller, port_name, controller.midi_channel, controller.midi_CC
+                    controller.parameter = self.hardware.create_external_parameter(
+                        controller, routing.port_name, controller.midi_channel, controller.midi_CC
                     )
                 else:
                     ext_info = {
