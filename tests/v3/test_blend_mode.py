@@ -1,4 +1,4 @@
-"""Integration tests for blend mode — v3 only (requires EncoderMidiControl)."""
+"""Integration tests for blend mode — v3 only (requires Encoder)."""
 
 import json
 import os
@@ -13,10 +13,10 @@ from tests.types import SystemFixture
 
 
 def _blend_encoder(hw):
-    """Return the EncoderMidiControl with id=1 used by the blend fixture."""
-    from pistomp.encoder_controller import EncoderController as EncoderMidiControl
+    """Return the Encoder with id=1 used by the blend fixture."""
+    from pistomp.encoder import Encoder
 
-    return next(e for e in hw.encoders if isinstance(e, EncoderMidiControl) and getattr(e, "id", None) == 1)
+    return next(e for e in hw.encoders if isinstance(e, Encoder) and getattr(e, "id", None) == 1)
 
 
 # ---------------------------------------------------------------------------

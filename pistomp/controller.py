@@ -55,7 +55,7 @@ class Controller:
         self.midi_channel: int = midi_channel
         self.midi_CC: int | None = midi_CC
         self.parameter: Parameter | None = None
-        # type is not declared here — it conflicts with encoder.Encoder.type in EncoderController's MRO.
+        # type is not declared here — it conflicts with Encoder's MRO.
         # Subclasses that carry type must declare it themselves.
         self.midi_min: int = 0
         self.midi_max: int = 127

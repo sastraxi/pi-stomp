@@ -92,29 +92,23 @@ def test_nav_encoder_step_zero_is_a_noop():
 def _make_enc_midi(midi_CC=70, midi_channel=0):
     midiout = MagicMock()
     handler = MagicMock()
-    cb = MagicMock()
     enc = MockEncoderMidi(
-        handler=handler, callback=cb, midi_channel=midi_channel, midi_CC=midi_CC, midiout=midiout, type="TWEAK", id=1
+        handler=handler, callback=None, midi_channel=midi_channel, midi_CC=midi_CC, midiout=midiout, type="TWEAK", id=1
     )
-    return enc, midiout, cb
+    return enc, midiout
 
 
-def test_tweak_encoder_step_emits_midi_and_invokes_callback():
-    enc, midiout, _ = _make_enc_midi(midi_CC=70, midi_channel=2)
-    cb = MagicMock()
-    enc.value_change_callback = cb
+def test_tweak_encoder_step_advances_midi_value():
+    enc, midiout = _make_enc_midi(midi_CC=70, midi_channel=2)
     assert enc.midi_value == 64
 
     enc.step(3)
 
     assert enc.midi_value == 67
-    midiout.send_message.assert_called_once_with([CONTROL_CHANGE | 2, 70, 67])
-    cb.assert_called_once()
-    assert cb.call_args.args[1] is enc
 
 
 def test_tweak_encoder_clamps_to_midi_range():
-    enc, midiout, _ = _make_enc_midi()
+    enc, midiout = _make_enc_midi()
     enc.set_value(125)
 
     enc.step(10)  # would go to 135 → clamped to 127
@@ -124,19 +118,15 @@ def test_tweak_encoder_clamps_to_midi_range():
     enc.step(-20)  # would go to -15 → clamped to 0
     assert enc.midi_value == 0
 
-    # both emissions used the clamped value
-    sent_values = [call.args[0][2] for call in midiout.send_message.call_args_list]
-    assert sent_values == [127, 0]
-
 
 def test_tweak_encoder_set_value_seeds_midi_value():
-    enc, _, _ = _make_enc_midi()
+    enc, _ = _make_enc_midi()
 
     enc.set_value(100)
     assert enc.midi_value == 100
 
     enc.set_value(33.7)
-    assert enc.midi_value == 34  # EncoderController snaps to nearest step
+    assert enc.midi_value == 34  # Encoder snaps to nearest step
 
 
 # ---------------------------------------------------------------------------

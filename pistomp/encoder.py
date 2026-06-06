@@ -27,6 +27,7 @@ import pistomp.gpioswitch as gpioswitch
 import pistomp.switchstate as switchstate
 from common.parameter import Parameter, Type
 from pistomp.input.event import EncoderEvent, SwitchEvent, SwitchEventKind
+from pistomp.input.sink import InputSink
 
 
 def _clamp(value, min_value, max_value):
@@ -104,6 +105,7 @@ class Encoder(controller.Controller):
         self.num_steps: int = 128
         self._last_detent_time: Optional[float] = None
         self._last_direction: int = 0
+        self.sink: Optional[InputSink] = None
         if midi_channel is not None and midi_CC is not None or type is not None:
             self._recalculate_steps()
             self.set_value(64)

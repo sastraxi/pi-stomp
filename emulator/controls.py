@@ -21,7 +21,7 @@ type checkers are satisfied, but bypasses any GPIO / SPI / ADC init.
 
 import pistomp.analogcontrol as analogcontrol
 import pistomp.encoder as encoder
-from pistomp.encoder_controller import EncoderController
+from pistomp.encoder import Encoder
 import pistomp.footswitch as footswitch
 
 try:
@@ -56,14 +56,17 @@ class MockEncoder(encoder.Encoder):
             self.press_callback(value)
 
 
-class MockEncoderMidi(EncoderController):
+class MockEncoderMidi(Encoder):
     """Tweak encoder with MIDI CC.  Driven externally via step() / press()."""
 
     def __init__(self, handler, callback, midi_channel, midi_CC, midiout,
                  type=None, id=None, cfg=None):
-        super().__init__(handler=handler, d_pin=None, clk_pin=None,
-                         midi_CC=midi_CC, midi_channel=midi_channel, midiout=midiout,
+        super().__init__(d_pin=None, clk_pin=None,
+                         midi_CC=midi_CC, midi_channel=midi_channel,
                          type=type, id=id)
+        self.handler = handler
+        self.callback = callback
+        self.midiout = midiout
         self.cfg = cfg or {'type': type, 'id': id}
         self.press_callback = None
 

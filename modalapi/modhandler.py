@@ -701,7 +701,7 @@ class Modhandler(Handler):
 
         # Clear previous parameter bindings from all controllers except volume encoder
         for controller in self.hardware.controllers.values():
-            if controller.type != Token.VOLUME:
+            if not (isinstance(controller, Encoder) and controller.type == Token.VOLUME):
                 controller.parameter = None
 
         # Clear analog controllers display data
