@@ -57,7 +57,7 @@ class Config:
         # XXX Add some error handling
         self.fonts[label] = f
 
-    def get_font(self, label):
+    def get_font(self, label) -> ImageFont.FreeTypeFont | None:
         if label not in self.fonts:
             return None
         return self.fonts[label]
