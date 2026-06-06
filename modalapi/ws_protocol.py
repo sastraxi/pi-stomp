@@ -231,6 +231,11 @@ def parse_message(raw_message: str) -> WebSocketMessage:
             case ["truebypass"]:
                 return TrueBypassMessage(left=0, right=0)
 
+            # Format: transport {rolling} {beatsPerBar} {bpm} {syncMode}
+            case ["transport", rolling, rest]:
+                bpm = float(rest.split()[1])
+                return TransportMessage(rolling=rolling != "0", bpm=bpm)
+
     except (ValueError, IndexError) as e:
         logging.warning(f"Failed to parse WebSocket message '{raw_message}': {e}")
         return UnknownMessage(raw=raw_message)
