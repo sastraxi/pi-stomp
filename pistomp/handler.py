@@ -18,13 +18,13 @@ from typing import TYPE_CHECKING
 
 from pistomp.input.event import ControllerEvent
 from pistomp.input.sink import InputSink
+from pistomp.tuner.source import TunerSourceFactory
 
 if TYPE_CHECKING:
     from pistomp.hardware import Hardware
 
 
 class Handler(InputSink):
-
     def __init__(self):
         self.homedir = None
         self.lcd = None
@@ -32,6 +32,13 @@ class Handler(InputSink):
     @property
     def hardware(self) -> "Hardware":
         raise NotImplementedError()
+
+    @property
+    def lcd_poll_divisor(self) -> int:
+        # Gate for poll_lcd_updates, in units of 10 ms main-loop ticks
+        # (20 → one flush every 200 ms). Subclasses may override to narrow
+        # it dynamically (e.g. when the tuner panel is visible).
+        return 20
 
     def noop(self):
         pass
@@ -103,3 +110,6 @@ class Handler(InputSink):
 
     def poll_wifi(self):
         raise NotImplementedError()
+
+    def set_tuner_source_factory(self, factory: "TunerSourceFactory") -> None:
+        pass

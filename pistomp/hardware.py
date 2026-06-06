@@ -266,7 +266,7 @@ class Hardware(ABC):
                 midi_port = self.__validate_midi_port(midi_port)
 
             if midi_port:
-                midiout = ExternalMidiOut(self.external_midi, midi_port, midi_channel, self.midiout)
+                midiout = ExternalMidiOut(self.external_midi, midi_port, self.midiout)
                 logging.info(f"Footswitch {idx} routing MIDI CC {midi_cc} to external port '{midi_port}'")
             else:
                 midiout = self.midiout
@@ -329,7 +329,7 @@ class Hardware(ABC):
                 midi_port = self.__validate_midi_port(midi_port)
 
             if midi_port:
-                midiout = ExternalMidiOut(self.external_midi, midi_port, midi_channel, self.midiout)
+                midiout = ExternalMidiOut(self.external_midi, midi_port, self.midiout)
                 logging.info(f"Analog control {id} routing MIDI CC {midi_cc} to external port '{midi_port}'")
             else:
                 midiout = self.midiout
@@ -376,7 +376,7 @@ class Hardware(ABC):
                 midi_port = self.__validate_midi_port(midi_port)
 
             if midi_port:
-                midiout = ExternalMidiOut(self.external_midi, midi_port, midi_channel, self.midiout)
+                midiout = ExternalMidiOut(self.external_midi, midi_port, self.midiout)
                 logging.info(f"Encoder {id} routing MIDI CC {midi_cc} to external port '{midi_port}'")
             else:
                 midiout = self.midiout
@@ -464,7 +464,7 @@ class Hardware(ABC):
                     if midi_cc is not None and hasattr(encoder, 'midi_CC'):
                         encoder.midi_CC = midi_cc
                     if midi_port:
-                        encoder.midiout = ExternalMidiOut(self.external_midi, midi_port, midi_channel, self.midiout)
+                        encoder.midiout = ExternalMidiOut(self.external_midi, midi_port, self.midiout)
                         self.external_routing[encoder] = midi_port
                         logging.debug(f"Encoder {enc_id} routing CC {midi_cc} to external port '{midi_port}'")
                     else:
@@ -489,7 +489,7 @@ class Hardware(ABC):
                     if midi_cc is not None and hasattr(analog, 'midi_CC'):
                         analog.midi_CC = midi_cc
                     if midi_port:
-                        analog.midiout = ExternalMidiOut(self.external_midi, midi_port, midi_channel, self.midiout)
+                        analog.midiout = ExternalMidiOut(self.external_midi, midi_port, self.midiout)
                         self.external_routing[analog] = midi_port
                         logging.debug(f"Analog controller {analog_id} routing CC {midi_cc} to external port '{midi_port}'")
                     else:
