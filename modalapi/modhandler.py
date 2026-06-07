@@ -24,8 +24,6 @@ from requests import Response
 import subprocess
 import sys
 import yaml
-from typing import Any
-
 from typing import cast, Any
 
 import common.token as Token
@@ -36,7 +34,7 @@ import modalapi.wifi as Wifi
 import modalapi.external_midi as ExternalMidi
 from modalapi.external_midi import EXTERNAL_INSTANCE_ID
 from pistomp.lcd320x240 import Lcd
-from pistomp.hardware import Controller, Hardware
+from pistomp.hardware import Hardware
 import pistomp.settings as Settings
 from blend.snapshot import SnapshotManager
 from modalapi.websocket_bridge import AsyncWebSocketBridge
@@ -585,9 +583,6 @@ class Modhandler(Handler):
                 cfg = yaml.load(ymlfile, Loader=yaml.SafeLoader)
         self.hardware.reinit(cfg)
 
-        # Sync current state of analog controls (expression pedals, etc.)
-        self.hardware.sync_analog_controls()
-
         # Initialize the data and draw on LCD
         self.bind_current_pedalboard()
         self.bind_volume_encoder()
@@ -603,6 +598,9 @@ class Modhandler(Handler):
                 self.external_midi.send_messages_for_pedalboard()
             except Exception as e:
                 logging.warning(f"Failed to send external MIDI messages: {e}")
+
+        # Sync analog controls last: after bind + external send, matching mod.py
+        self.hardware.sync_analog_controls()
 
         # Prepare blend modes if configured (snapshot-based activation)
         try:
@@ -648,9 +646,9 @@ class Modhandler(Handler):
         # The pedalboard data has already been loaded, but this will overlay
         # any real time settings
 
-        # Clear previous parameter bindings from all controllers except volume encoder
+        # Clear previous parameter bindings from all controllers except the volume control
         for controller in self.hardware.controllers.values():
-            if getattr(controller, 'type', None) != Token.VOLUME:
+            if controller.type != Token.VOLUME:
                 controller.parameter = None
 
         # Clear analog controllers display data
@@ -971,7 +969,7 @@ class Modhandler(Handler):
             logging.info("Data backup...")
             cmd = os.path.join(self.homedir, 'util', 'data-backup.sh')
             try:
-                output = subprocess.check_output([cmd, os.path.join(self.backup_dir, self.backup_file), self.data_dir])
+                subprocess.check_output([cmd, os.path.join(self.backup_dir, self.backup_file), self.data_dir])
                 self.lcd.draw_message_dialog("Backup complete", "Info")
                 logging.info("Backup complete")
             except subprocess.CalledProcessError as e:
@@ -990,8 +988,8 @@ class Modhandler(Handler):
             logging.info("Restoring data backup...")
             cmd = os.path.join(self.homedir, 'util', 'data-restore.sh')
             try:
-                output = subprocess.check_output(['sudo', '-u', self.username, cmd,
-                                                  os.path.join(self.backup_dir, self.backup_file), self.data_dir])
+                subprocess.check_output(['sudo', '-u', self.username, cmd,
+                                         os.path.join(self.backup_dir, self.backup_file), self.data_dir])
                 logging.info("Restore complete")
                 self.system_menu_restart_sound(None)
             except subprocess.CalledProcessError as e:
