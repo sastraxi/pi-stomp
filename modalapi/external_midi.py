@@ -27,6 +27,8 @@ MidiMessage = list[int]
 
 EXTERNAL_INSTANCE_ID = "External"
 
+PORT_RETRY_BACKOFF_S = 5.0  # don't re-enumerate a failed port more often than this
+
 
 class ExternalMidiOut:
     """
@@ -75,6 +77,7 @@ class ExternalMidiManager:
         self.messages: dict[str, list[MidiMessage]] = {}
         self.enabled: bool = False
         self.send_delay_ms: int = 10
+        self._open_failures: dict[str, float] = {}
 
     def update_config(self, cfg: ExternalMidiConfig | None) -> None:
         """
@@ -155,29 +158,40 @@ class ExternalMidiManager:
         logging.info(f"Auto-detected MIDI port: {selected_name} (index {selected_idx})")
         return selected_idx
 
+    def open_port(self, port_name: str) -> bool:
+        """Eagerly open a port at routing time so the first poll-loop send doesn't enumerate."""
+        return self._init_port(port_name) is not None
+
     def _init_port(self, port_name: str) -> rtmidi.MidiOut | None:
         if port_name in self.midi_ports:
             return self.midi_ports[port_name]
 
+        last_fail = self._open_failures.get(port_name)
+        if last_fail is not None and (time.monotonic() - last_fail) < PORT_RETRY_BACKOFF_S:
+            return None
+
         port_config = self.port_configs.get(port_name)
         if not port_config:
             logging.warning(f"No configuration found for MIDI port: {port_name}")
+            self._open_failures[port_name] = time.monotonic()
             return None
 
         port_idx = self._find_port_by_name(port_config)
         if port_idx is None:
             logging.warning(f"Could not find MIDI port for: {port_name}")
+            self._open_failures[port_name] = time.monotonic()
             return None
 
         try:
             midi_out = rtmidi.MidiOut()
             midi_out.open_port(port_idx)
             self.midi_ports[port_name] = midi_out
+            self._open_failures.pop(port_name, None)
             logging.info(f"Opened MIDI port: {port_name}")
             return midi_out
         except Exception as e:
             logging.error(f"Failed to open MIDI port {port_name} (index {port_idx}): {e}")
-            del self.midi_ports[port_name]
+            self._open_failures[port_name] = time.monotonic()
             return None
 
     def _invalidate_port(self, port_name: str) -> None:
@@ -192,6 +206,7 @@ class ExternalMidiManager:
             except Exception as e:
                 logging.debug(f"Error closing invalidated port {port_name}: {e}")
             del self.midi_ports[port_name]
+            self._open_failures[port_name] = time.monotonic()  # back off before re-enumerating
 
     def _validate_midi_message(self, message: MidiMessage) -> bool:
         if not isinstance(message, list) or len(message) < 2:
@@ -211,14 +226,6 @@ class ExternalMidiManager:
         return True
 
     def _send_messages(self, port_name: str, messages: list[MidiMessage], delay_ms: int = 10):
-        """
-        Send MIDI messages to a port.
-
-        Args:
-            port_name: Name of port configuration.
-            messages: List of MIDI messages to send.
-            delay_ms: Delay between messages in milliseconds.
-        """
         midi_out = self._init_port(port_name)
         if midi_out is None:
             logging.warning(f"Skipping messages for unavailable port: {port_name}")
@@ -243,11 +250,7 @@ class ExternalMidiManager:
                 break  # Stop sending remaining messages to this broken port
 
     def send_raw(self, port_name: str, message: MidiMessage) -> bool:
-        """
-        Send a raw MIDI message to an external port.
-        Same contract as send_cc: enabled gate, lazy port discovery, invalidation on failure.
-        Returns True on success, False if port unavailable (caller should fallback).
-        """
+        """Send one raw message; True on success, False if the port is unavailable (caller falls back)."""
         if not self.enabled:
             return False
 
@@ -267,38 +270,8 @@ class ExternalMidiManager:
             self._invalidate_port(port_name)
             return False
 
-    def send_cc(self, port_name: str, channel: int, cc: int, value: int) -> bool:
-        """
-        Send a single MIDI CC message to an external port.
-        Convenience wrapper around send_raw that constructs the CC message.
-
-        Args:
-            port_name: Name of port configuration from config file.
-            channel: MIDI channel (0-15).
-            cc: MIDI CC number (0-127).
-            value: MIDI CC value (0-127).
-
-        Returns:
-            True if message was sent successfully, False if port unavailable (caller should fallback).
-        """
-        if not (0 <= channel <= 15):
-            raise ValueError(f"Invalid MIDI channel {channel} (must be 0-15)")
-        if not (0 <= cc <= 127):
-            raise ValueError(f"Invalid MIDI CC {cc} (must be 0-127)")
-        if not (0 <= value <= 127):
-            raise ValueError(f"Invalid MIDI value {value} (must be 0-127)")
-
-        status = 0xB0 | channel
-        return self.send_raw(port_name, [status, cc, value])
-
     def send_messages_for_pedalboard(self) -> bool:
-        """
-        Send external MIDI messages for current pedalboard configuration.
-        Configuration should have been set via update_config() before calling this.
-
-        Returns:
-            True if messages were sent successfully, False otherwise.
-        """
+        """Send the current pedalboard's external messages (config set earlier via update_config)."""
         if not self.enabled:
             return False
 
