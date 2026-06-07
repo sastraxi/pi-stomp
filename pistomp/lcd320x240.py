@@ -121,7 +121,8 @@ class Lcd(abstract_lcd.Lcd):
         self.pstack.push_panel(self.splash_panel, refresh=False)
         self.main_panel = Panel(box=Box.xywh(0, 0, self.display_width, 208))
         self.main_panel_pushed = False
-        self.footswitch_panel = Panel(box=Box.xywh(0, 208, self.display_width, self.footswitch_height))
+        self.footswitch_panel = ShroudedPanel(box=Box.xywh(0, 208, self.display_width, self.footswitch_height),
+                                              shroud_alpha=64)
         self.pstack.push_panel(self.footswitch_panel, refresh=False)
         self._tuner_panel = None
 

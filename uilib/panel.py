@@ -145,6 +145,27 @@ class Panel(ContainerWidget):
         return self
 
 
+class ShroudedPanel(Panel):
+    """A Panel that composites a translucent dark shroud over its own content
+    after its widgets are drawn — like the menu shroud, but scoped to this
+    panel's area so it reads as a recessed tray."""
+
+    def __init__(self, shroud_alpha=64, **kwargs):
+        if "image_format" not in kwargs:
+            kwargs["image_format"] = "RGBA"
+        super(ShroudedPanel, self).__init__(**kwargs)
+        self.shroud_alpha = shroud_alpha
+        self._shroud = None
+
+    def _do_draw(self, image, draw, real_box):
+        super(ShroudedPanel, self)._do_draw(image, draw, real_box)
+        if self.shroud_alpha <= 0:
+            return
+        if self._shroud is None or self._shroud.size != self.image.size:
+            self._shroud = Image.new("RGBA", self.image.size, (0, 0, 0, self.shroud_alpha))
+        self.image.alpha_composite(self._shroud)
+
+
 class RoundedPanel(Panel):
     def __init__(self, radius=10, **kwargs):
         if "mask_format" not in kwargs:
