@@ -5,7 +5,6 @@ These exercise the UX flows added on feat/external-midi:
   - configuring external MIDI ports via auto-detect / explicit index
   - sending pedalboard load messages with inter-message delay
   - per-pedalboard config overrides (incremental update_config)
-  - send_cc with graceful fallback when an external port is unavailable
   - ExternalMidiOut wrapper preferring external port, falling back to virtual
 """
 
@@ -214,6 +213,42 @@ class TestSendMessagesForPedalboard:
         midi_out.close_port.assert_called_once()
 
 
+class TestInitPort:
+    def test_open_port_failure_returns_none_without_keyerror(self, monkeypatch):
+        """A failing open_port must not KeyError when the port is absent from the cache."""
+        failing = MagicMock()
+        failing.open_port.side_effect = RuntimeError("cannot open")
+        monkeypatch.setattr("modalapi.external_midi.rtmidi.MidiOut", lambda *a, **k: failing)
+
+        mgr = ExternalMidiManager()
+        mgr.update_config({"enabled": True, "ports": {"dev": {"port_index": 0}}})
+
+        assert mgr._init_port("dev") is None
+        assert "dev" not in mgr.midi_ports
+
+
+class TestOpenBackoff:
+    def test_failed_open_backs_off_no_reenumerate(self, fake_ports):
+        """A port whose device is absent must not re-enumerate on every poll tick."""
+        available, created = fake_ports
+        available[:] = ["something_else"]
+        mgr = ExternalMidiManager()
+        mgr.update_config({"enabled": True, "ports": {"c4": {"auto_detect": ["*c4*"]}}})
+
+        assert mgr._init_port("c4") is None
+        n = len(created)
+        assert mgr._init_port("c4") is None
+        assert len(created) == n  # second attempt skipped enumeration
+
+    def test_open_port_eager_returns_bool(self, fake_ports):
+        available, _ = fake_ports
+        available[:] = ["dev"]
+        mgr = ExternalMidiManager()
+        mgr.update_config({"enabled": True, "ports": {"dev": {"port_index": 0}}})
+        assert mgr.open_port("dev") is True
+        assert "dev" in mgr.midi_ports
+
+
 class TestSendRaw:
     def test_returns_false_when_disabled(self):
         mgr = ExternalMidiManager()
@@ -256,31 +291,6 @@ class TestSendRaw:
         mgr.midi_ports["dev"] = midi_out
         assert mgr.send_raw("dev", [0xB0, 10, 64]) is False
         assert "dev" not in mgr.midi_ports
-
-
-class TestSendCC:
-    def test_returns_false_when_disabled(self):
-        mgr = ExternalMidiManager()
-        mgr.update_config({"ports": {"dev": {"port_index": 0}}})
-        assert mgr.send_cc("dev", 0, 10, 64) is False
-
-    @pytest.mark.parametrize(
-        "channel,cc,value",
-        [(-1, 10, 64), (16, 10, 64), (0, -1, 64), (0, 128, 64), (0, 10, -1), (0, 10, 128)],
-    )
-    def test_invalid_midi_args_raise(self, channel, cc, value):
-        mgr = ExternalMidiManager()
-        mgr.update_config({"enabled": True, "ports": {"dev": {"port_index": 0}}})
-        with pytest.raises(ValueError):
-            mgr.send_cc("dev", channel, cc, value)
-
-    def test_delegates_to_send_raw(self, fake_ports):
-        available, _ = fake_ports
-        available[:] = ["dev"]
-        mgr = ExternalMidiManager()
-        mgr.update_config({"enabled": True, "ports": {"dev": {"port_index": 0}}})
-        assert mgr.send_cc("dev", 2, 80, 100) is True
-        _port(mgr, "dev").send_message.assert_called_once_with([0xB2, 80, 100])
 
 
 class TestClose:
