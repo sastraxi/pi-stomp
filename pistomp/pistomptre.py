@@ -69,7 +69,7 @@ class Pistomptre(hardware.Hardware):
 
         try:
             self.ledstrip = Ledstrip.Ledstrip()
-        except Exception as e:
+        except Exception:
             self.ledstrip = None
             logging.error("Could not initialize LED Strip")
 
@@ -94,7 +94,7 @@ class Pistomptre(hardware.Hardware):
             spi_speed = 24  # Default to spec
         self.handler.add_lcd(Lcd.Lcd(self.handler.homedir, self.handler, flip=False, spi_speed_mhz=spi_speed))
 
-    def add_encoder(self, id, type, callback, longpress_callback, midi_channel, midi_cc, shortpress_config=None, midiout=None):
+    def add_encoder(self, id, type, callback, longpress_callback, midi_channel, midi_cc, midiout=None):
         enc_pins = Util.DICT_GET(ENC, id)
         if enc_pins is None:
             raise ValueError("Cannot create encoder object for id:", id)
