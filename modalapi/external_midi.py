@@ -78,6 +78,10 @@ class ExternalMidiManager:
         self.enabled: bool = False
         self.send_delay_ms: int = 10
         self._open_failures: dict[str, float] = {}
+        self.traffic_count: int = 0  # successful external sends; UI flashes on change
+
+    def has_present_device(self) -> bool:
+        return self.enabled and bool(self.midi_ports)
 
     def update_config(self, cfg: ExternalMidiConfig | None) -> None:
         """
@@ -238,6 +242,7 @@ class ExternalMidiManager:
 
             try:
                 midi_out.send_message(message)
+                self.traffic_count += 1
                 logging.debug(f"Sent MIDI message to {port_name}: {[f'0x{b:02X}' for b in message]}")
 
                 # Delay between messages (except after last one)
@@ -264,6 +269,7 @@ class ExternalMidiManager:
 
         try:
             midi_out.send_message(message)
+            self.traffic_count += 1
             return True
         except Exception as e:
             logging.error(f"Failed to send MIDI message to {port_name}: {e}")

@@ -15,6 +15,7 @@
 
 import logging
 import os
+import time
 from typing import Optional
 import common.token as Token
 import common.parameter as Parameter
@@ -56,6 +57,7 @@ class Lcd(abstract_lcd.Lcd):
         self.foreground = (255, 255, 255)
         self.color_splash_up = (70, 255, 70)
         self.color_splash_down = (255, 20, 20)
+        self.connection_color = (0, 180, 255)
         self.default_plugin_color = "Silver"
         self.category_color_map = {
             'Delay': "MediumVioletRed",
@@ -106,6 +108,10 @@ class Lcd(abstract_lcd.Lcd):
         self.w_eq = None
         self.w_power = None
         self.w_wrench = None
+        self.w_connections = {}
+        self._conn_flash = {}
+        self._conn_flashed = {}
+        self._midi_last_traffic = 0
         self.w_pedalboard = None
         self.w_preset = None
         self.w_plugins = []
@@ -176,6 +182,7 @@ class Lcd(abstract_lcd.Lcd):
         if not self.main_panel_pushed:
             self.pstack.push_panel(self.main_panel)
             self.main_panel_pushed = True
+        self.update_connections()
         #self.main_panel.refresh()
 
     def poll_updates(self):
@@ -234,6 +241,71 @@ class Lcd(abstract_lcd.Lcd):
                  ("Left & Right",  self.handler.change_bypass_preference, Token.LEFT_RIGHT,
                   pref == Token.LEFT_RIGHT or pref == None)]
         self.draw_selection_menu(items, "Bypass Preference", auto_dismiss=True)
+
+    #
+    # Connections (left-aligned status pills in the top row)
+    #
+    _CONNECTION_ORDER = ("MIDI", "ETH")
+    _CONNECTION_FLASH_SEC = 0.25
+
+    def update_connections(self):
+        if not self.main_panel_pushed:
+            return
+
+        em = getattr(self.handler, "external_midi", None)
+        self._reconcile_connection("MIDI", em is not None and em.has_present_device())
+
+        now = time.monotonic()
+        if em is not None and em.traffic_count != self._midi_last_traffic:
+            self._midi_last_traffic = em.traffic_count
+            if "MIDI" in self.w_connections:
+                self._conn_flash["MIDI"] = now + self._CONNECTION_FLASH_SEC
+
+        for name, w in self.w_connections.items():
+            flash = self._conn_flash.get(name, 0) > now
+            if self._conn_flashed.get(name) != flash:
+                self._style_connection(w, flash)
+                self._conn_flashed[name] = flash
+
+    def _reconcile_connection(self, name, present):
+        if present and name not in self.w_connections:
+            tw, _ = get_text_size(name, self.tiny_font)
+            w = TextWidget(box=Box.xywh(0, 0, tw + 12, 20), text=name, outline_radius=5,
+                           parent=self.main_panel, action=self._connection_action)
+            w.set_font(self.tiny_font)
+            self.w_connections[name] = w
+            self.main_panel.add_sel_widget(w)
+            self._style_connection(w, False)
+            self._conn_flashed[name] = False
+            self._layout_connections()
+        elif not present and name in self.w_connections:
+            self.w_connections.pop(name).destroy()
+            self._conn_flash.pop(name, None)
+            self._conn_flashed.pop(name, None)
+            self._layout_connections()
+
+    def _layout_connections(self):
+        x = 0
+        for name in self._CONNECTION_ORDER:
+            w = self.w_connections.get(name)
+            if w is None:
+                continue
+            w.set_box(box=Box.xywh(x, 0, w.box.width, 20), refresh=True)
+            x += w.box.width + 2
+
+    def _style_connection(self, widget, flash):
+        if flash:
+            widget.set_outline(2, self.background)
+            widget.set_background(self.connection_color)
+            widget.set_foreground(self.background)
+        else:
+            widget.set_outline(1, self.connection_color)
+            widget.set_background(self.background)
+            widget.set_foreground(self.connection_color)
+        widget.refresh()
+
+    def _connection_action(self, event, widget):
+        pass  # selectable; no action yet
 
     #
     # Title (Pedalboard and Preset)
