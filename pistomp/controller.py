@@ -43,20 +43,20 @@ class RoutingInfo:
 
 
 class AnalogDisplayInfo(TypedDict, total=False):
-    type: str  # Token.KNOB, Token.EXPRESSION, Token.VOLUME
-    id: int  # Position on screen (0-based from left)
+    type: str | None  # Token.KNOB, Token.EXPRESSION, Token.VOLUME
+    id: int | None  # Position on screen (0-based from left); None if unpositioned
     category: str | None
     port_name: str | None  # External port name if routed externally
     midi_cc: int | None  # MIDI CC for external routing display
 
 
 class Controller:
+    type: str | None = None  # class default; not in __init__ — clashes with Encoder.type in EncoderController's MRO
+
     def __init__(self, midi_channel: int, midi_CC: int | None):
         self.midi_channel: int = midi_channel
         self.midi_CC: int | None = midi_CC
         self.parameter: Parameter | None = None
-        # type is not declared here — it conflicts with encoder.Encoder.type in EncoderController's MRO.
-        # Subclasses that carry type must declare it themselves.
         self.midi_min: int = 0
         self.midi_max: int = 127
         self.midi_value: int = 0
