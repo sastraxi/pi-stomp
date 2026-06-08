@@ -16,13 +16,14 @@
 from __future__ import annotations
 
 import logging
-from typing import cast, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 import common.token as Token
+from common.parameter import Parameter, TTL_PROPERTIES, TTL_INTEGER
+from modalapi.external_midi import EXTERNAL_INSTANCE_ID
 from pistomp.analogmidicontrol import AnalogMidiControl
-from pistomp.controller import AnalogDisplayInfo, RoutingDestination
+from pistomp.controller import RoutingDestination
 from pistomp.current import Current
-from pistomp.encodermidicontrol import EncoderMidiControl
 from pistomp.footswitch import Footswitch
 
 if TYPE_CHECKING:
@@ -33,24 +34,15 @@ class ControllerManager:
     """
     Manages controller/parameter bindings on the current pedalboard,
     overlaying per-pedalboard config on top of the base.
-    Version differences are passed as flags rather than subclassed:
+    The one genuine version difference is passed as a flag rather than subclassed:
 
       reorder_footswitch_plugins  v1 moves footswitch-controlled plugins to the
                                   tail of the chain; v3 leaves order untouched.
-      stamp_plugin_cfg_id         v3 stamps the controller id onto plugin-bound
-                                  analog/encoder cfg entries; v1 does not.
     """
 
-    def __init__(
-        self,
-        hardware: "Hardware",
-        *,
-        reorder_footswitch_plugins: bool = False,
-        stamp_plugin_cfg_id: bool = False,
-    ):
+    def __init__(self, hardware: "Hardware", *, reorder_footswitch_plugins: bool = False):
         self._hw = hardware
         self._reorder_footswitch_plugins = reorder_footswitch_plugins
-        self._stamp_plugin_cfg_id = stamp_plugin_cfg_id
 
     def bind(self, current: Current | None) -> None:
         """Rebind all controllers for the active pedalboard state."""
@@ -95,21 +87,18 @@ class ControllerManager:
                     )
                     continue
 
-                controller.parameter = param
-                controller.set_value(param.value)
+                controller.bind_to_parameter(param)
                 plugin.controllers.append(controller)
 
                 if isinstance(controller, Footswitch):
                     plugin.has_footswitch = True
                     footswitch_plugins.append(plugin)
                     controller.set_category(plugin.category)
-                elif isinstance(controller, (AnalogMidiControl, EncoderMidiControl)):
+                else:
                     key = "%s:%s" % (plugin.instance_id, param.name)
-                    controller.cfg[Token.CATEGORY] = plugin.category  # somewhat LAME adding to cfg dict
-                    controller.cfg[Token.TYPE] = controller.type
-                    if self._stamp_plugin_cfg_id:
-                        controller.cfg[Token.ID] = controller.id
-                    current.analog_controllers[key] = cast(AnalogDisplayInfo, controller.cfg)
+                    display_info = controller.get_display_info()
+                    display_info["category"] = plugin.category
+                    current.analog_controllers[key] = display_info
         return footswitch_plugins
 
     def _bind_volume_encoders(self, current) -> None:
@@ -117,8 +106,7 @@ class ControllerManager:
         practice — v1 has no VOLUME-typed encoder)."""
         for e in self._hw.encoders:
             if e.type == Token.VOLUME:
-                entry: AnalogDisplayInfo = {"category": None, "type": e.type, "id": e.id}
-                current.analog_controllers[Token.VOLUME] = entry
+                current.analog_controllers[Token.VOLUME] = e.get_display_info()
 
     @staticmethod
     def _move_footswitch_plugins_to_end(current, footswitch_plugins) -> None:
@@ -133,19 +121,26 @@ class ControllerManager:
             if routing.destination != RoutingDestination.EXTERNAL or controller.midi_CC is None:
                 continue
 
-            controller.parameter = self._hw.create_external_parameter(
-                controller, routing.port_name, controller.midi_channel, controller.midi_CC
-            )
+            # Create a synthetic parameter if not already bound.
+            # AnalogMidiControl uses EXTERNAL_INSTANCE_ID so parameter_value_commit can guard it;
+            # EncoderController routes through encoder_value_changed instead.
+            if controller.parameter is None:
+                if isinstance(controller, AnalogMidiControl):
+                    controller.parameter = self._hw.create_external_parameter(
+                        controller, routing.port_name, controller.midi_channel, controller.midi_CC
+                    )
+                else:
+                    ext_info = {
+                        Token.NAME: f"{routing.port_name} CC{controller.midi_CC}",
+                        Token.SYMBOL: f"external_{controller.midi_CC}",
+                        Token.RANGES: {Token.MINIMUM: 0, Token.MAXIMUM: 127},
+                        TTL_PROPERTIES: [TTL_INTEGER],
+                    }
+                    controller.bind_to_parameter(
+                        Parameter(ext_info, controller.midi_value, None, EXTERNAL_INSTANCE_ID)
+                    )
 
-            if not isinstance(controller, (AnalogMidiControl, EncoderMidiControl)):
-                continue
             key = f"{controller.midi_channel}:{controller.midi_CC}"
-            # AnalogMidiControl.get_display_info() already carries type/id; the
-            # encoder's does not, so seed them and let the dict override.
-            entry: AnalogDisplayInfo = {
-                "type": controller.type,
-                "id": controller.id,
-                **controller.get_display_info(),
-                "category": "External",
-            }
-            current.analog_controllers[key] = entry
+            display_info = controller.get_display_info()
+            display_info["category"] = "External"
+            current.analog_controllers[key] = display_info
