@@ -146,9 +146,12 @@ class Panel(ContainerWidget):
 
 
 class ShroudedPanel(Panel):
-    """A Panel that composites a translucent dark shroud over its own content
-    after its widgets are drawn — like the menu shroud, but scoped to this
-    panel's area so it reads as a recessed tray."""
+    """A Panel that overlaps underlying panels with a semi-transparent dark shroud.
+
+    The panel's own backing image is transparent, so whatever the PanelStack
+    has already composited shows through — then the shroud darkens it, and
+    child widgets are drawn on top of the shroud.
+    """
 
     def __init__(self, shroud_alpha=64, **kwargs):
         if "image_format" not in kwargs:
@@ -157,13 +160,29 @@ class ShroudedPanel(Panel):
         self.shroud_alpha = shroud_alpha
         self._shroud = None
 
+    def _draw_erase(self, image, draw, box):
+        # Bypass inherited bkgnd_color (which would be opaque RGB); PIL draws
+        # RGBA (0,0,0,0) as truly transparent on RGBA images.
+        draw.rectangle(box.PIL_rect, (0, 0, 0, 0))
+
     def _do_draw(self, image, draw, real_box):
-        super(ShroudedPanel, self)._do_draw(image, draw, real_box)
-        if self.shroud_alpha <= 0:
-            return
-        if self._shroud is None or self._shroud.size != self.image.size:
-            self._shroud = Image.new("RGBA", self.image.size, (0, 0, 0, self.shroud_alpha))
-        self.image.alpha_composite(self._shroud)
+        # Clear to transparent so the underlying PanelStack content shows through
+        self._draw_erase(image, draw, real_box)
+        # Lay shroud down before children so widgets appear on top of it
+        if self.shroud_alpha > 0:
+            if self._shroud is None or self._shroud.size != self.image.size:
+                self._shroud = Image.new("RGBA", self.image.size, (0, 0, 0, self.shroud_alpha))
+            self.image.alpha_composite(self._shroud)
+        # Draw children on top of the shroud
+        off_real_box = real_box.deoffset(self.offset)
+        self._draw(image, draw, off_real_box)
+        for c in self.children:
+            crb = c.box.offset(off_real_box)
+            c._do_draw(image, draw, crb)
+        self._draw_outline(image, draw, real_box)
+        self._draw_selection(image, draw, real_box)
+        if image is not self.image:
+            image.paste(self.image, real_box.rect)
 
 
 class RoundedPanel(Panel):
@@ -215,6 +234,7 @@ class PanelStack(ContainerWidget):
         super(PanelStack, self).__init__(box=box, image_format=image_format)
         self.stack = []
         self.current = None
+        self.overlay = None  # always composited last; never receives input
         self.lcd = lcd
         self.visible = True
         if use_dimming:
@@ -270,6 +290,13 @@ class PanelStack(ContainerWidget):
                 local_inter = inter.deoffset(p.box)
                 super(PanelStack, self)._compose(p, local_inter, inter)
 
+        # Composite overlay last so it always appears on top regardless of stack order
+        if self.overlay is not None:
+            inter = box.intersection(self.overlay.box)
+            if not inter.is_empty():
+                local_inter = inter.deoffset(self.overlay.box)
+                super(PanelStack, self)._compose(self.overlay, local_inter, inter)
+
         # Update LCD
         trace(self, "updating lcd with image", self.image, "box=", box)
         self.lcd.update(self.image, box)
@@ -312,6 +339,17 @@ class PanelStack(ContainerWidget):
         if panel.auto_destroy:
             # panel.detach()
             panel.destroy()
+
+    def set_overlay(self, panel, refresh=True):
+        """Register a panel as a persistent overlay composited above all stack panels.
+        The overlay never receives input events."""
+        assert isinstance(panel, Panel)
+        if panel.parent is None:
+            panel.attach(self)
+        self.overlay = panel
+        panel.show(refresh=False)
+        if refresh:
+            self.refresh()
 
     def find_panel_type(self, type):
         for p in self.stack:

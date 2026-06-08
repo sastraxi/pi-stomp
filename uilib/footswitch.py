@@ -42,6 +42,9 @@ class FootswitchWidget(Widget):
         self.color = color
         self.is_bypassed = is_bypassed
 
+    def _draw_erase(self, image, draw, box):
+        pass  # shroud panel owns the background; erasing here would wipe it out
+
     def _draw(self, image, draw, real_box):
         x0, y0 = real_box.x0, real_box.y0
         w, h = real_box.width, real_box.height
@@ -63,14 +66,17 @@ class FootswitchWidget(Widget):
         kx1 = kx0 + kw - 1
         ky1 = ky0 + kh - 1
 
-        self._draw_keycap(draw, kx0, ky0, kx1, ky1, accent)
+        bg = (0, 0, 0, 255) if not is_on else None
+        self._draw_keycap(draw, kx0, ky0, kx1, ky1, accent, bg)
 
         tx = kx0 + self.KEYCAP_PAD_X - bbox[0]
         ty = ky0 + self.KEYCAP_PAD_TOP - bbox[1]
         draw.text((tx, ty), text, fill=accent, font=self.font)
 
-    def _draw_keycap(self, draw, x0, y0, x1, y1, color):
+    def _draw_keycap(self, draw, x0, y0, x1, y1, color, fill=None):
         # Keycap outline: rounded top corners, vertical sides, open bottom.
+        if fill is not None:
+            draw.rectangle([x0, y0, x1, y1], fill=fill)
         r = self.KEYCAP_RADIUS
         draw.line([(x0 + r, y0), (x1 - r, y0)], fill=color, width=1)        # top
         draw.line([(x0, y0 + r), (x0, y1)], fill=color, width=1)           # left
