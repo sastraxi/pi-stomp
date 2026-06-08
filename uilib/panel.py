@@ -36,10 +36,12 @@ class Panel(ContainerWidget):
     placed into a PanelStack
     """
 
-    def __init__(self, auto_destroy=False, decorator=None, **kwargs):
+    def __init__(self, auto_destroy=False, decorator=None, no_dim=False, accepts_input=True, **kwargs):
         self.sel_list = []
         self.sel = None
         self.auto_destroy = auto_destroy
+        self.no_dim = no_dim
+        self.accepts_input = accepts_input
         if decorator:
             self.decorator = decorator(self)
         else:
@@ -145,6 +147,59 @@ class Panel(ContainerWidget):
         return self
 
 
+class ShroudedPanel(Panel):
+    """A Panel that overlaps underlying panels with a semi-transparent dark shroud.
+
+    The panel's own backing image is transparent, so whatever the PanelStack
+    has already composited shows through — then the shroud darkens it, and
+    child widgets are drawn on top of the shroud.
+    """
+
+    def __init__(self, shroud_alpha=64, gradient_start: float | None = None, gradient_pos=1.0, **kwargs):
+        if "image_format" not in kwargs:
+            kwargs["image_format"] = "RGBA"
+        super(ShroudedPanel, self).__init__(**kwargs)
+        self.gradient_start = gradient_start if gradient_start is not None else shroud_alpha
+        self.gradient_end = shroud_alpha
+        self.gradient_pos = gradient_pos
+        self._shroud = None
+
+    def _draw_erase(self, image, draw, box):
+        # Bypass inherited bkgnd_color (which would be opaque RGB); PIL draws
+        # RGBA (0,0,0,0) as truly transparent on RGBA images.
+        draw.rectangle(box.PIL_rect, (0, 0, 0, 0))
+
+    def _make_shroud(self):
+        w, h = self.image.size
+        shroud = Image.new("RGBA", (w, h))
+        end_y = max(int(h * self.gradient_pos), 1)
+        for y in range(h):
+            t = min(y / end_y, 1.0)
+            alpha = int(self.gradient_start + t * (self.gradient_end - self.gradient_start))
+            shroud.paste((0, 0, 0, alpha), (0, y, w, y + 1))
+        return shroud
+
+    def _do_draw(self, image, draw, real_box):
+        # Clear to transparent so the underlying PanelStack content shows through
+        self._draw_erase(image, draw, real_box)
+        # Lay shroud down before children so widgets appear on top of it
+        # can skip if the gradient is fully transparent
+        if self.gradient_start > 0 or self.gradient_end > 0:
+            if self._shroud is None or self._shroud.size != self.image.size:
+                self._shroud = self._make_shroud()
+            self.image.alpha_composite(self._shroud)
+        # Draw children on top of the shroud
+        off_real_box = real_box.deoffset(self.offset)
+        self._draw(image, draw, off_real_box)
+        for c in self.children:
+            crb = c.box.offset(off_real_box)
+            c._do_draw(image, draw, crb)
+        self._draw_outline(image, draw, real_box)
+        self._draw_selection(image, draw, real_box)
+        if image is not self.image:
+            image.paste(self.image, real_box.rect)
+
+
 class RoundedPanel(Panel):
     def __init__(self, radius=10, **kwargs):
         if "mask_format" not in kwargs:
@@ -236,7 +291,7 @@ class PanelStack(ContainerWidget):
 
         # Compose panels
         for p in self.stack:
-            if self.dimmer is not None:
+            if self.dimmer is not None and not p.no_dim:
                 self.image.alpha_composite(self.dimmer, box.topleft, box.rect)
             d = p.decorator
             if d is not None:
@@ -267,8 +322,9 @@ class PanelStack(ContainerWidget):
         if panel.parent is None:
             panel.attach(self)
         self.stack.append(panel)
-        # Input target
-        self.current = panel
+        # Input target: skip non-input panels
+        if panel.accepts_input:
+            self.current = panel
         panel.show(refresh=False)
         if refresh:
             self.refresh()
@@ -281,10 +337,12 @@ class PanelStack(ContainerWidget):
         self.stack.remove(panel)
         panel.hide(refresh=False)
         if panel == self.current:
-            if len(self.stack) == 0:
-                current = None
-            else:
-                current = self.stack[-1]
+            # Walk backwards past non-input panels to find the new input target
+            current = None
+            for p in reversed(self.stack):
+                if p.accepts_input:
+                    current = p
+                    break
             self.current = current
         # queue a refresh
         self.lcd_needs_update = True
