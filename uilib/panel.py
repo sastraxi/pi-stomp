@@ -155,12 +155,11 @@ class ShroudedPanel(Panel):
     child widgets are drawn on top of the shroud.
     """
 
-    def __init__(self, shroud_alpha=64, gradient_start=0, gradient_pos=1.0, **kwargs):
+    def __init__(self, shroud_alpha=64, gradient_start: float | None = None, gradient_pos=1.0, **kwargs):
         if "image_format" not in kwargs:
             kwargs["image_format"] = "RGBA"
         super(ShroudedPanel, self).__init__(**kwargs)
-        self.shroud_alpha = shroud_alpha
-        self.gradient_start = gradient_start
+        self.gradient_start = gradient_start if gradient_start is not None else shroud_alpha
         self.gradient_end = shroud_alpha
         self.gradient_pos = gradient_pos
         self._shroud = None
@@ -184,7 +183,8 @@ class ShroudedPanel(Panel):
         # Clear to transparent so the underlying PanelStack content shows through
         self._draw_erase(image, draw, real_box)
         # Lay shroud down before children so widgets appear on top of it
-        if self.shroud_alpha > 0:
+        # can skip if the gradient is fully transparent
+        if self.gradient_start > 0 or self.gradient_end > 0:
             if self._shroud is None or self._shroud.size != self.image.size:
                 self._shroud = self._make_shroud()
             self.image.alpha_composite(self._shroud)
