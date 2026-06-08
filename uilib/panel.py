@@ -236,7 +236,6 @@ class PanelStack(ContainerWidget):
         super(PanelStack, self).__init__(box=box, image_format=image_format)
         self.stack = []
         self.current = None
-        self.overlay = None  # always composited last; never receives input
         self.lcd = lcd
         self.visible = True
         if use_dimming:
@@ -279,7 +278,7 @@ class PanelStack(ContainerWidget):
 
         # Compose panels
         for p in self.stack:
-            if self.dimmer is not None:
+            if self.dimmer is not None and not p.no_dim:
                 self.image.alpha_composite(self.dimmer, box.topleft, box.rect)
             d = p.decorator
             if d is not None:
@@ -291,13 +290,6 @@ class PanelStack(ContainerWidget):
                 # Get intersection in panel local coordinates
                 local_inter = inter.deoffset(p.box)
                 super(PanelStack, self)._compose(p, local_inter, inter)
-
-        # Composite overlay last so it always appears on top regardless of stack order
-        if self.overlay is not None:
-            inter = box.intersection(self.overlay.box)
-            if not inter.is_empty():
-                local_inter = inter.deoffset(self.overlay.box)
-                super(PanelStack, self)._compose(self.overlay, local_inter, inter)
 
         # Update LCD
         trace(self, "updating lcd with image", self.image, "box=", box)
@@ -317,8 +309,9 @@ class PanelStack(ContainerWidget):
         if panel.parent is None:
             panel.attach(self)
         self.stack.append(panel)
-        # Input target
-        self.current = panel
+        # Input target: skip non-input panels
+        if panel.accepts_input:
+            self.current = panel
         panel.show(refresh=False)
         if refresh:
             self.refresh()
@@ -331,27 +324,18 @@ class PanelStack(ContainerWidget):
         self.stack.remove(panel)
         panel.hide(refresh=False)
         if panel == self.current:
-            if len(self.stack) == 0:
-                current = None
-            else:
-                current = self.stack[-1]
+            # Walk backwards past non-input panels to find the new input target
+            current = None
+            for p in reversed(self.stack):
+                if p.accepts_input:
+                    current = p
+                    break
             self.current = current
         # queue a refresh
         self.lcd_needs_update = True
         if panel.auto_destroy:
             # panel.detach()
             panel.destroy()
-
-    def set_overlay(self, panel, refresh=True):
-        """Register a panel as a persistent overlay composited above all stack panels.
-        The overlay never receives input events."""
-        assert isinstance(panel, Panel)
-        if panel.parent is None:
-            panel.attach(self)
-        self.overlay = panel
-        panel.show(refresh=False)
-        if refresh:
-            self.refresh()
 
     def find_panel_type(self, type):
         for p in self.stack:
