@@ -173,6 +173,12 @@ class Lcd(abstract_lcd.Lcd):
         self.draw_analog_assignments(self.current.analog_controllers)
         self.draw_plugins()
         self.draw_unbound_footswitches()
+        if self.footswitch_panel in self.main_panel.sel_list:
+            self.main_panel.sel_list.remove(self.footswitch_panel)
+        self.main_panel.add_sel_widget(self.footswitch_panel)
+        if self.footswitch_panel.sel_ref is not None:
+            self.footswitch_panel.sel_ref.set_selected(False)
+        self.footswitch_panel.sel_ref = None
         if not self.main_panel_pushed:
             self.pstack.push_panel(self.main_panel, refresh=False)
             self.pstack.push_panel(self.footswitch_panel, refresh=False)
@@ -475,9 +481,10 @@ class Lcd(abstract_lcd.Lcd):
                 self.footswitch_slots[fs_id] = label
                 color = self.get_plugin_color(plugin)
                 p = FootswitchWidget(Box.xywh(x, y, self.footswitch_width, self.footswitch_height),
-                             fs_id, label, color, plugin.is_bypassed(), parent=self.footswitch_panel, object=c)
+                             fs_id, label, color, plugin.is_bypassed(),
+                             parent=self.footswitch_panel, action=self.plugin_event, object=plugin)
                 self.w_footswitches.append(p)
-                self.footswitch_panel.add_widget(p)
+                self.footswitch_panel.add_sel_widget(p)
                 break
 
     def draw_unbound_footswitches(self):
@@ -492,7 +499,7 @@ class Lcd(abstract_lcd.Lcd):
             p = FootswitchWidget(Box.xywh(x, y, self.footswitch_width, self.footswitch_height),
                                  slot, label, None, True, parent=self.footswitch_panel, object=fs)
             self.w_footswitches.append(p)
-            self.footswitch_panel.add_widget(p)
+            self.footswitch_panel.add_sel_widget(p)
         self.footswitch_panel.refresh()
 
     def update_footswitch(self, footswitch):

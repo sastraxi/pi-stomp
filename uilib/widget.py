@@ -370,7 +370,7 @@ class Widget:
 
     def _notify_detach(self, widget):
         if self.parent:
-            self.parent.notify_detach(widget)
+            self.parent._notify_detach(widget)
 
     def refresh(self, box: Box | None = None):
         """Refresh widget (and children)"""
@@ -444,6 +444,12 @@ class Widget:
     def _draw(self, image, draw, real_box):
         # It's ok for widgets to not have anything to draw, some are pure rectangles
         pass
+
+    def sel_children(self):
+        """Selection-tree expansion. Default: only self.
+        Return a list of children in desired iteration order.
+        """
+        return [self]
 
     def input_event(self, event):
         if (event == InputEvent.CLICK or event == InputEvent.LONG_CLICK) and self.action is not None:
