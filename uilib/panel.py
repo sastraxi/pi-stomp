@@ -36,10 +36,12 @@ class Panel(ContainerWidget):
     placed into a PanelStack
     """
 
-    def __init__(self, auto_destroy=False, decorator=None, **kwargs):
+    def __init__(self, auto_destroy=False, decorator=None, no_dim=False, accepts_input=True, **kwargs):
         self.sel_list = []
         self.sel = None
         self.auto_destroy = auto_destroy
+        self.no_dim = no_dim
+        self.accepts_input = accepts_input
         if decorator:
             self.decorator = decorator(self)
         else:
