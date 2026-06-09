@@ -253,11 +253,24 @@ def test_v3_parameter_edit(v3_system: SystemFixture, make_parameter, snapshot):
 
 
 def test_v3_parameter_midi_change(v3_system: SystemFixture, make_parameter, snapshot):
-    """parameter_midi_change() draws a parameter dialog and steps the value."""
-    handler = v3_system.handler
+    """Rotating a tweak encoder steps the bound value and draws the dialog."""
+    import pytest
 
+    from pistomp.encoder_controller import EncoderController
+
+    hw = v3_system.hw
+
+    enc = next(e for e in hw.encoders if isinstance(e, EncoderController))
     param = make_parameter("Gain", "delay", value=0.5)
-    handler.parameter_midi_change(param, 1)
+    enc.bind_to_parameter(param)
+
+    # The first rotation is always at 1x (no prior detent timing), so 8 detents
+    # deterministically advance exactly 8 steps on the encoder's quantized grid.
+    start_step = enc.current_step
+    enc.refresh(8)
+
+    assert enc.current_step == start_step + 8
+    assert param.value == pytest.approx(enc.step_values[start_step + 8])
     snapshot()
 
 

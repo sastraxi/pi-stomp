@@ -191,8 +191,6 @@ class EncoderController(encoder.Encoder, controller.Controller):
         if self.parameter:
             self.parameter.value = new_value
 
-        # logging.debug(f"Encoder refresh: steps={delta}, value={new_value}, midi={self.midi_value}")
-
         if self.midi_CC:
             self.midiout.send_message([self.midi_channel | CONTROL_CHANGE, self.midi_CC, int(self.midi_value)])
 
@@ -200,9 +198,6 @@ class EncoderController(encoder.Encoder, controller.Controller):
             self.value_change_callback(new_value, self)
         elif self.parameter:
             self.handler.encoder_value_changed(self.parameter, new_value, self.get_routing_info())
-        else:
-            # not bound to anything
-            pass
 
     def _value_to_midi(self, value: float) -> int:
         """Convert parameter value to MIDI CC value [0-127]."""
