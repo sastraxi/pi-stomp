@@ -182,17 +182,9 @@ class Modhandler(Handler):
             return
         for enc in self.hardware.encoders:
             if enc.type == Token.VOLUME and isinstance(enc, EncoderController):
-                value = self.audiocard.get_volume_parameter(self.audiocard.MASTER)
-                info = {
-                    Token.NAME: "Output Volume",
-                    Token.SYMBOL: self.audiocard.MASTER,
-                    Token.RANGES: {
-                        Token.MINIMUM: -25.75,
-                        Token.MAXIMUM: 6.0
-                    }
-                }
-                volume_param = Parameter(info, value, None)
-                volume_param.unit_symbol = "dB"
+                volume_param = self._create_audio_parameter(
+                    "Output Volume", self.audiocard.MASTER, -25.75, 6.0
+                )
                 enc.bind_to_parameter(volume_param)
                 self.volume_parameter = volume_param
 
