@@ -182,17 +182,9 @@ class Modhandler(Handler):
             return
         for enc in self.hardware.encoders:
             if enc.type == Token.VOLUME and isinstance(enc, EncoderController):
-                value = self.audiocard.get_volume_parameter(self.audiocard.MASTER)
-                info = {
-                    Token.NAME: "Output Volume",
-                    Token.SYMBOL: self.audiocard.MASTER,
-                    Token.RANGES: {
-                        Token.MINIMUM: -25.75,
-                        Token.MAXIMUM: 6.0
-                    }
-                }
-                volume_param = Parameter(info, value, None)
-                volume_param.unit_symbol = "dB"
+                volume_param = self._create_audio_parameter(
+                    "Output Volume", self.audiocard.MASTER, -25.75, 6.0
+                )
                 enc.bind_to_parameter(volume_param)
                 self.volume_parameter = volume_param
 
@@ -800,12 +792,6 @@ class Modhandler(Handler):
 
         self.ws_bridge.send_parameter(param.instance_id, param.symbol, param.value)
 
-    def parameter_midi_change(self, param, direction):
-        if param:
-            d = self.lcd.draw_parameter_dialog(param)
-            if d:
-                self.lcd.enc_step_widget(d, direction)
-
     def encoder_value_changed(self, param: Parameter, new_value: float, routing_info: RoutingInfo) -> None:
         self.lcd.display_parameter_value(param, new_value)
         if routing_info.destination == RoutingDestination.EXTERNAL:
@@ -986,15 +972,6 @@ class Modhandler(Handler):
 
     def change_bypass_preference(self, pref):
         self.settings.set_setting(Token.BYPASS, pref)
-
-    def system_toggle_hotspot(self, **kwargs):
-        if util.DICT_GET(self.wifi_status, 'hotspot_active'):
-            self.wifi_manager.disable_hotspot()
-        else:
-            self.wifi_manager.enable_hotspot()
-
-    def configure_wifi_credentials(self, ssid, password):
-        return self.wifi_manager.configure_wifi(ssid, password)
 
     def _create_audio_parameter(self, name, symbol, min_val, max_val):
         value = self.audiocard.get_volume_parameter(symbol)
