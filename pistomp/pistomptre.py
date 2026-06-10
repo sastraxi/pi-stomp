@@ -108,14 +108,12 @@ class Pistomptre(hardware.Hardware):
             midi_channel=midi_channel, midi_CC=enc_cc,
             type=enc_type, id=id,
             sw_pin=sw_pin,
-            shortpress=self.handler.universal_encoder_sw if sw_pin is not None else None,
             longpress=longpress_callback,  # string name; handler resolves at dispatch
         )
 
     def init_encoders(self):
         enc = EncoderController.EncoderController(
-            NAV_PIN_D, NAV_PIN_CLK, callback=self.handler.universal_encoder_select,
-            type=Token.NAV,
+            NAV_PIN_D, NAV_PIN_CLK, type=Token.NAV,
         )
         self.encoders.append(enc)
         # Nav encoder switch is a special case which gets initialized in init_analog_controls

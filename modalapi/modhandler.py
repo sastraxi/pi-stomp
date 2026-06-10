@@ -43,7 +43,7 @@ from modalapi.pedalboard_monitor import FileChangeMonitor, read_pedalboard_bundl
 
 from pistomp.controller_manager import ControllerManager
 from pistomp.current import Current
-from pistomp.encoder import Encoder
+from pistomp.encoder_controller import EncoderController
 from pistomp.footswitch import Footswitch
 from pistomp.handler import Handler
 from pistomp.input.event import (
@@ -51,7 +51,9 @@ from pistomp.input.event import (
     ControllerEvent,
     EncoderEvent,
     SwitchEvent,
+    SwitchEventKind,
 )
+import pistomp.switchstate as switchstate
 from pistomp.tuner import TunerEngine, TunerPanel, TunerSourceFactory
 from pistomp.tuner.source import AudioSource, build_source
 from rtmidi.midiconstants import CONTROL_CHANGE
@@ -192,7 +194,7 @@ class Modhandler(Handler):
         if self.hardware is None:
             return
         for enc in self.hardware.encoders:
-            if enc.type != Token.VOLUME or not isinstance(enc, Encoder):
+            if enc.type != Token.VOLUME or not isinstance(enc, EncoderController):
                 continue
             value = self.audiocard.get_volume_parameter(self.audiocard.MASTER)
             info = {
@@ -228,6 +230,9 @@ class Modhandler(Handler):
 
     def _handle_encoder(self, event: EncoderEvent) -> bool:
         c = event.controller
+        if c.type == Token.NAV:
+            self.universal_encoder_select(event.rotations)
+            return True
         # Volume encoder bypasses the mod-host commit path — there is no
         # backing plugin parameter, just the audio card.
         if c.type == Token.VOLUME and c.parameter is not None:
@@ -250,11 +255,19 @@ class Modhandler(Handler):
         return True
 
     def _handle_switch(self, event: SwitchEvent) -> bool:
-        # Encoder buttons today route via the legacy callbacks the Encoder was
-        # constructed with. Footswitch chord resolution (Appendix A) moves to
-        # a Handler-owned helper in step 5; until then the Footswitch's own
-        # poll path handles its own callbacks and doesn't dispatch here.
-        del event
+        controller = event.controller
+        if isinstance(controller, EncoderController):
+            if event.kind == SwitchEventKind.LONGPRESS:
+                callback_name = controller.longpress
+                if callback_name:
+                    cb = self.get_callback(callback_name)
+                    if cb:
+                        cb()
+                return True
+            self.universal_encoder_sw(switchstate.Value.RELEASED)
+            return True
+        # Footswitch: chord resolution moves here in Step 4; until then
+        # the Footswitch's own poll path handles callbacks and doesn't dispatch.
         return True
 
     def _emit_midi(self, controller, midi_value: int) -> None:
@@ -264,11 +277,8 @@ class Modhandler(Handler):
         cc = [controller.midi_channel | CONTROL_CHANGE, controller.midi_CC, int(midi_value)]
         port_name = self.hardware.external_port_name(controller)
         if port_name is not None and self.external_midi is not None:
-            try:
-                if self.external_midi.send_cc(port_name, controller.midi_channel, controller.midi_CC, int(midi_value)):
-                    return
-            except Exception as e:
-                logging.warning(f"External CC send failed on {port_name}: {e}")
+            if self.external_midi.send_raw(port_name, cc):
+                return
         self.hardware.midiout.send_message(cc)
 
     def add_lcd(self, lcd):
@@ -393,7 +403,7 @@ class Modhandler(Handler):
         Args:
             new_snapshot_index: Index of the new snapshot being loaded
         """
-        if not self.blend_modes:
+        if not self.blend_modes or self.current is None:
             return
 
         new_snapshot_name = self.current.presets.get(new_snapshot_index)
@@ -401,11 +411,12 @@ class Modhandler(Handler):
                      f"active_blend={self.active_blend_mode.config.get('name') if self.active_blend_mode else None}")
 
         # Deactivate current blend mode if switching away
-        if self.active_blend_mode:
-            old_name = self.active_blend_mode.config.get('name')
+        active = self.active_blend_mode
+        if active:
+            old_name = active.config.get('name')
             if old_name != new_snapshot_name:
                 logging.info(f"Deactivating blend mode '{old_name}' (switching to '{new_snapshot_name}')")
-                self.active_blend_mode.deactivate()
+                active.deactivate()
                 self.active_blend_mode = None
                 self.lcd.draw_analog_assignments(self.current.analog_controllers)
             else:
@@ -414,12 +425,13 @@ class Modhandler(Handler):
         # Activate new blend mode if switching to a blend snapshot
         if new_snapshot_name in self.blend_modes:
             logging.info(f"Activating blend mode '{new_snapshot_name}'")
-            self.active_blend_mode = self.blend_modes[new_snapshot_name]
+            new_active = self.blend_modes[new_snapshot_name]
+            self.active_blend_mode = new_active
             try:
                 # Check for snapshot changes immediately before activating
                 # to ensure we have the latest stop data (user may have just saved a snapshot)
-                self.active_blend_mode.check_for_snapshot_changes()
-                self.active_blend_mode.activate()
+                new_active.check_for_snapshot_changes()
+                new_active.activate()
                 self.lcd.draw_analog_assignments(self.current.analog_controllers)
             except Exception as e:
                 logging.error(f"Failed to activate blend mode '{new_snapshot_name}': {e}")

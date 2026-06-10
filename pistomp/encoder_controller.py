@@ -18,7 +18,7 @@ from __future__ import annotations
 import bisect
 import logging
 import time
-from typing import Callable, List, Optional
+from typing import List, Optional
 
 import common.util as util
 import pistomp.controller as controller
@@ -59,18 +59,15 @@ class EncoderController(controller.Controller):
         d_pin: int,
         clk_pin: int,
         *,
-        callback: Optional[Callable[[int], None]] = None,  # nav mode; removed in step 3
         midi_channel: int = 0,
         midi_CC: Optional[int] = None,
         type: Optional[str] = None,
         id: Optional[int] = None,
         sw_pin: Optional[int] = None,
-        shortpress: Optional[Callable] = None,  # legacy; removed in step 3
-        longpress: Optional[str] = None,         # string name; resolved by handler at dispatch
+        longpress: Optional[str] = None,  # string name; resolved by handler at dispatch
     ):
         controller.Controller.__init__(self, midi_channel, midi_CC)
         self._hw_encoder = Encoder(d_pin, clk_pin)
-        self.callback = callback
         self.type = type
         self.id = id
 
@@ -86,7 +83,6 @@ class EncoderController(controller.Controller):
 
         # Absorbed button (GPIO)
         self._button: Optional[gpioswitch.GpioSwitch] = None
-        self._shortpress = shortpress
         self.longpress: Optional[str] = longpress  # string name; resolved at dispatch
         if sw_pin is not None:
             self._button = gpioswitch.GpioSwitch(
@@ -95,7 +91,7 @@ class EncoderController(controller.Controller):
                 longpress_callback=self._on_button_longpress,
             )
 
-        logging.debug(f"EncoderController init: id={id}, midi_CC={midi_CC}, sw_pin={sw_pin}")
+        logging.debug("EncoderController init: id=%s, midi_CC=%s, sw_pin=%s", id, midi_CC, sw_pin)
 
     # ── Poll ─────────────────────────────────────────────────────────────
 
@@ -218,10 +214,6 @@ class EncoderController(controller.Controller):
 
     def refresh(self, rotations: int) -> None:
         """Handle a tick's worth of detents."""
-        if self.callback is not None:
-            self.callback(rotations)
-            return
-
         multiplier = self._compute_multiplier(rotations)
         delta = int(round(rotations * multiplier))
         new_value = self._move_steps(delta)
@@ -250,9 +242,6 @@ class EncoderController(controller.Controller):
             return
         if self.sink is not None:
             self.sink.handle(SwitchEvent(controller=self, kind=SwitchEventKind.PRESS))
-            return
-        if self._shortpress is not None:
-            self._shortpress(state)
 
     def _on_button_longpress(self, state) -> None:
         if self.sink is not None:

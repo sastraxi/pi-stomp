@@ -23,6 +23,7 @@ import pistomp.analogcontrol as analogcontrol
 import pistomp.encoder_controller as encoder_controller
 from pistomp.encoder_controller import EncoderController
 import pistomp.footswitch as footswitch
+import pistomp.switchstate as switchstate
 
 try:
     from rtmidi.midiconstants import CONTROL_CHANGE
@@ -36,39 +37,36 @@ except ImportError:
 class MockEncoder(encoder_controller.EncoderController):
     """Nav encoder (no GPIO).  Driven externally via step() / press()."""
 
-    def __init__(self, callback, type=None, id=None):
-        super().__init__(d_pin=None, clk_pin=None, callback=callback, type=type, id=id)
-        self.press_callback = None
+    def __init__(self, type=None, id=None):
+        super().__init__(d_pin=None, clk_pin=None, type=type, id=id)
         self.label: str | None = None
 
     def read_rotary(self):
         pass
 
     def step(self, direction):
-        if direction != 0 and self.callback:
-            self.callback(direction)
+        if direction != 0:
+            self.refresh(direction)
 
     def get_display_info(self) -> dict:
         return {"type": self.type, "id": self.id, "category": None}
 
     def press(self, value):
-        if self.press_callback:
-            self.press_callback(value)
+        if value == switchstate.Value.LONGPRESSED:
+            self._on_button_longpress(value)
+        else:
+            self._on_button(value)
 
 
 class MockEncoderMidi(EncoderController):
     """Tweak encoder with MIDI CC.  Driven externally via step() / press()."""
 
-    def __init__(self, handler, callback, midi_channel, midi_CC, midiout,
-                 type=None, id=None, cfg=None):
+    def __init__(self, midi_channel, midi_CC, midiout, type=None, id=None, cfg=None):
         super().__init__(d_pin=None, clk_pin=None,
                          midi_CC=midi_CC, midi_channel=midi_channel,
                          type=type, id=id)
-        self.handler = handler
-        self.callback = callback
         self.midiout = midiout
         self.cfg = cfg or {'type': type, 'id': id}
-        self.press_callback = None
 
     def read_rotary(self):
         pass
@@ -77,8 +75,10 @@ class MockEncoderMidi(EncoderController):
         self.refresh(direction)
 
     def press(self, value):
-        if self.press_callback:
-            self.press_callback(value)
+        if value == switchstate.Value.LONGPRESSED:
+            self._on_button_longpress(value)
+        else:
+            self._on_button(value)
 
 
 class MockFootswitch(footswitch.Footswitch):

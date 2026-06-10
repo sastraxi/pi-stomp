@@ -106,13 +106,11 @@ class Pistomp(hardware.Hardware):
 
     def init_encoders(self):
         top_enc = EncoderController.EncoderController(
-            TOP_ENC_PIN_D, TOP_ENC_PIN_CLK, callback=self.mod.top_encoder_select,
-            type=Token.NAV,
+            TOP_ENC_PIN_D, TOP_ENC_PIN_CLK, type=Token.NAV, id=0,
         )
         self.encoders.append(top_enc)
         bot_enc = EncoderController.EncoderController(
-            BOT_ENC_PIN_D, BOT_ENC_PIN_CLK, callback=self.mod.bot_encoder_select,
-            type=Token.NAV,
+            BOT_ENC_PIN_D, BOT_ENC_PIN_CLK, type=Token.NAV, id=1,
         )
         self.encoders.append(bot_enc)
         control = AnalogSwitch.AnalogSwitch(self.spi, TOP_ENC_SWITCH_CHANNEL, ENC_SW_THRESHOLD,
@@ -190,7 +188,8 @@ class Pistomp(hardware.Hardware):
             encoders = [["Turn the PBoard Knob", TOP_ENC_PIN_D, TOP_ENC_PIN_CLK],
                         ["Turn the Effect Knob", BOT_ENC_PIN_D, BOT_ENC_PIN_CLK]]
             for e in encoders:
-                enc = EncoderController.EncoderController(e[1], e[2], callback=self.test_passed)
+                enc = EncoderController.EncoderController(e[1], e[2], type=Token.NAV)
+                enc.sink = type("_Sink", (), {"handle": lambda s, ev: self.__setattr__("test_pass", True) or True})()
                 self.mod.lcd.draw_info_message(e[0])
                 self.test_pass = False
                 timeout = 1000

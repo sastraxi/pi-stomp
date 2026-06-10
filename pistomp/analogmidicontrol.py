@@ -15,16 +15,11 @@
 
 from typing import Any
 
-from rtmidi import MidiOut
-from rtmidi.midiconstants import CONTROL_CHANGE
-
 import common.util as util
 import pistomp.analogcontrol as analogcontrol
 import pistomp.controller as controller
 from pistomp.controller import AnalogDisplayInfo
 from pistomp.input.event import AnalogEvent
-
-import logging
 
 
 def as_midi_value(adc_value: int):
@@ -33,7 +28,7 @@ def as_midi_value(adc_value: int):
 
 
 class AnalogMidiControl(analogcontrol.AnalogControl, controller.Controller):
-    def __init__(self, spi, adc_channel, tolerance, midi_CC, midi_channel, midiout: MidiOut, type, id=None, cfg=None, autosync=False):
+    def __init__(self, spi, adc_channel, tolerance, midi_CC, midi_channel, midiout, type, id=None, cfg=None, autosync=False):
         super(AnalogMidiControl, self).__init__(spi, adc_channel, tolerance)
         controller.Controller.__init__(self, midi_channel, midi_CC)
         self.midiout = midiout
@@ -59,32 +54,17 @@ class AnalogMidiControl(analogcontrol.AnalogControl, controller.Controller):
         return value
 
     def _send_value(self, value):
-        """Dispatch via sink (v3) or take the legacy inline MIDI path (v1).
-
-        v1 path: ``sink is None`` → emit CC directly to ``self.midiout`` (which
-        may be an ``ExternalMidiOut`` wrapper for routed controls). This is the
-        whole v1 behavior; nothing else needs to happen.
-
-        v3 path: ``sink is not None`` → stash midi_value on self, build an
-        ``AnalogEvent``, hand it to the sink. The handler does all of the work
-        (volume routing, external MIDI, virtual emit) inside ``handle``."""
         midi_value = as_midi_value(value)
         self.midi_value = midi_value
         self.value = value
         self.last_read = value
 
-        if self.sink is None:
-            if self.midiout is not None:
-                cc = [self.midi_channel | CONTROL_CHANGE, self.midi_CC, midi_value]
-                logging.debug("AnalogControl Sending CC event %s" % cc)
-                self.midiout.send_message(cc)
-            return
-
-        self.sink.handle(AnalogEvent(
-            controller=self,
-            raw_value=value,
-            midi_value=midi_value,
-        ))
+        if self.sink is not None:
+            self.sink.handle(AnalogEvent(
+                controller=self,
+                raw_value=value,
+                midi_value=midi_value,
+            ))
 
     def send_current_value(self):
         """Force-send the current ADC value unconditionally. Used by sync_analog_controls()."""

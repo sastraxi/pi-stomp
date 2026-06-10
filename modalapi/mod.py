@@ -29,6 +29,9 @@ import modalapi.pedalboard as Pedalboard
 import common.parameter as Parameter
 import modalapi.wifi as Wifi
 import modalapi.external_midi as ExternalMidi
+from pistomp.encoder_controller import EncoderController
+from pistomp.input.event import AnalogEvent, ControllerEvent, EncoderEvent, SwitchEvent, SwitchEventKind
+from rtmidi.midiconstants import CONTROL_CHANGE
 
 from blend.snapshot import SnapshotManager
 from modalapi.websocket_bridge import AsyncWebSocketBridge
@@ -209,6 +212,61 @@ class Mod(Handler):
         self._hardware = hardware
         hardware.external_midi = self.external_midi
         self._controller_manager = ControllerManager(hardware, reorder_footswitch_plugins=True)
+        hardware.register_sink(self)
+
+    def handle(self, event: ControllerEvent) -> bool:
+        if isinstance(event, EncoderEvent):
+            c = event.controller
+            if c.type == Token.NAV:
+                if getattr(c, 'id', None) == 0:
+                    self.top_encoder_select(event.rotations)
+                else:
+                    self.bot_encoder_select(event.rotations)
+                return True
+            if c.parameter is not None:
+                self.lcd.display_parameter_value(c.parameter, event.new_value)
+            self._emit_midi(c, event.new_midi_value)
+            return True
+
+        if isinstance(event, AnalogEvent):
+            self._emit_midi(event.controller, event.midi_value)
+            return True
+
+        if isinstance(event, SwitchEvent):
+            return self._handle_switch_v1(event)
+
+        return False
+
+    def _handle_switch_v1(self, event: SwitchEvent) -> bool:
+        c = event.controller
+        if isinstance(c, EncoderController):
+            if event.kind == SwitchEventKind.LONGPRESS:
+                name = getattr(c, 'longpress', None)
+                if name:
+                    cb = self.get_callback(name)
+                    if cb:
+                        cb()
+                return True
+            # Short press on nav encoder button
+            if getattr(c, 'id', None) == 0:
+                self.top_encoder_sw(switchstate.Value.RELEASED)
+            else:
+                self.bottom_encoder_sw(switchstate.Value.RELEASED)
+            return True
+        return False
+
+    def _emit_midi(self, controller, midi_value: int) -> None:
+        if controller.midi_CC is None:
+            return
+        cc = [controller.midi_channel | CONTROL_CHANGE, controller.midi_CC, int(midi_value)]
+        port_name = self.hardware.external_port_name(controller)
+        if port_name is not None and self.external_midi is not None:
+            try:
+                if self.external_midi.send_cc(port_name, controller.midi_channel, controller.midi_CC, int(midi_value)):
+                    return
+            except Exception as e:
+                logging.warning("External CC send failed on %s: %s", port_name, e)
+        self.hardware.midiout.send_message(cc)
 
     def add_lcd(self, lcd):
         self.lcd = lcd

@@ -77,12 +77,9 @@ class Pistompcore(hardware.Hardware):
 
     def init_encoders(self):
         top_enc = EncoderController.EncoderController(
-            TOP_ENC_PIN_D,
-            TOP_ENC_PIN_CLK,
-            callback=self.mod.universal_encoder_select,
+            TOP_ENC_PIN_D, TOP_ENC_PIN_CLK,
             type=Token.NAV,
             sw_pin=1,
-            shortpress=self.mod.universal_encoder_sw,
         )
         self.encoders.append(top_enc)
         # XXX: user-added encoders via config are not supported here yet (see v3).
