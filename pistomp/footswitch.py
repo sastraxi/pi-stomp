@@ -56,7 +56,7 @@ class Footswitch(controller.Controller):
 
         self.adc_switch = None
         if adc_input is not None:
-            self.adc_switch = analogswitch.AnalogSwitch(spi, adc_input, 800, self._on_switch,
+            self.adc_switch = analogswitch.AnalogSwitch(spi, adc_input, self._on_switch,
                                                          longpress_callback=self._on_switch)
 
         if led_pin is not None:

@@ -19,13 +19,30 @@ import time
 import pistomp.analogcontrol as analogcontrol
 import pistomp.switchstate as switchstate
 
-LONG_PRESS_TIME = 0.5  # Hold seconds which defines a long press
-FALLING_THRESHOLD = 800  # ASSUMES 10-bit ADC, can be changed for debounce handling
-
 
 class AnalogSwitch(analogcontrol.AnalogControl):
-    def __init__(self, spi, adc_channel, tolerance, callback, longpress_callback=None):
-        super(AnalogSwitch, self).__init__(spi, adc_channel, tolerance)
+    """Raw ADC press detector (10-bit via MCP3008 SPI).
+
+    Hardware paths:
+      - Encoder buttons on v1 (Pistomp) — both nav encoders use ADC channels.
+      - Nav encoder button on v3 (Pistomptre) — uses ADC channel 4.
+      - Footswitches on ALL versions when wired to ADC channels (e.g. expression-pedal-style switches).
+
+    The "tolerance" value is ignored.
+
+    The owning object (Footswitch or EncoderController) is responsible for any
+    MIDI / event-dispatch behavior. This class is polled via ``refresh()`` from
+    the main loop (it does NOT implement ``poll()``)."""
+
+    # ADC value below which a switch is considered pressed.
+    THRESHOLD = 800
+
+    # Hold seconds which defines a long press.
+    LONG_PRESS_TIME = 0.5
+
+    def __init__(self, spi, adc_channel, callback, longpress_callback=None):
+        # Tolerance is not used for switch detection (binary pressed/released)
+        super(AnalogSwitch, self).__init__(spi, adc_channel, tolerance=0)
         self.callback = callback
         self.longpress_callback = longpress_callback
         self.state = switchstate.Value.RELEASED
@@ -37,7 +54,7 @@ class AnalogSwitch(analogcontrol.AnalogControl):
         # read the analog channel
         new_value = self.readChannel()
 
-        if new_value <= FALLING_THRESHOLD:
+        if new_value <= self.THRESHOLD:
             # switch pressed
             if self.state is switchstate.Value.RELEASED:
                 self.state = switchstate.Value.PRESSED
@@ -45,11 +62,11 @@ class AnalogSwitch(analogcontrol.AnalogControl):
             elif self.state is not switchstate.Value.LONGPRESSED:
                 # not longpress yet, but check how long
                 self.duration = time.monotonic() - self.start_time
-                if self.duration >= LONG_PRESS_TIME:
+                if self.duration >= self.LONG_PRESS_TIME:
                     self.state = switchstate.Value.LONGPRESSED
-                    lp = self.longpress_callback if self.longpress_callback is not None else self.callback
-                    lp(switchstate.Value.LONGPRESSED, self.start_time)
-        elif new_value > FALLING_THRESHOLD:
+                    if self.longpress_callback is not None:
+                        self.longpress_callback(switchstate.Value.LONGPRESSED, self.start_time)
+        elif new_value > self.THRESHOLD:
             # switch released
             if self.state is switchstate.Value.PRESSED:
                 self.state = switchstate.Value.RELEASED

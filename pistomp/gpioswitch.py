@@ -21,9 +21,15 @@ import pistomp.switchstate as switchstate
 
 
 class GpioSwitch:
-    """Raw GPIO press detector. Not a Controller — pure event source.
-    The owning object (Footswitch or Encoder) is responsible for any
-    MIDI / event-dispatch behavior."""
+    """Raw GPIO press detector.
+
+    Hardware paths:
+      - Footswitches on ALL versions (v1/v2/v3) when wired to GPIO pins.
+      - Encoder buttons on v2 (Pistompcore) and v3 (Pistomptre) tweak encoders.
+
+    The owning object (Footswitch or EncoderController) is responsible for any
+    MIDI / event-dispatch behavior.  This class is polled via ``poll()`` from
+    the main loop (it does NOT implement ``refresh()``)."""
 
     def __init__(self, gpio_input, callback, longpress_callback=None):
         self.gpio_input = gpio_input
@@ -38,7 +44,8 @@ class GpioSwitch:
         # TODO with the move to gpiozero.button, we could take advantage of its methods for detecting release,
         # hold, etc. (when_released, when_held).  But experiments with those async events caused issues with
         # the LCD refresh timing.  So for now, we'll just poll like we did before when using RPi.GPIO
-        from gpiozero import Button
+        from gpiozero import Button  # pyright: ignore[reportMissingImports]
+
         self.button = Button(gpio_input, bounce_time=0.008)
         self.button.when_pressed = self._gpio_down
 

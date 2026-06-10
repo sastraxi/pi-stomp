@@ -97,7 +97,6 @@ class EncoderController(controller.Controller):
             self._button = analogswitch.AnalogSwitch(
                 spi,
                 sw_adc_chan,
-                512,
                 callback=self._on_button,
                 longpress_callback=self._on_button_longpress,
             )
