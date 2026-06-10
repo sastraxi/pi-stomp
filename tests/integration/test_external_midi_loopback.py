@@ -6,13 +6,9 @@ macOS-only for now: virtual ports need CoreMIDI. Linux/CI needs the ALSA sequenc
 import sys
 import time
 import uuid
-from unittest.mock import MagicMock
-
 import pytest
 
-import pistomp.switchstate as switchstate
 from modalapi.external_midi import ExternalMidiManager
-from pistomp.footswitch import Footswitch
 
 pytestmark = pytest.mark.skipif(
     sys.platform != "darwin",
@@ -125,21 +121,11 @@ class TestRealLoopback:
 
 
 class TestControlRoutesToRealPort:
-    """End-to-end: a real control routed via ExternalMidiOut emits framed CC bytes on the wire.
+    """End-to-end: externally-routed controls emit framed CC bytes on the wire.
 
-    Each builds the actual control with its midiout set to an external wrapper (as
-    __apply_midi_routing does), drives the action method directly, and asserts the
-    bytes land on the virtual port. Covers every externally-routable control:
-    footswitch press, tweak-encoder rotation, expression/knob movement.
+    Deferred — these need the full handler+sink pipeline so _emit_midi runs.
+    Tracked in project_input_router_finish.
     """
-
-    def _routed(self, port_name):
-        mgr = _manager_for(port_name)
-        fallback = MagicMock()
-        out = ExternalMidiOut(mgr, port_name, fallback)
-        # Eagerly open the port so the first send doesn't race enumeration.
-        mgr.open_port(port_name)
-        return mgr, out, fallback
 
     def test_footswitch_press_reaches_real_port(self, loopback):
         pytest.skip(
