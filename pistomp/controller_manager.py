@@ -121,7 +121,8 @@ class ControllerManager:
             port_name = self._hw.external_port_name(controller)
 
             # AnalogMidiControl commits via parameter_value_commit (guarded by
-            # EXTERNAL_INSTANCE_ID); the encoder routes through encoder_value_changed.
+            # EXTERNAL_INSTANCE_ID); the encoder skips the commit path in _handle_encoder
+            # via hardware.is_external().
             if controller.parameter is None:
                 if isinstance(controller, AnalogMidiControl):
                     controller.parameter = self._hw.create_external_parameter(

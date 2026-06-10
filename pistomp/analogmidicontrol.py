@@ -101,7 +101,4 @@ class AnalogMidiControl(analogcontrol.AnalogControl, controller.Controller):
         return self.last_read / 1023.0
 
     def get_display_info(self) -> AnalogDisplayInfo:
-        info: AnalogDisplayInfo = {'type': self.type, 'category': None}
-        if self.id is not None:
-            info['id'] = self.id
-        return info
+        return {'type': self.type, 'id': self.id, 'category': None}

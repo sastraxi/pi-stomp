@@ -56,7 +56,7 @@ AnalogControllers = dict[str, AnalogDisplayInfo]
 
 
 class Controller:
-    type: str | None = None  # class default; not in __init__ — clashes with Encoder.type in EncoderController's MRO
+    type: str | None = None  # class default; not in __init__ — Encoder sets its own type via the encoder MRO
 
     def __init__(self, midi_channel: int, midi_CC: int | None):
         self.midi_channel: int = midi_channel
