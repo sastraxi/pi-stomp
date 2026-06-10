@@ -22,6 +22,7 @@ from typing import List, Optional
 
 import common.util as util
 import pistomp.controller as controller
+import pistomp.analogswitch as analogswitch
 import pistomp.gpioswitch as gpioswitch
 import pistomp.switchstate as switchstate
 from common.parameter import Parameter, Type
@@ -44,8 +45,9 @@ class EncoderController(controller.Controller):
       dispatches EncoderEvent via sink.
 
     Button: if sw_pin is provided, owns a GpioSwitch that emits SwitchEvent
-    via self.sink. Longpress is stored as a string callback name resolved by
-    the handler at dispatch time.
+    via self.sink. If sw_adc_chan is provided, owns an AnalogSwitch instead.
+    Longpress is stored as a string callback name resolved by the handler at
+    dispatch time.
     """
 
     # Speed amplification: at this per-detent interval, multiplier = 1×.
@@ -63,6 +65,8 @@ class EncoderController(controller.Controller):
         type: Optional[str] = None,
         id: Optional[int] = None,
         sw_pin: Optional[int] = None,
+        sw_adc_chan: Optional[int] = None,
+        spi: Optional[object] = None,
         longpress: Optional[str] = None,  # string name; resolved by handler at dispatch
     ):
         controller.Controller.__init__(self, midi_channel, midi_CC)
@@ -80,8 +84,8 @@ class EncoderController(controller.Controller):
             self._recalculate_steps()
             self.set_value(64)
 
-        # Absorbed button (GPIO)
-        self._button: Optional[gpioswitch.GpioSwitch] = None
+        # Absorbed button (GPIO or ADC)
+        self._button: Optional[gpioswitch.GpioSwitch | analogswitch.AnalogSwitch] = None
         self.longpress: Optional[str] = longpress  # string name; resolved at dispatch
         if sw_pin is not None:
             self._button = gpioswitch.GpioSwitch(
@@ -89,8 +93,22 @@ class EncoderController(controller.Controller):
                 callback=self._on_button,
                 longpress_callback=self._on_button_longpress,
             )
+        elif sw_adc_chan is not None:
+            self._button = analogswitch.AnalogSwitch(
+                spi,
+                sw_adc_chan,
+                512,
+                callback=self._on_button,
+                longpress_callback=self._on_button_longpress,
+            )
 
-        logging.debug("EncoderController init: id=%s, midi_CC=%s, sw_pin=%s", id, midi_CC, sw_pin)
+        logging.debug(
+            "EncoderController init: id=%s, midi_CC=%s, sw_pin=%s, sw_adc_chan=%s",
+            id,
+            midi_CC,
+            sw_pin,
+            sw_adc_chan,
+        )
 
     # ── Poll ─────────────────────────────────────────────────────────────
 
@@ -104,7 +122,10 @@ class EncoderController(controller.Controller):
     def poll(self) -> None:
         """Called from hardware.poll_controls(). Polls the absorbed button."""
         if self._button is not None:
-            self._button.poll()
+            if isinstance(self._button, gpioswitch.GpioSwitch):
+                self._button.poll()
+            else:
+                self._button.refresh()
 
     # ── Quantizer ────────────────────────────────────────────────────────
 

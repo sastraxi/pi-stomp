@@ -25,11 +25,10 @@ from pathlib import Path
 import common.token as Token
 import common.util as Util
 import pistomp.analogmidicontrol as AnalogMidiControl
-import pistomp.analogswitch as AnalogSwitch
-import pistomp.encoder as Encoder
 import pistomp.encoder_controller as EncoderController
 import pistomp.footswitch as Footswitch
 import pistomp.hardware as hardware
+import pistomp.input.sink as InputSink
 import pistomp.relay as Relay
 
 
@@ -106,18 +105,14 @@ class Pistomp(hardware.Hardware):
     def init_encoders(self):
         top_enc = EncoderController.EncoderController(
             TOP_ENC_PIN_D, TOP_ENC_PIN_CLK, type=Token.NAV, id=0,
+            sw_adc_chan=TOP_ENC_SWITCH_CHANNEL, spi=self.spi,
         )
         self.encoders.append(top_enc)
         bot_enc = EncoderController.EncoderController(
             BOT_ENC_PIN_D, BOT_ENC_PIN_CLK, type=Token.NAV, id=1,
+            sw_adc_chan=BOT_ENC_SWITCH_CHANNEL, spi=self.spi,
         )
         self.encoders.append(bot_enc)
-        control = AnalogSwitch.AnalogSwitch(self.spi, TOP_ENC_SWITCH_CHANNEL, ENC_SW_THRESHOLD,
-                                            callback=self.mod.top_encoder_sw)
-        self.analog_controls.append(control)
-        control = AnalogSwitch.AnalogSwitch(self.spi, BOT_ENC_SWITCH_CHANNEL, ENC_SW_THRESHOLD,
-                                            callback=self.mod.bottom_encoder_sw)
-        self.analog_controls.append(control)
 
     def init_footswitches(self):
         cfg_fss = self.cfg[Token.HARDWARE][Token.FOOTSWITCHES]
@@ -184,11 +179,18 @@ class Pistomp(hardware.Hardware):
                 time.sleep(1.2)
 
             # Encoder rotary
+            class _TestSink(InputSink.InputSink):
+                def __init__(self, on_event):
+                    self.on_event = on_event
+                def handle(self, event):
+                    self.on_event()
+                    return True
+
             encoders = [["Turn the PBoard Knob", TOP_ENC_PIN_D, TOP_ENC_PIN_CLK],
-                        ["Turn the Effect Knob", BOT_ENC_PIN_D, BOT_ENC_PIN_CLK]]
+                        ["Turn the Effect Knob", BOT_ENC_PIN_D, BOT_ENC_CLK]]
             for e in encoders:
                 enc = EncoderController.EncoderController(e[1], e[2], type=Token.NAV)
-                enc.sink = type("_Sink", (), {"handle": lambda s, ev: self.__setattr__("test_pass", True) or True})()
+                enc.sink = _TestSink(lambda: setattr(self, "test_pass", True))
                 self.mod.lcd.draw_info_message(e[0])
                 self.test_pass = False
                 timeout = 1000
@@ -208,12 +210,16 @@ class Pistomp(hardware.Hardware):
             encoders = [["Press the PBoard Knob", TOP_ENC_SWITCH_CHANNEL],
                         ["Press the Effect Knob", BOT_ENC_SWITCH_CHANNEL]]
             for e in encoders:
-                enc = AnalogSwitch.AnalogSwitch(self.spi, e[1], ENC_SW_THRESHOLD, callback=self.test_passed)
+                enc = EncoderController.EncoderController(
+                    None, None, type=Token.NAV,
+                    sw_adc_chan=e[1], spi=self.spi,
+                )
+                enc.sink = _TestSink(lambda: setattr(self, "test_pass", True))
                 self.mod.lcd.draw_info_message(e[0])
                 self.test_pass = False
                 timeout = 1000
                 while self.test_pass is False and timeout > 0:
-                    enc.refresh()
+                    enc.poll()
                     time.sleep(0.01)
                     timeout = timeout - 1
                 del enc

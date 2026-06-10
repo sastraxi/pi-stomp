@@ -15,7 +15,6 @@
 
 import logging
 
-import pistomp.analogswitch as AnalogSwitch
 import pistomp.analogVU as AnalogVU
 import common.token as Token
 import common.util as Util
@@ -113,9 +112,9 @@ class Pistomptre(hardware.Hardware):
     def init_encoders(self):
         enc = EncoderController.EncoderController(
             NAV_PIN_D, NAV_PIN_CLK, type=Token.NAV,
+            sw_adc_chan=NAV_ADC_CHAN, spi=self.spi,
         )
         self.encoders.append(enc)
-        # Nav encoder switch is a special case which gets initialized in init_analog_controls
 
         # Tweak encoders
         cfg = self.default_cfg.copy()
@@ -129,12 +128,6 @@ class Pistomptre(hardware.Hardware):
         cfg = self.default_cfg.copy()
         if len(self.analog_controls) == 0:
             self.create_analog_controls(cfg)
-
-        # Special case Navigation encoder switch
-        control = AnalogSwitch.AnalogSwitch(self.spi, NAV_ADC_CHAN, ENC_SW_THRESHOLD,
-                                            callback=self.handler.universal_encoder_sw)
-        self.analog_controls.append(control)
-
     def init_footswitches(self):
         # These are defined in the config file
         cfg = self.default_cfg.copy()
