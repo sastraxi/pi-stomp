@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import threading
+from typing import Any
 
 
 class Encoder:
@@ -29,8 +30,8 @@ class Encoder:
         self.d_pin = d_pin
         self.clk_pin = clk_pin
         self._lock = threading.Lock()
-        self.data = None
-        self.clk = None
+        self.data: Any = None
+        self.clk: Any = None
         if d_pin is not None:
             from gpiozero import Button  # noqa: PLC0415
             self.data = Button(d_pin)

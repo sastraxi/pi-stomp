@@ -74,9 +74,10 @@ class AnalogMidiControl(analogcontrol.AnalogControl, controller.Controller):
         self.last_read = value
 
         if self.sink is None:
-            cc = [self.midi_channel | CONTROL_CHANGE, self.midi_CC, midi_value]
-            logging.debug("AnalogControl Sending CC event %s" % cc)
-            self.midiout.send_message(cc)
+            if self.midiout is not None:
+                cc = [self.midi_channel | CONTROL_CHANGE, self.midi_CC, midi_value]
+                logging.debug("AnalogControl Sending CC event %s" % cc)
+                self.midiout.send_message(cc)
             return
 
         self.sink.handle(AnalogEvent(

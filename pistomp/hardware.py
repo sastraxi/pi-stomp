@@ -15,7 +15,6 @@
 
 import logging
 import os
-from typing import Union
 import sys
 
 import common.token as Token
@@ -32,10 +31,8 @@ from abc import ABC, abstractmethod
 from rtmidi import MidiOut
 from modalapi.external_midi import ExternalMidiOut, ExternalMidiManager, EXTERNAL_INSTANCE_ID
 from pistomp.input.sink import InputSink
-from pistomp.controller import RoutingInfo, RoutingDestination
+from pistomp.controller import Controller, RoutingInfo, RoutingDestination
 import pistomp.relay as Relay
-
-Controller = Union[AnalogMidiControl.AnalogMidiControl, EncoderController.EncoderController, Footswitch.Footswitch]
 
 
 class Hardware(ABC):
@@ -77,14 +74,12 @@ class Hardware(ABC):
         Hardware is fully constructed. v1 never calls this — its controllers
         keep `sink = None` and take their legacy inline paths."""
         for ac in self.analog_controls:
-            if hasattr(ac, "sink"):
+            if isinstance(ac, Controller):
                 ac.sink = sink
         for enc in self.encoders:
-            if hasattr(enc, "sink"):
-                enc.sink = sink
+            enc.sink = sink
         for fs in self.footswitches:
-            if hasattr(fs, "sink"):
-                fs.sink = sink
+            fs.sink = sink
 
     def toggle_tap_tempo_enable(self, bpm: float = 0.0):
         if self.taptempo:

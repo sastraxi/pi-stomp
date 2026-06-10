@@ -42,8 +42,8 @@ class Parameter:
         if self.name is None:
             self.name = util.DICT_GET(plugin_info, Token.NAME)
         self.symbol = util.DICT_GET(plugin_info, Token.SYMBOL)
-        self.minimum = util.DICT_GET(util.DICT_GET(plugin_info, Token.RANGES), Token.MINIMUM)
-        self.maximum = util.DICT_GET(util.DICT_GET(plugin_info, Token.RANGES), Token.MAXIMUM)
+        self.minimum: float = util.DICT_GET(util.DICT_GET(plugin_info, Token.RANGES), Token.MINIMUM)
+        self.maximum: float = util.DICT_GET(util.DICT_GET(plugin_info, Token.RANGES), Token.MAXIMUM)
         self.value = value
         self.binding = binding
         self.instance_id = instance_id.lstrip("/") if instance_id else instance_id
