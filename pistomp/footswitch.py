@@ -82,6 +82,12 @@ class Footswitch(controller.Controller):
     def set_midi_channel(self, midi_channel):
         self.midi_channel = midi_channel
 
+    @property
+    def drives_display(self) -> bool:
+        """True when unbound: no inbound echo will arrive, so the press updates
+        indicators itself. When bound to a plugin :bypass, the WS broadcast does."""
+        return self.parameter is None
+
     @override
     def set_value(self, value: float):
         self.toggled = (value < 1)
