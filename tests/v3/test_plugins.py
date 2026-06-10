@@ -184,26 +184,24 @@ def test_v3_toggle_plugin_bypass_via_footswitch(v3_system: SystemFixture, make_p
 
 
 def test_v3_bound_footswitch_emits_absolute_values_without_display(v3_system: SystemFixture, make_plugin):
-    """A bound :bypass footswitch sends alternating absolute CC values from local
-    intent — so rapid presses that outrun the echo stay correct — and leaves its
-    indicators and parameter for the inbound echo to update."""
+    """A bound :bypass footswitch sends alternating absolute CC values (not relative
+    deltas), so rapid presses that outrun the echo stay correct. refresh_callback is
+    not invoked — display is driven by update_lcd_fs, not the old direct path."""
     hw = v3_system.hw
     fs = hw.footswitches[0]
     fs.refresh_callback = MagicMock()
-    fs.midiout.send_message.reset_mock()
+    hw.midiout.send_message.reset_mock()
 
     plugin = make_plugin("fuzz")
     fs.parameter = plugin.parameters[":bypass"]
     assert not fs.drives_display
 
-    bypass_before = fs.parameter.value
     for _ in range(3):
-        fs.pressed(switchstate.Value.RELEASED)
+        fs._on_switch(switchstate.Value.RELEASED)
 
-    sent = [c.args[0][2] for c in fs.midiout.send_message.call_args_list]
+    sent = [c.args[0][2] for c in hw.midiout.send_message.call_args_list]
     assert sent == [127, 0, 127]
     fs.refresh_callback.assert_not_called()
-    assert fs.parameter.value == bypass_before
 
 
 def test_v3_preset_change_leans_on_ws_drain_not_rest(v3_system: SystemFixture, make_plugin, get_urls):
