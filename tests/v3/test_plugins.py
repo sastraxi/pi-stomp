@@ -5,6 +5,7 @@ from unittest.mock import MagicMock
 
 import pistomp.switchstate as switchstate
 from pistomp.encoder import Encoder
+from pistomp.footswitch import Footswitch
 from common.parameter import Parameter
 from modalapi.plugin import Plugin
 import common.token as Token
@@ -75,6 +76,31 @@ def test_v3_bind_volume_encoder_populates_analog_controllers(v3_system: SystemFi
     assert Token.VOLUME in handler.current.analog_controllers
 
 
+def test_v3_bind_does_not_reorder_footswitch_plugins(v3_system: SystemFixture, make_plugin):
+    """v3 (modhandler) leaves the plugin chain order untouched.
+
+    Counterpart to v1's reorder-to-end behavior — pins the asymmetry so a shared
+    controller-manager extraction must preserve it rather than unify it.
+    """
+    handler = v3_system.handler
+    hw = v3_system.hw
+
+    fs_key = next(k for k, v in hw.controllers.items() if isinstance(v, Footswitch))
+
+    fuzz = make_plugin("fuzz")  # footswitch-controlled, placed first
+    fuzz.parameters[":bypass"].binding = fs_key
+    reverb = make_plugin("reverb")  # no controller binding
+
+    assert handler.current
+    handler.current.pedalboard.plugins = [fuzz, reverb]
+    handler.bind_current_pedalboard()
+
+    assert hw.controllers[fs_key].parameter is fuzz.parameters[":bypass"]
+    assert fuzz.has_footswitch is True
+    titles = [p.instance_id for p in handler.current.pedalboard.plugins]
+    assert titles == ["fuzz", "reverb"], "v3 must not reorder footswitch plugins"
+
+
 # ---------------------------------------------------------------------------
 # Plugin bypass
 # ---------------------------------------------------------------------------
@@ -100,6 +126,7 @@ def test_v3_toggle_plugin_bypass_via_footswitch_sends_midi_cc(v3_system: SystemF
 
     handler.toggle_plugin_bypass(None, plugin)
 
+    assert isinstance(fs.midiout, MagicMock)
     fs.midiout.send_message.assert_called_once()
     sent_cc = fs.midiout.send_message.call_args[0][0]
     assert sent_cc[1] == fs.midi_CC
@@ -229,11 +256,22 @@ def test_v3_parameter_edit(v3_system: SystemFixture, make_parameter, snapshot):
 
 
 def test_v3_parameter_midi_change(v3_system: SystemFixture, make_parameter, snapshot):
-    """parameter_midi_change() draws a parameter dialog and steps the value."""
-    handler = v3_system.handler
+    """Rotating a tweak encoder steps the bound value and draws the dialog."""
+    import pytest
 
+    hw = v3_system.hw
+
+    enc = next(e for e in hw.encoders if isinstance(e, Encoder) and e.midi_CC is not None)
     param = make_parameter("Gain", "delay", value=0.5)
-    handler.parameter_midi_change(param, 1)
+    enc.bind_to_parameter(param)
+
+    # The first rotation is always at 1x (no prior detent timing), so 8 detents
+    # deterministically advance exactly 8 steps on the encoder's quantized grid.
+    start_step = enc.current_step
+    enc.refresh(8)
+
+    assert enc.current_step == start_step + 8
+    assert param.value == pytest.approx(enc.step_values[start_step + 8])
     snapshot()
 
 

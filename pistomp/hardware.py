@@ -29,8 +29,10 @@ import pistomp.footswitch as Footswitch
 import pistomp.taptempo as taptempo
 
 from abc import ABC, abstractmethod
+from rtmidi import MidiOut
 from modalapi.external_midi import ExternalMidiOut, ExternalMidiManager, EXTERNAL_INSTANCE_ID
 from pistomp.input.sink import InputSink
+from pistomp.controller import RoutingInfo, RoutingDestination
 import pistomp.relay as Relay
 
 Controller = Union[AnalogMidiControl.AnalogMidiControl, Encoder.Encoder, Footswitch.Footswitch]
@@ -64,18 +66,10 @@ class Hardware(ABC):
         self.ledstrip = None
         self.taptempo = taptempo.TapTempo(None)
         self.external_midi: ExternalMidiManager | None = None
-        # Routing registry: maps controller -> external port name. Hardware records
-        # the routing decision at construction time (and on reinit) from per-controller
-        # config; sinks and handler code query via external_port_name(). Controller
-        # objects are stable across reinit (mutated in place), so identity-keying is safe.
-        self.external_routing: dict[Controller, str] = {}
-
-    def external_port_name(self, controller: Controller) -> str | None:
-        """Look up external port for a controller. Returns None if virtual-routed."""
-        return self.external_routing.get(controller)
-
-    def is_external(self, controller: Controller) -> bool:
-        return controller in self.external_routing
+        # control → destination; absent means internal (virtual/mod-host).
+        # Rebuilt every reinit in __apply_midi_routing. Identity-keyed; controllers
+        # are stable across reinit (mutated in place).
+        self.external_routing: dict[Controller, RoutingInfo] = {}
 
     def register_sink(self, sink: InputSink) -> None:
         """Assign `sink` as the default dispatch target for every controller
@@ -134,6 +128,13 @@ class Hardware(ABC):
                 except Exception as e:
                     logging.warning(f"Failed to sync analog control {control.midi_CC}: {e}")
 
+    def is_external(self, controller: Controller) -> bool:
+        return controller in self.external_routing
+
+    def external_port_name(self, controller: Controller) -> str | None:
+        info = self.external_routing.get(controller)
+        return info.port_name if info is not None else None
+
     def poll_indicators(self):
         for i in self.indicators:
             i.refresh()
@@ -149,6 +150,7 @@ class Hardware(ABC):
     def reinit(self, cfg):
         # reinit hardware as specified by the new cfg context (after pedalboard change, etc.)
         self.cfg = self.default_cfg.copy()
+        self.external_routing.clear()  # rebuilt by __route_section for this cfg overlay
 
         self.__init_midi_default()
 
@@ -279,8 +281,6 @@ class Hardware(ABC):
 
             assert fs is not None, "No footswitch created for config: %s" % f
             self.footswitches.append(fs)
-            if midi_port:
-                self.external_routing[fs] = midi_port
             idx += 1
 
     def create_analog_controls(self, cfg):
@@ -319,8 +319,6 @@ class Hardware(ABC):
             self.analog_controls.append(control)
             key = format("%d:%d" % (midi_channel, midi_cc))
             self.controllers[key] = control
-            if midi_port:
-                self.external_routing[control] = midi_port
             logging.debug("Created AnalogMidiControl Input: %d, Midi Chan: %d, CC: %d" %
                           (adc_input, midi_channel, midi_cc))
 
@@ -358,9 +356,6 @@ class Hardware(ABC):
                 logging.exception("Failed to create encoder with config: %s" % c)
                 continue
 
-            if midi_port:
-                self.external_routing[control] = midi_port
-
             if midi_cc is not None:
                 assert isinstance(control, Encoder.Encoder), "Encoder specified with MIDI CC must be an Encoder"
                 key = format("%d:%d" % (midi_channel, midi_cc))
@@ -395,20 +390,17 @@ class Hardware(ABC):
         if self.external_midi is None:
             logging.warning(f"midi_port '{port_name}' set but external_midi not initialized, falling back to virtual")
             return None
-        if port_name not in self.external_midi.port_configs:
-            logging.warning(f"midi_port '{port_name}' not found in external_midi config, falling back to virtual")
-            return None
         return port_name
 
-    def __resolve_midiout(self, cfg_entry):
-        """Return the midiout for a control: its external port (opened eagerly) if routed, else virtual."""
+    def __resolve_midiout(self, cfg_entry) -> tuple[MidiOut | ExternalMidiOut, RoutingInfo]:
+        """Return (midiout, routing): the wire to send on and its destination."""
         midi_port = Util.DICT_GET(cfg_entry, "midi_port")
         if midi_port:
             midi_port = self.__validate_midi_port(midi_port)
         if not midi_port or self.external_midi is None:
-            return self.midiout
+            return self.midiout, RoutingInfo.virtual()
         self.external_midi.open_port(midi_port)  # eager: first poll-loop send must not enumerate
-        return ExternalMidiOut(self.external_midi, midi_port, self.midiout)
+        return ExternalMidiOut(self.external_midi, midi_port, self.midiout), RoutingInfo.external(midi_port)
 
     def __route_section(self, cfg, section, controls, set_cc):
         cfg_list = Util.DICT_GET(cfg[Token.HARDWARE], section)
@@ -426,7 +418,14 @@ class Hardware(ABC):
                 midi_cc = Util.DICT_GET(entry, Token.MIDI_CC)
                 if midi_cc is not None and hasattr(ctrl, 'midi_CC'):
                     ctrl.midi_CC = midi_cc
-            ctrl.midiout = self.__resolve_midiout(entry)
+                midi_channel = Util.DICT_GET(entry, "midi_channel")
+                if midi_channel is not None and hasattr(ctrl, 'midi_channel'):
+                    ctrl.midi_channel = midi_channel
+            ctrl.midiout, routing = self.__resolve_midiout(entry)
+            if routing.destination == RoutingDestination.EXTERNAL:
+                self.external_routing[ctrl] = routing
+            else:
+                self.external_routing.pop(ctrl, None)
 
     def __apply_midi_routing(self, cfg):
         """Route every control to its external port or the virtual port (default + pedalboard cfg)."""

@@ -28,7 +28,7 @@ from typing import cast, Any
 
 import common.token as Token
 import common.util as util
-from common.parameter import Parameter, TTL_PROPERTIES, TTL_INTEGER
+from common.parameter import Parameter
 import modalapi.pedalboard as Pedalboard
 import modalapi.wifi as Wifi
 import modalapi.external_midi as ExternalMidi
@@ -41,7 +41,8 @@ from modalapi.websocket_bridge import AsyncWebSocketBridge
 from modalapi.ws_protocol import parse_message, LoadingEndMessage, PedalSnapshotMessage, PluginBypassMessage, WebSocketMessage
 from modalapi.pedalboard_monitor import FileChangeMonitor, read_pedalboard_bundle
 
-from pistomp.analogmidicontrol import AnalogMidiControl
+from pistomp.controller_manager import ControllerManager
+from pistomp.current import Current
 from pistomp.encoder import Encoder
 from pistomp.footswitch import Footswitch
 from pistomp.handler import Handler
@@ -88,7 +89,7 @@ class Modhandler(Handler):
         self.bypass_left = False
         self.bypass_right = False
 
-        self.current: Modhandler.Current | None = None
+        self.current: Current | None = None
         self._lcd: Lcd | None = None
         self._hardware: Hardware | None = None
         self.volume_parameter = None
@@ -136,11 +137,7 @@ class Modhandler(Handler):
         }
 
         # External MIDI device synchronization
-        self.external_midi = None
-        try:
-            self.external_midi = ExternalMidi.ExternalMidiManager()
-        except Exception as e:
-            logging.warning(f"Failed to initialize external MIDI manager: {e}")
+        self.external_midi = ExternalMidi.ExternalMidiManager()
 
         # Blend mode manager - multiple blend snapshots per pedalboard
         self.blend_modes: dict[str, Any] = {}  # {snapshot_name: BlendMode}
@@ -164,22 +161,8 @@ class Modhandler(Handler):
             self._lcd.cleanup()
         if self._hardware is not None:
             self._hardware.cleanup()
-        if self.external_midi is not None:
-            self.external_midi.close()
-        if self.ws_bridge is not None:
-            self.ws_bridge.stop()
-            logging.info("WebSocket bridge stopped")
-
-    # Container for dynamic data which is unique to the "current" pedalboard
-    # The self.current pointed above will point to this object which gets
-    # replaced when a different pedalboard is made current (old Current object
-    # gets deleted and a new one added via self.set_current_pedalboard()
-    class Current:
-        def __init__(self, pedalboard: Pedalboard.Pedalboard):
-            self.pedalboard: Pedalboard.Pedalboard = pedalboard
-            self.presets: dict[int, str] = {}
-            self.preset_index: int = 0  # Assumes pedalboard loads at snapshot 0 (default behavior)
-            self.analog_controllers: dict[str, dict[str, Any]] = {}  # { type: (plugin_name, param_name) }
+        self.external_midi.close()
+        self.ws_bridge.stop()
 
     def _rest_get(self, url: str) -> Response | None:
         try:
@@ -198,6 +181,7 @@ class Modhandler(Handler):
     def add_hardware(self, hardware):
         self._hardware = hardware
         hardware.external_midi = self.external_midi
+        self._controller_manager = ControllerManager(hardware)
         self.bind_volume_encoder()
         hardware.register_sink(self)
 
@@ -618,7 +602,7 @@ class Modhandler(Handler):
         del self.current
 
         # Create a new "current"
-        self.current = self.Current(pedalboard)
+        self.current = Current(pedalboard)
 
         if self.next_pedalboard_preset_index is not None:
             self.current.preset_index = self.next_pedalboard_preset_index
@@ -642,11 +626,10 @@ class Modhandler(Handler):
 
         # Send external MIDI messages for this pedalboard
         # Config was already updated by hardware.reinit(cfg) above
-        if self.external_midi is not None:
-            try:
-                self.external_midi.send_messages_for_pedalboard()
-            except Exception as e:
-                logging.warning(f"Failed to send external MIDI messages: {e}")
+        try:
+            self.external_midi.send_messages_for_pedalboard()
+        except Exception as e:
+            logging.warning(f"Failed to send external MIDI messages: {e}")
 
         # Sync analog controls last: after bind + external send, matching mod.py
         self.hardware.sync_analog_controls()
@@ -694,76 +677,7 @@ class Modhandler(Handler):
         # "current" being the pedalboard mod-host says is current
         # The pedalboard data has already been loaded, but this will overlay
         # any real time settings
-
-        # Clear previous parameter bindings from all controllers except the volume control
-        for controller in self.hardware.controllers.values():
-            if controller.type != Token.VOLUME:
-                controller.parameter = None
-
-        # Clear analog controllers display data
-        self.current.analog_controllers = {}
-
-        footswitch_plugins = []
-        if self.current:
-            #logging.debug(self.current.pedalboard.to_json())
-            for plugin in self.current.pedalboard.plugins:
-                if plugin is None or plugin.parameters is None:
-                    continue
-                for sym, param in plugin.parameters.items():
-                    if param.binding is not None:
-                        controller = self.hardware.controllers.get(param.binding)
-                        if controller is not None:
-                            external_port = self.hardware.external_port_name(controller)
-
-                            # External controllers shouldn't be bound to plugin parameters
-                            if external_port is not None:
-                                logging.warning(
-                                    f"Plugin parameter {plugin.name}:{param.name} is bound to external controller "
-                                    f"{param.binding} (routed to {external_port}) - ignoring plugin binding"
-                                )
-                                continue
-
-                            controller.bind_to_parameter(param)
-                            plugin.controllers.append(controller)
-                            if isinstance(controller, Footswitch):
-                                plugin.has_footswitch = True
-                                footswitch_plugins.append(plugin)
-                                controller.set_category(plugin.category)
-                            else:
-                                key = "%s:%s" % (plugin.instance_id, param.name)
-                                display_info = self._build_display_info(controller, category=plugin.category)
-                                self.current.analog_controllers[key] = display_info
-
-            # Special case for volume control
-            for e in self.hardware.encoders:
-                if e.type == Token.VOLUME:
-                    self.current.analog_controllers[Token.VOLUME] = self._build_display_info(e)
-
-        # Handle all external controllers (create synthetic parameters for display).
-        # Iterate the routing registry directly — it's the source of truth for "what's external."
-        for controller, port_name in self.hardware.external_routing.items():
-            if controller.midi_CC is None:
-                continue
-
-            # Create synthetic parameter if not already bound.
-            # AnalogMidiControl gets EXTERNAL_INSTANCE_ID so parameter_value_commit can guard it;
-            # encoders skip the commit path entirely via hardware.is_external() inside Handler.handle.
-            if controller.parameter is None:
-                if isinstance(controller, AnalogMidiControl):
-                    controller.parameter = self.hardware.create_external_parameter(
-                        controller, routing.port_name, controller.midi_channel, controller.midi_CC
-                    )
-                else:
-                    ext_info = {
-                        Token.NAME: f"{port_name} CC{controller.midi_CC}",
-                        Token.SYMBOL: f"external_{controller.midi_CC}",
-                        Token.RANGES: {Token.MINIMUM: 0, Token.MAXIMUM: 127},
-                        TTL_PROPERTIES: [TTL_INTEGER]
-                    }
-                    controller.bind_to_parameter(Parameter(ext_info, controller.midi_value, None, EXTERNAL_INSTANCE_ID))
-
-            key = f"{controller.midi_channel}:{controller.midi_CC}"
-            self.current.analog_controllers[key] = self._build_display_info(controller, category='External')
+        self._controller_manager.bind(self.current)
 
     def pedalboard_change(self, pedalboard=None):
         logging.info("Pedalboard change")
@@ -941,19 +855,6 @@ class Modhandler(Handler):
             if d:
                 self.lcd.enc_step_widget(d, direction)
 
-    def _build_display_info(self, controller, *, category: str | None = None) -> dict:
-        """Assemble display info dict for an analog-style controller. Combines the
-        hardware-intrinsic fields from controller.get_display_info() with the
-        routing-derived port_name/midi_cc when the controller is externally routed."""
-        info: dict = dict(controller.get_display_info())
-        if category is not None:
-            info['category'] = category
-        port_name = self.hardware.external_port_name(controller)
-        if port_name is not None:
-            info['port_name'] = port_name
-            info['midi_cc'] = controller.midi_CC
-        return info
-
     #
     # System Menu
     #
@@ -1128,15 +1029,6 @@ class Modhandler(Handler):
 
     def change_bypass_preference(self, pref):
         self.settings.set_setting(Token.BYPASS, pref)
-
-    def system_toggle_hotspot(self, **kwargs):
-        if util.DICT_GET(self.wifi_status, 'hotspot_active'):
-            self.wifi_manager.disable_hotspot()
-        else:
-            self.wifi_manager.enable_hotspot()
-
-    def configure_wifi_credentials(self, ssid, password):
-        return self.wifi_manager.configure_wifi(ssid, password)
 
     def _create_audio_parameter(self, name, symbol, min_val, max_val):
         value = self.audiocard.get_volume_parameter(symbol)
