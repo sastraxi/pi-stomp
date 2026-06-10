@@ -34,7 +34,7 @@ from blend.types import (
 )
 from modalapi.parameter import Type as ParameterType
 from modalapi.pedalboard_monitor import FileChangeMonitor
-from pistomp.input.event import AnalogEvent, EncoderEvent
+from pistomp.input.event import ControllerEvent
 
 if TYPE_CHECKING:
     from modalapi.modhandler import Modhandler
@@ -178,10 +178,11 @@ class BlendMode:
             self.activate()
         logging.info("Blend mode re-prepared successfully")
 
-    def intercept(self, event: AnalogEvent | EncoderEvent) -> bool:
+    def intercept(self, event: ControllerEvent) -> bool:
         """Check if this event comes from the blend input and run interpolation.
 
-        Returns True if the event was consumed, False to let normal dispatch proceed.
+        Returns True if the event's controller matches the blend input
+        and interpolation ran. False lets normal dispatch proceed.
         """
         if self.input_controller is None:
             return False

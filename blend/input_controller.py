@@ -21,7 +21,7 @@ from blend.easing import EasingFunc
 from blend.parameter_setter import ParameterSetter
 from blend.stop import BlendStop
 from blend.types import BlendInputProtocol, EnrichedDiffMap
-from pistomp.input.event import AnalogEvent, EncoderEvent
+from pistomp.input.event import AnalogEvent, ControllerEvent, EncoderEvent
 
 
 class InputController:
@@ -83,13 +83,15 @@ class InputController:
             f"sent {diff_sent} differing + {const_sent} constant = {diff_sent + const_sent} total parameters"
         )
 
-    def handle_event(self, event: AnalogEvent | EncoderEvent) -> bool:
+    def handle_event(self, event: ControllerEvent) -> bool:
         """Process a hardware event from the blend input.
 
         Returns True if the event was consumed (blend interpolation ran), False otherwise.
         """
         control = event.controller
         if self.controlled_input is None or control is not self.controlled_input:
+            return False
+        if not isinstance(event, (AnalogEvent, EncoderEvent)):
             return False
         try:
             _, _, segment_idx, local_pct = self._resolve_position(self.controlled_input)
