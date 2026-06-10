@@ -270,7 +270,7 @@ class Mod(Handler):
         port_name = self.hardware.external_port_name(controller)
         if port_name is not None and self.external_midi is not None:
             try:
-                if self.external_midi.send_cc(port_name, controller.midi_channel, controller.midi_CC, int(midi_value)):
+                if self.external_midi.send_raw(port_name, cc):
                     return
             except Exception as e:
                 logging.warning("External CC send failed on %s: %s", port_name, e)

@@ -30,40 +30,36 @@ def _make_sink():
 
 
 def _make_fs(midi_CC: int | None = 60, midi_channel: int = 0):
-    midiout = MagicMock()
     refresh = MagicMock()
-    fs = MockFootswitch(id=1, midi_CC=midi_CC, midi_channel=midi_channel, midiout=midiout, refresh_callback=refresh)
-    return fs, midiout, refresh
+    fs = MockFootswitch(id=1, midi_CC=midi_CC, midi_channel=midi_channel, refresh_callback=refresh)
+    return fs, refresh
 
 
-def test_footswitch_press_toggles_and_emits_on():
-    fs, midiout, refresh = _make_fs(midi_CC=60, midi_channel=0)
+def test_footswitch_press_toggles_and_calls_refresh():
+    fs, refresh = _make_fs(midi_CC=60, midi_channel=0)
     assert fs.toggled is False
 
     fs.press()
 
     assert fs.toggled is True
-    midiout.send_message.assert_called_once_with([CONTROL_CHANGE | 0, 60, 127])
     refresh.assert_called_once_with(footswitch=fs)
 
 
-def test_footswitch_press_twice_emits_off_with_channel_masking():
-    fs, midiout, _ = _make_fs(midi_CC=61, midi_channel=5)
+def test_footswitch_press_twice_toggles_off():
+    fs, _ = _make_fs(midi_CC=61, midi_channel=5)
 
     fs.press()
     fs.press()
 
     assert fs.toggled is False
-    assert midiout.send_message.call_args_list[-1].args[0] == [CONTROL_CHANGE | 5, 61, 0]
 
 
 def test_footswitch_without_midi_cc_still_toggles_and_calls_refresh():
-    fs, midiout, refresh = _make_fs(midi_CC=None)
+    fs, refresh = _make_fs(midi_CC=None)
 
     fs.press()
 
     assert fs.toggled is True
-    midiout.send_message.assert_not_called()
     refresh.assert_called_once_with(footswitch=fs)
 
 
@@ -131,16 +127,15 @@ def test_nav_encoder_longpress_dispatches_longpress_event():
 
 
 def _make_enc_midi(midi_CC=70, midi_channel=0):
-    midiout = MagicMock()
     enc = MockEncoderMidi(
-        midi_channel=midi_channel, midi_CC=midi_CC, midiout=midiout, type="TWEAK", id=1
+        midi_channel=midi_channel, midi_CC=midi_CC, type="TWEAK", id=1
     )
     enc.sink = _make_sink()
-    return enc, midiout
+    return enc
 
 
 def test_tweak_encoder_step_advances_midi_value():
-    enc, midiout = _make_enc_midi(midi_CC=70, midi_channel=2)
+    enc = _make_enc_midi(midi_CC=70, midi_channel=2)
     assert enc.midi_value == 64
 
     enc.step(3)
@@ -149,7 +144,7 @@ def test_tweak_encoder_step_advances_midi_value():
 
 
 def test_tweak_encoder_clamps_to_midi_range():
-    enc, midiout = _make_enc_midi()
+    enc = _make_enc_midi()
     enc.set_value(125)
 
     enc.step(10)  # would go to 135 → clamped to 127
@@ -161,7 +156,7 @@ def test_tweak_encoder_clamps_to_midi_range():
 
 
 def test_tweak_encoder_set_value_seeds_midi_value():
-    enc, _ = _make_enc_midi()
+    enc = _make_enc_midi()
 
     enc.set_value(100)
     assert enc.midi_value == 100
@@ -171,7 +166,7 @@ def test_tweak_encoder_set_value_seeds_midi_value():
 
 
 def test_tweak_encoder_step_dispatches_to_sink():
-    enc, _ = _make_enc_midi(midi_CC=70, midi_channel=0)
+    enc = _make_enc_midi(midi_CC=70, midi_channel=0)
     sink = _make_sink()
     enc.sink = sink
 
@@ -187,11 +182,8 @@ def test_tweak_encoder_step_dispatches_to_sink():
 # ---------------------------------------------------------------------------
 
 
-def test_analog_control_send_midi_emits_with_channel_masking():
-    midiout = MagicMock()
-    ctrl = MockAnalogControl(midi_CC=75, midi_channel=3, midiout=midiout)
+def test_analog_control_set_value():
+    ctrl = MockAnalogControl(midi_CC=75, midi_channel=3)
     ctrl.set_value(42)
 
     assert ctrl.value == 42
-    ctrl.send_midi(42)
-    midiout.send_message.assert_called_once_with([CONTROL_CHANGE | 3, 75, 42])

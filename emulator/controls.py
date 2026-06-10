@@ -64,11 +64,10 @@ class MockEncoder(encoder_controller.EncoderController):
 class MockEncoderMidi(EncoderController):
     """Tweak encoder with MIDI CC.  Driven externally via step() / press()."""
 
-    def __init__(self, midi_channel, midi_CC, midiout, type=None, id=None, cfg=None):
+    def __init__(self, midi_channel, midi_CC, type=None, id=None, cfg=None):
         super().__init__(d_pin=None, clk_pin=None,
                          midi_CC=midi_CC, midi_channel=midi_channel,
                          type=type, id=id)
-        self.midiout = midiout
         self.cfg = cfg or {'type': type, 'id': id}
 
     def read_rotary(self):
@@ -92,9 +91,9 @@ class MockFootswitch(footswitch.Footswitch):
     def check_longpress_events(cls):
         pass
 
-    def __init__(self, id, midi_CC, midi_channel, midiout, refresh_callback):
+    def __init__(self, id, midi_CC, midi_channel, refresh_callback):
         # led_pin=None, pixel=None, gpio_input=None, adc_input=None — no GPIO paths taken
-        super().__init__(id, None, None, midi_CC, midi_channel, midiout, refresh_callback)
+        super().__init__(id, None, None, midi_CC, midi_channel, refresh_callback)
         self.type = None
         self.cfg = {}
 
@@ -103,22 +102,17 @@ class MockFootswitch(footswitch.Footswitch):
 
     def press(self):
         self.toggled = not self.toggled
-        if self.midiout and self.midi_CC is not None and _rtmidi_available:
-            self.midiout.send_message(
-                [CONTROL_CHANGE | (self.midi_channel & 0x0F), self.midi_CC, 127 if self.toggled else 0]
-            )
         self.refresh_callback(footswitch=self)
 
 
 class MockAnalogControl(analogcontrol.AnalogControl):
     """Expression pedal / knob with no SPI/ADC.  Value set externally."""
 
-    def __init__(self, midi_CC, midi_channel, midiout, control_type=None, id=None, cfg=None):
+    def __init__(self, midi_CC, midi_channel, control_type=None, id=None, cfg=None):
         # AnalogControl.__init__ only stores spi/channel/tolerance — safe with None
         super().__init__(spi=None, adc_channel=None, tolerance=0)
         self.midi_CC = midi_CC
         self.midi_channel = midi_channel
-        self.midiout = midiout
         self.type = control_type
         self.id = id
         self.cfg = cfg or {"type": control_type, "id": id}
@@ -136,7 +130,3 @@ class MockAnalogControl(analogcontrol.AnalogControl):
 
     def set_value(self, value):
         self.value = int(value)
-
-    def send_midi(self, value_0_127):
-        if self.midiout and self.midi_CC is not None and _rtmidi_available:
-            self.midiout.send_message([CONTROL_CHANGE | (self.midi_channel & 0x0F), self.midi_CC, int(value_0_127)])

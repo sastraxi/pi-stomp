@@ -31,7 +31,6 @@ def _make_footswitch(**kwargs):
         pixel=None,
         midi_CC=10,
         midi_channel=0,
-        midiout=MagicMock(),
         refresh_callback=MagicMock(),
     )
     defaults.update(kwargs)

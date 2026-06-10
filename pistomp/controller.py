@@ -20,7 +20,6 @@ from enum import Enum
 import logging
 from typing import TYPE_CHECKING, TypedDict
 from common.parameter import Parameter
-from rtmidi import MidiOut
 
 if TYPE_CHECKING:
     from pistomp.input.sink import InputSink
@@ -70,7 +69,6 @@ class Controller:
         self.midi_min: int = 0
         self.midi_max: int = 127
         self.midi_value: int = 0
-        self.midiout: MidiOut | None = None
         self._sink: InputSink | None = None
 
     @property

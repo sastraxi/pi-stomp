@@ -28,10 +28,9 @@ def as_midi_value(adc_value: int):
 
 
 class AnalogMidiControl(analogcontrol.AnalogControl, controller.Controller):
-    def __init__(self, spi, adc_channel, tolerance, midi_CC, midi_channel, midiout, type, id=None, cfg=None, autosync=False):
+    def __init__(self, spi, adc_channel, tolerance, midi_CC, midi_channel, type, id=None, cfg=None, autosync=False):
         super(AnalogMidiControl, self).__init__(spi, adc_channel, tolerance)
         controller.Controller.__init__(self, midi_channel, midi_CC)
-        self.midiout = midiout
         self.autosync = autosync
 
         self.type = type

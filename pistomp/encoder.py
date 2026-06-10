@@ -33,7 +33,8 @@ class Encoder:
         self.data: Any = None
         self.clk: Any = None
         if d_pin is not None:
-            from gpiozero import Button  # noqa: PLC0415
+            from gpiozero import Button  # pyright: ignore[reportMissingImports]
+
             self.data = Button(d_pin)
             self.data.when_pressed = self._gpio_callback
             self.data.when_released = self._gpio_callback
@@ -60,15 +61,15 @@ class Encoder:
             self.prevNextCode |= 0x02
         if self.clk.value:
             self.prevNextCode |= 0x01
-        self.prevNextCode &= 0x0f
+        self.prevNextCode &= 0x0F
 
         direction = 0
         if self.rot_enc_table[self.prevNextCode]:
             self.store <<= 4
             self.store |= self.prevNextCode
-            if (self.store & 0xff) == 0x2b:
+            if (self.store & 0xFF) == 0x2B:
                 direction = 1
-            if (self.store & 0xff) == 0x17:
+            if (self.store & 0xFF) == 0x17:
                 direction = -1
         if direction != 0:
             self.store = self.prevNextCode

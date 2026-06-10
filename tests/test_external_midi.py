@@ -1,5 +1,5 @@
 """
-Tests for ExternalMidiManager and ExternalMidiOut.
+Tests for ExternalMidiManager.
 
 Config keys are ALSA client device names (e.g. 'Source Audio C4 Synth').
 Matching is case-insensitive against the client-name prefix of each rtmidi port string.
@@ -10,7 +10,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from modalapi.external_midi import ExternalMidiManager, ExternalMidiOut
+from modalapi.external_midi import ExternalMidiManager
 
 
 def _port(mgr: ExternalMidiManager, name: str) -> MagicMock:
@@ -293,52 +293,3 @@ class TestClose:
         for o in outs:
             o.close_port.assert_called_once()
         assert mgr.midi_ports == {}
-
-
-class TestExternalMidiOut:
-    def test_delegates_to_send_raw(self):
-        manager = MagicMock()
-        manager.send_raw.return_value = True
-        fallback = MagicMock()
-        out = ExternalMidiOut(manager, "dev", fallback)
-        out.send_message([0xB3, 80, 100])
-        manager.send_raw.assert_called_once_with("dev", [0xB3, 80, 100])
-        fallback.send_message.assert_not_called()
-
-    def test_falls_back_when_send_raw_fails(self):
-        manager = MagicMock()
-        manager.send_raw.return_value = False
-        fallback = MagicMock()
-        out = ExternalMidiOut(manager, "dev", fallback)
-        msg = [0xB0, 10, 64]
-        out.send_message(msg)
-        manager.send_raw.assert_called_once_with("dev", msg)
-        fallback.send_message.assert_called_once_with(msg)
-
-    def test_falls_back_when_send_raw_raises(self):
-        """Exceptions from send_raw must not crash the poll loop."""
-        manager = MagicMock()
-        manager.send_raw.side_effect = RuntimeError("port not in config")
-        fallback = MagicMock()
-        out = ExternalMidiOut(manager, "dev", fallback)
-        out.send_message([0xB0, 10, 64])
-        fallback.send_message.assert_called_once_with([0xB0, 10, 64])
-
-    def test_non_cc_message_routes_to_external(self):
-        manager = MagicMock()
-        manager.send_raw.return_value = True
-        fallback = MagicMock()
-        out = ExternalMidiOut(manager, "dev", fallback)
-        msg = [0x92, 64, 100]  # Note On
-        out.send_message(msg)
-        manager.send_raw.assert_called_once_with("dev", msg)
-        fallback.send_message.assert_not_called()
-
-    def test_program_change_routes_to_external(self):
-        manager = MagicMock()
-        manager.send_raw.return_value = True
-        fallback = MagicMock()
-        out = ExternalMidiOut(manager, "dev", fallback)
-        out.send_message([0xC0, 5])  # Program Change, 2 bytes
-        manager.send_raw.assert_called_once_with("dev", [0xC0, 5])
-        fallback.send_message.assert_not_called()

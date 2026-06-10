@@ -55,8 +55,8 @@ class EncoderController(controller.Controller):
 
     def __init__(
         self,
-        d_pin: int,
-        clk_pin: int,
+        d_pin: int | None,
+        clk_pin: int | None,
         *,
         midi_channel: int = 0,
         midi_CC: Optional[int] = None,
@@ -141,7 +141,7 @@ class EncoderController(controller.Controller):
         rng = self.max_val - self.min_val
         for i in range(self.num_steps):
             pos = i / (self.num_steps - 1)
-            tapered_pos = pos ** _taper
+            tapered_pos = pos**_taper
             self.step_values.append(self.min_val + (rng * tapered_pos))
 
     def bind_to_parameter(self, parameter: Parameter) -> None:
@@ -191,8 +191,11 @@ class EncoderController(controller.Controller):
             midi_value = value
         else:
             midi_value = util.renormalize(
-                value, self.parameter.minimum, self.parameter.maximum,
-                self.midi_min, self.midi_max,
+                value,
+                self.parameter.minimum,
+                self.parameter.maximum,
+                self.midi_min,
+                self.midi_max,
             )
         return int(_clamp(midi_value, 0, 127))
 
@@ -220,13 +223,15 @@ class EncoderController(controller.Controller):
         if self.parameter is not None:
             self.parameter.value = new_value
 
-        self.sink.handle(EncoderEvent(
-            controller=self,
-            rotations=rotations,
-            multiplier=multiplier,
-            new_value=new_value,
-            new_midi_value=self.midi_value,
-        ))
+        self.sink.handle(
+            EncoderEvent(
+                controller=self,
+                rotations=rotations,
+                multiplier=multiplier,
+                new_value=new_value,
+                new_midi_value=self.midi_value,
+            )
+        )
 
     # ── Button ───────────────────────────────────────────────────────────
 

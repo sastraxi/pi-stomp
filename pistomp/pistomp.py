@@ -76,7 +76,6 @@ class Pistomp(hardware.Hardware):
 
         self.cfg = cfg
         self.mod = mod
-        self.midiout = midiout
 
         self.init_spi()
 
@@ -99,7 +98,7 @@ class Pistomp(hardware.Hardware):
     def init_analog_controls(self):
         for c in ANALOG_CONTROL:
             control = AnalogMidiControl.AnalogMidiControl(self.spi, c[0], c[1], c[2], self.midi_channel,
-                                                          self.midiout, c[3])
+                                                          c[3])
             self.analog_controls.append(control)
             key = format("%d:%d" % (self.midi_channel, c[2]))
             self.controllers[key] = control  # Controller.Controller(self.midi_channel, c[1], Controller.Type.ANALOG)
@@ -134,7 +133,7 @@ class Pistomp(hardware.Hardware):
             taptempo = (self.taptempo if tt else None)
             if taptempo:
                 taptempo.set_callback(self.handler.get_callback(tt))
-            fs = Footswitch.Footswitch(f[0], f[2], None, f[3], self.midi_channel, self.midiout,
+            fs = Footswitch.Footswitch(f[0], f[2], None, f[3], self.midi_channel,
                                        refresh_callback=self.refresh_callback, gpio_input=f[1],
                                        taptempo=taptempo)
             self.footswitches.append(fs)
@@ -163,7 +162,7 @@ class Pistomp(hardware.Hardware):
             # Footswitches
             for f in FOOTSW:
                 self.mod.lcd.draw_info_message("Press Footswitch %d" % int(f[0] + 1))
-                fs = Footswitch.Footswitch(f[0], f[2], None, f[3], self.midi_channel, self.midiout,
+                fs = Footswitch.Footswitch(f[0], f[2], None, f[3], self.midi_channel,
                                            refresh_callback=self.test_passed, gpio_input=f[1])
                 self.test_pass = False
                 timeout = 1000  # 10 seconds
@@ -229,7 +228,7 @@ class Pistomp(hardware.Hardware):
             self.mod.lcd.draw_info_message("Turn the Tweak knob")
             c = ANALOG_CONTROL[0]
             control = AnalogMidiControl.AnalogMidiControl(self.spi, c[0], c[1], c[2], self.midi_channel,
-                                                          self.midiout, c[3])
+                                                          c[3])
             self.test_pass = False
             timeout = 1000
             initial_value = control.readChannel()

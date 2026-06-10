@@ -19,7 +19,6 @@ def _make_control(spi, *, midi_CC=75, midi_channel=14, last_read=0):
         tolerance=16,
         midi_CC=midi_CC,
         midi_channel=midi_channel,
-        midiout=MagicMock(),
         type="EXPRESSION",
         id=0,
     )

@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 import pytest
 
 import common.token as Token
-from modalapi.external_midi import ExternalMidiManager, ExternalMidiOut
+from modalapi.external_midi import ExternalMidiManager
 from pistomp.hardware import Hardware
 
 
@@ -66,9 +66,9 @@ def routed_hw(monkeypatch):
     hw.external_midi = ExternalMidiManager()
     hw.external_midi.update_config({"enabled": True})
 
-    hw.encoders = [_Ctl(id=1, midi_CC=70, midi_channel=13, midiout=hw.midiout)]
-    hw.analog_controls = cast(list, [_Ctl(id=2, midi_CC=75, midiout=hw.midiout)])
-    hw.footswitches = cast(list, [_Ctl(id=0, midiout=hw.midiout)])
+    hw.encoders = [_Ctl(id=1, midi_CC=70, midi_channel=13)]
+    hw.analog_controls = cast(list, [_Ctl(id=2, midi_CC=75)])
+    hw.footswitches = cast(list, [_Ctl(id=0)])
     hw.external_routing = {}  # __new__ bypasses __init__; __route_section writes here
     return hw
 
@@ -83,8 +83,6 @@ class TestApplyMidiRouting:
         cfg = {Token.HARDWARE: {Token.FOOTSWITCHES: [{Token.ID: 0, "midi_port": "My MIDI Device"}]}}
         _route(routed_hw, cfg)
         fs = routed_hw.footswitches[0]
-        assert isinstance(fs.midiout, ExternalMidiOut)
-        assert fs.midiout.port_name == "My MIDI Device"
         assert routed_hw.is_external(fs)
         assert routed_hw.external_port_name(fs) == "My MIDI Device"
         assert routed_hw.external_routing[fs].port_name == "My MIDI Device"
@@ -94,7 +92,6 @@ class TestApplyMidiRouting:
         cfg = {Token.HARDWARE: {Token.FOOTSWITCHES: [{Token.ID: 0}]}}
         _route(routed_hw, cfg)
         fs = routed_hw.footswitches[0]
-        assert fs.midiout is routed_hw.midiout
         assert not routed_hw.is_external(fs)
         assert routed_hw.external_port_name(fs) is None
         assert fs not in routed_hw.external_routing
@@ -116,8 +113,10 @@ class TestApplyMidiRouting:
             }
         }
         _route(routed_hw, cfg)
-        assert isinstance(routed_hw.encoders[0].midiout, ExternalMidiOut)
-        assert isinstance(routed_hw.analog_controls[0].midiout, ExternalMidiOut)
+        assert routed_hw.is_external(routed_hw.encoders[0])
+        assert routed_hw.is_external(routed_hw.analog_controls[0])
+        assert routed_hw.external_port_name(routed_hw.encoders[0]) == "My MIDI Device"
+        assert routed_hw.external_port_name(routed_hw.analog_controls[0]) == "My MIDI Device"
 
     def test_encoder_midi_cc_override(self, routed_hw):
         cfg = {Token.HARDWARE: {Token.ENCODERS: [{Token.ID: 1, Token.MIDI_CC: 99}]}}
@@ -133,7 +132,7 @@ class TestApplyMidiRouting:
     def test_no_midi_port_falls_back_to_virtual(self, routed_hw):
         cfg = {Token.HARDWARE: {Token.FOOTSWITCHES: [{Token.ID: 0}]}}
         _route(routed_hw, cfg)
-        assert routed_hw.footswitches[0].midiout is routed_hw.midiout
+        assert not routed_hw.is_external(routed_hw.footswitches[0])
 
     def test_external_port_opened_eagerly(self, routed_hw):
         """The external port is opened at routing time, not lazily inside the poll loop."""

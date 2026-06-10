@@ -69,7 +69,7 @@ class EmulatorHardwareBase(hardware.Hardware):
             id_ = Util.DICT_GET(f, Token.ID)
             midi_cc = Util.DICT_GET(f, Token.MIDI_CC)
             fs = MockFootswitch(id_, midi_cc, midi_channel,
-                                self.midiout, self.refresh_callback)
+                                self.refresh_callback)
             self.footswitches.append(fs)
             if midi_cc is not None:
                 key = "%d:%d" % (midi_channel, midi_cc)
@@ -91,7 +91,7 @@ class EmulatorHardwareBase(hardware.Hardware):
             control_type = Util.DICT_GET(c, Token.TYPE)
             if midi_cc is None:
                 continue
-            ctrl = MockAnalogControl(midi_cc, midi_channel, self.midiout,
+            ctrl = MockAnalogControl(midi_cc, midi_channel,
                                      control_type, id_, c)
             self.analog_controls.append(ctrl)
             key = "%d:%d" % (midi_channel, midi_cc)

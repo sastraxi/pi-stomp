@@ -29,29 +29,6 @@ EXTERNAL_INSTANCE_ID = "External"
 PORT_RETRY_BACKOFF_S = 5.0  # don't re-enumerate a failed port more often than this
 
 
-class ExternalMidiOut:
-    """
-    Wrapper around external MIDI port that implements the same interface as
-    the virtual port's midiout. Allows controls to send MIDI to external devices
-    transparently, with automatic fallback to virtual port if device unavailable.
-    """
-
-    def __init__(self, external_midi_manager: ExternalMidiManager, port_name: str, fallback_midiout: RtMidiOut):
-        self.external_midi = external_midi_manager
-        self.port_name = port_name
-        self.fallback = fallback_midiout
-
-    def send_message(self, message: MidiMessage) -> None:
-        try:
-            success = self.external_midi.send_raw(self.port_name, message)
-        except Exception:
-            logging.warning(f"External MIDI send failed for port {self.port_name}, falling back to virtual")
-            self.fallback.send_message(message)
-            return
-        if not success:
-            self.fallback.send_message(message)
-
-
 class ExternalMidiConfig(TypedDict, total=False):
     enabled: bool
     send_delay_ms: int

@@ -126,9 +126,8 @@ def test_v3_toggle_plugin_bypass_via_footswitch_sends_midi_cc(v3_system: SystemF
 
     handler.toggle_plugin_bypass(None, plugin)
 
-    assert isinstance(fs.midiout, MagicMock)
-    fs.midiout.send_message.assert_called_once()
-    sent_cc = fs.midiout.send_message.call_args[0][0]
+    hw.midiout.send_message.assert_called_once()
+    sent_cc = hw.midiout.send_message.call_args[0][0]
     assert sent_cc[1] == fs.midi_CC
     assert ws_bridge.sent_values_for("fuzz", ":bypass") == []
 

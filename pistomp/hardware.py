@@ -29,7 +29,7 @@ import pistomp.taptempo as taptempo
 
 from abc import ABC, abstractmethod
 from rtmidi import MidiOut
-from modalapi.external_midi import ExternalMidiOut, ExternalMidiManager, EXTERNAL_INSTANCE_ID
+from modalapi.external_midi import ExternalMidiManager, EXTERNAL_INSTANCE_ID
 from pistomp.input.sink import InputSink
 from pistomp.controller import Controller, RoutingInfo, RoutingDestination
 import pistomp.relay as Relay
@@ -255,20 +255,17 @@ class Hardware(ABC):
             if taptempo:
                 taptempo.set_callback(self.handler.get_callback(tap_tempo_callback))
 
-            # midi_port routing is applied later in __apply_midi_routing (external_midi is None here)
-            midiout = self.midiout
-
             fs: Footswitch.Footswitch | None = None
             if adc_input is not None:
                 fs = Footswitch.Footswitch(id if id else idx, gpio_output, pixel, midi_cc, midi_channel,
-                                           midiout, refresh_callback=self.refresh_callback,
+                                           refresh_callback=self.refresh_callback,
                                            adc_input=adc_input, spi=self.spi,
                                            taptempo = taptempo)
                 logging.debug("Created Footswitch on ADC input: %d, Midi Chan: %d, CC: %s" %
                               (adc_input, midi_channel, midi_cc))
             elif gpio_input is not None:
                 fs = Footswitch.Footswitch(id if id else idx, gpio_output, pixel, midi_cc, midi_channel,
-                                           midiout, refresh_callback=self.refresh_callback,
+                                           refresh_callback=self.refresh_callback,
                                            gpio_input=gpio_input,
                                            taptempo = taptempo)
                 logging.debug("Created Footswitch on GPIO input: %d, Midi Chan: %d, CC: %s" %
@@ -308,9 +305,8 @@ class Hardware(ABC):
             if autosync is None:
                 autosync = False  # Default to False
 
-            # midi_port routing is applied later in __apply_midi_routing (external_midi is None here)
             control = AnalogMidiControl.AnalogMidiControl(self.spi, adc_input, threshold, midi_cc, midi_channel,
-                                                          self.midiout, control_type, id, c, autosync)
+                                                          control_type, id, c, autosync)
             self.analog_controls.append(control)
             key = format("%d:%d" % (midi_channel, midi_cc))
             self.controllers[key] = control
@@ -318,7 +314,7 @@ class Hardware(ABC):
                           (adc_input, midi_channel, midi_cc))
 
     @abstractmethod
-    def add_encoder(self, id, type, callback, longpress_callback, midi_channel, midi_cc, midiout=None) -> EncoderController.EncoderController:
+    def add_encoder(self, id, type, callback, longpress_callback, midi_channel, midi_cc) -> EncoderController.EncoderController:
         # This should be implemented by hardware subclasses that support tweak encoders (Tre at least)
         ...
 
@@ -345,7 +341,7 @@ class Hardware(ABC):
 
             # midi_port routing is applied later in __apply_midi_routing (external_midi is None here)
             try:
-                control = self.add_encoder(id, type, None, longpress_callback, midi_channel, midi_cc, midiout=self.midiout)
+                control = self.add_encoder(id, type, None, longpress_callback, midi_channel, midi_cc)
                 self.encoders.append(control)
             except Exception:
                 logging.exception("Failed to create encoder with config: %s" % c)
@@ -387,15 +383,15 @@ class Hardware(ABC):
             return None
         return port_name
 
-    def __resolve_midiout(self, cfg_entry) -> tuple[MidiOut | ExternalMidiOut, RoutingInfo]:
-        """Return (midiout, routing): the wire to send on and its destination."""
+    def __resolve_midiout(self, cfg_entry) -> tuple[MidiOut, RoutingInfo]:
+        """Return (midiout, routing): always the virtual MidiOut; routing tells _emit_midi where to go."""
         midi_port = Util.DICT_GET(cfg_entry, "midi_port")
         if midi_port:
             midi_port = self.__validate_midi_port(midi_port)
         if not midi_port or self.external_midi is None:
             return self.midiout, RoutingInfo.virtual()
         self.external_midi.open_port(midi_port)  # eager: first poll-loop send must not enumerate
-        return ExternalMidiOut(self.external_midi, midi_port, self.midiout), RoutingInfo.external(midi_port)
+        return self.midiout, RoutingInfo.external(midi_port)
 
     def __route_section(self, cfg, section, controls, set_cc):
         cfg_list = Util.DICT_GET(cfg[Token.HARDWARE], section)
@@ -416,7 +412,7 @@ class Hardware(ABC):
                 midi_channel = Util.DICT_GET(entry, "midi_channel")
                 if midi_channel is not None and hasattr(ctrl, 'midi_channel'):
                     ctrl.midi_channel = midi_channel
-            ctrl.midiout, routing = self.__resolve_midiout(entry)
+            _, routing = self.__resolve_midiout(entry)
             if routing.destination == RoutingDestination.EXTERNAL:
                 self.external_routing[ctrl] = routing
             else:

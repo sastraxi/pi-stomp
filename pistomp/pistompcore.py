@@ -55,7 +55,6 @@ class Pistompcore(hardware.Hardware):
         Pistompcore.__single = self
 
         self.mod = mod
-        self.midiout = midiout
         self.debounce_map = DEBOUNCE_MAP
 
         self.init_spi()
@@ -104,6 +103,6 @@ class Pistompcore(hardware.Hardware):
     def test(self):
         pass
 
-    def add_encoder(self, id, type, callback, longpress_callback, midi_channel, midi_cc, shortpress_config=None, midiout=None):
+    def add_encoder(self, id, type, callback, longpress_callback, midi_channel, midi_cc, shortpress_config=None):
         # Pistompcore currently doesn't support configurable tweak encoders
         raise NotImplementedError("Pistompcore does not support add_encoder")

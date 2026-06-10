@@ -11,7 +11,7 @@ from unittest.mock import MagicMock
 import pytest
 
 import pistomp.switchstate as switchstate
-from modalapi.external_midi import ExternalMidiManager, ExternalMidiOut
+from modalapi.external_midi import ExternalMidiManager
 from pistomp.footswitch import Footswitch
 
 pytestmark = pytest.mark.skipif(
@@ -90,31 +90,6 @@ class TestRealLoopback:
 
         assert mgr.send_raw(port_name, [0xB0, 75, 42]) is True
         assert _wait_for(lambda: received == [[0xB0, 75, 42]])
-        mgr.close()
-
-    def test_external_midi_out_prefers_real_port_over_fallback(self, loopback):
-        port_name, received = loopback
-        mgr = _manager_for(port_name)
-        mgr.open_port(port_name)
-        fallback = MagicMock()
-        out = ExternalMidiOut(mgr, port_name, fallback)
-
-        out.send_message([0xB0, 70, 7])
-
-        assert _wait_for(lambda: received == [[0xB0, 70, 7]])
-        fallback.send_message.assert_not_called()
-        mgr.close()
-
-    def test_external_midi_out_falls_back_when_device_absent(self, loopback):
-        _, received = loopback
-        mgr = _manager_for("no-such-pistomp-port")
-        fallback = MagicMock()
-        out = ExternalMidiOut(mgr, "no-such-pistomp-port", fallback)
-
-        out.send_message([0xB0, 70, 7])
-
-        fallback.send_message.assert_called_once_with([0xB0, 70, 7])
-        assert received == []
         mgr.close()
 
     def test_send_messages_for_pedalboard_delivers_sequence(self, loopback):
