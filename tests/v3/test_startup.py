@@ -22,7 +22,7 @@ def test_v3_footswitch_press(v3_system, snapshot):
     hw = v3_system.hw
     midiout = hw.midiout
 
-    hw.footswitches[0].pressed(switchstate.Value.RELEASED)
+    hw.footswitches[0]._on_switch(switchstate.Value.RELEASED)
 
     midiout.send_message.assert_called_once()
     cc_msg = midiout.send_message.call_args[0][0]

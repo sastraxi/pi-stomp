@@ -107,11 +107,8 @@ class Hardware(ABC):
             e.read_rotary()
             if hasattr(e, "poll"):
                 e.poll()
-        s = None
         for s in self.footswitches:
             s.poll()
-        if s:
-            s.check_longpress_events()
 
     def sync_analog_controls(self):
         """Send current values of analog controls with autosync enabled via MIDI."""
@@ -148,8 +145,8 @@ class Hardware(ABC):
 
         self.__init_midi_default()
 
-        # Global footswitch init (callbacks and groups)
-        Footswitch.Footswitch.init(self.handler.callbacks)
+        # Reset the handler's chord resolver for this pedalboard.
+        self.handler.chord_helper.rebuild(self.handler.callbacks)
 
         # Apply defaults
         self.__init_footswitches(self.cfg)
@@ -166,6 +163,10 @@ class Hardware(ABC):
             self.__init_external_midi(cfg)
             self.__init_encoders(cfg)
             self.__apply_midi_routing(cfg)
+
+        # Register final longpress-group membership with the chord resolver.
+        for fs in self.footswitches:
+            self.handler.chord_helper.register(fs.longpress_groups)
 
     @abstractmethod
     def init_analog_controls(self):

@@ -148,6 +148,7 @@ class TestReinitDefaultRouting:
         hw = object.__new__(_StubHardware)
         hw.default_cfg = {Token.HARDWARE: {}}
         hw.handler = MagicMock()
+        hw.footswitches = []  # reinit registers longpress groups over these
         hw.external_routing = {}  # __new__ bypasses __init__; reinit clears it
 
         for name in (
@@ -159,7 +160,6 @@ class TestReinitDefaultRouting:
             setattr(hw, name, lambda *a, **k: None)
         routed = []
         setattr(hw, "_Hardware__apply_midi_routing", lambda cfg: routed.append(cfg))
-        monkeypatch.setattr("pistomp.footswitch.Footswitch.init", staticmethod(lambda cb: None))
 
         hw.reinit(None)
 

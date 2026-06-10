@@ -19,6 +19,7 @@ from pistomp.audiocard import Audiocard
 import json
 import logging
 import os
+import time
 import requests as req
 from requests import Response
 import subprocess
@@ -45,6 +46,7 @@ from pistomp.controller_manager import ControllerManager
 from pistomp.current import Current
 from pistomp.encoder_controller import EncoderController
 from pistomp.footswitch import Footswitch
+from pistomp.footswitch_chords import FootswitchChords
 from pistomp.handler import Handler
 from pistomp.input.event import (
     AnalogEvent,
@@ -144,6 +146,9 @@ class Modhandler(Handler):
         # Blend mode manager - multiple blend snapshots per pedalboard
         self.blend_modes: dict[str, Any] = {}  # {snapshot_name: BlendMode}
         self.active_blend_mode: Any | None = None  # Currently active blend mode
+
+        # Footswitch longpress/chord resolver (rebuilt on pedalboard change)
+        self.chord_helper = FootswitchChords()
 
     def __del__(self):
         logging.info("Handler cleanup")
@@ -266,9 +271,9 @@ class Modhandler(Handler):
                 return True
             self.universal_encoder_sw(switchstate.Value.RELEASED)
             return True
-        # Footswitch: chord resolution moves here in Step 4; until then
-        # the Footswitch's own poll path handles callbacks and doesn't dispatch.
-        return True
+        if isinstance(controller, Footswitch):
+            return self._handle_footswitch(controller, event.kind, event.timestamp)
+        return False
 
     def _emit_midi(self, controller, midi_value: int) -> None:
         """Send a CC. Tries the external port if routed; falls back to virtual."""
@@ -297,6 +302,7 @@ class Modhandler(Handler):
     def poll_controls(self):
         if self.hardware:
             self.hardware.poll_controls()
+        self._tick_chords()
 
     def poll_indicators(self):
         if self.hardware:
@@ -828,7 +834,7 @@ class Modhandler(Handler):
             if plugin.has_footswitch:
                 for c in plugin.controllers:
                     if isinstance(c, Footswitch):
-                        c.pressed(0)
+                        self._handle_footswitch(c, SwitchEventKind.PRESS, time.monotonic())
                         return
             # Regular (non footswitch plugin)
             value = plugin.toggle_bypass()

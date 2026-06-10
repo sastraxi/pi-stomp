@@ -119,17 +119,17 @@ def test_footswitch_disabled_does_not_respond(v3_system: SystemFixture):
 
     fs0 = hw.footswitches[0]
     fires = []
-    original_pressed = fs0.pressed
-    fs0.pressed = lambda state: fires.append(state)
+    original_on_switch = fs0._on_switch
+    fs0._on_switch = lambda state, timestamp=0.0: fires.append(state)
 
-    # Simulate a short-press event directly (bypass the GPIO layer)
+    # Simulate a poll (bypass the GPIO layer)
     fs0.poll()  # should no-op because disabled
 
     # Nothing fired
     assert fires == []
 
     # Restore
-    fs0.pressed = original_pressed
+    fs0._on_switch = original_on_switch
 
 
 # ---------------------------------------------------------------------------

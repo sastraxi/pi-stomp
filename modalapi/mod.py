@@ -17,6 +17,7 @@
 import json
 import logging
 import os
+import time
 import requests as req
 import subprocess
 import sys
@@ -42,6 +43,7 @@ from modalapi.pedalboard_monitor import FileChangeMonitor, read_pedalboard_bundl
 from pistomp.controller_manager import ControllerManager
 from pistomp.current import Current
 from pistomp.footswitch import Footswitch
+from pistomp.footswitch_chords import FootswitchChords
 from pistomp.handler import Handler
 from enum import Enum
 from pathlib import Path
@@ -172,6 +174,9 @@ class Mod(Handler):
                           "previous_snapshot": self.preset_decr_and_change
         }
 
+        # Footswitch longpress/chord resolver (rebuilt on pedalboard change)
+        self.chord_helper = FootswitchChords()
+
         # Blend mode manager - multiple blend snapshots per pedalboard
         self.blend_modes: dict[str, Any] = {}  # {snapshot_name: BlendMode}
         self.active_blend_mode: Any | None = None  # Currently active blend mode
@@ -254,6 +259,8 @@ class Mod(Handler):
             else:
                 self.bottom_encoder_sw(switchstate.Value.RELEASED)
             return True
+        if isinstance(c, Footswitch):
+            return self._handle_footswitch(c, event.kind, event.timestamp)
         return False
 
     def _emit_midi(self, controller, midi_value: int) -> None:
@@ -527,6 +534,7 @@ class Mod(Handler):
         # this is called many times per second.  Only critical updates should be here
         if self.universal_encoder_mode is not UniversalEncoderMode.LOADING:
             self.hardware.poll_controls()
+            self._tick_chords()
 
     def poll_wifi(self):
         self.wifi_manager.poll()
@@ -940,7 +948,7 @@ class Mod(Handler):
             if inst.has_footswitch:
                 for c in inst.controllers:
                     if isinstance(c, Footswitch):
-                        c.pressed(0)
+                        self._handle_footswitch(c, SwitchEventKind.PRESS, time.monotonic())
                         return
             # Regular (non footswitch plugin)
             value = inst.toggle_bypass()

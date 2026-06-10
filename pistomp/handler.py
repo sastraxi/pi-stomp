@@ -16,11 +16,13 @@
 
 from typing import TYPE_CHECKING
 
-from pistomp.input.event import ControllerEvent
+from pistomp.input.event import ControllerEvent, SwitchEventKind
 from pistomp.input.sink import InputSink
+from pistomp.footswitch_chords import FootswitchChords
 from pistomp.tuner.source import TunerSourceFactory
 
 if TYPE_CHECKING:
+    from pistomp.footswitch import Footswitch
     from pistomp.hardware import Hardware
 
 
@@ -28,6 +30,7 @@ class Handler(InputSink):
     def __init__(self):
         self.homedir = None
         self.lcd = None
+        self.chord_helper = FootswitchChords()
 
     @property
     def hardware(self) -> "Hardware":
@@ -83,8 +86,54 @@ class Handler(InputSink):
         raise NotImplementedError()
 
     def handle(self, event: ControllerEvent) -> bool:
-        """Default sink for v3 controllers. v1 leaves controller.sink = None
-        and uses the legacy inline path."""
+        raise NotImplementedError()
+
+    # ── Footswitch dispatch (shared by v1/v3) ────────────────────────────
+
+    def _handle_footswitch(self, fs: "Footswitch", kind: SwitchEventKind, timestamp: float) -> bool:
+        """Resolve a footswitch SwitchEvent. Mirrors the old Footswitch.pressed()
+        behavior exactly, but as the sole arbiter on the handler side."""
+        if kind == SwitchEventKind.LONGPRESS:
+            if fs.relay_list:
+                # Relay footswitch: longpress toggles the relay immediately and
+                # never enters chord resolution.
+                new_toggled = not fs.toggled
+                fs.toggled = new_toggled
+                fs.toggle_relays(new_toggled)
+                fs.set_led(new_toggled)
+                self.update_lcd_fs(bypass_change=True)
+            else:
+                # TODO: consider case where relay and longpress are specified
+                self.chord_helper.observe(fs, timestamp)
+            return True
+
+        # Short press
+        if fs.taptempo and fs.taptempo.is_enabled():
+            fs.taptempo.stamp(timestamp)
+            return True
+        if fs.preset_callback is not None:
+            if fs.preset_callback_arg is not None:
+                fs.preset_callback(fs.preset_callback_arg)
+            else:
+                fs.preset_callback()
+            return True
+        if fs.midi_CC is not None:
+            fs.toggled = not fs.toggled
+            fs.set_led(fs.toggled)
+            self._emit_midi(fs, 127 if fs.toggled else 0)
+        if fs.parameter is not None:
+            fs.parameter.value = not fs.toggled  # FIXME: assumes mapped parameter is :bypass
+        self.update_lcd_fs(footswitch=fs)
+        return True
+
+    def _tick_chords(self) -> None:
+        """Resolve pending footswitch chords/singletons. Call once per poll cycle."""
+        for name in self.chord_helper.tick():
+            cb = self.get_callback(name)
+            if cb:
+                cb()
+
+    def _emit_midi(self, controller, midi_value: int) -> None:
         raise NotImplementedError()
 
     def cleanup(self):
