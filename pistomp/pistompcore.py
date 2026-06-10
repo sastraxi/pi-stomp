@@ -21,7 +21,8 @@
 #
 # A new version with different controls should have a new separate subclass
 
-import pistomp.encoder as Encoder
+import common.token as Token
+import pistomp.encoder_controller as EncoderController
 import pistomp.hardware as hardware
 import pistomp.relay as Relay
 
@@ -75,13 +76,13 @@ class Pistompcore(hardware.Hardware):
         self.mod.add_lcd(Lcd.Lcd(self.mod.homedir, self.mod, flip=True))
 
     def init_encoders(self):
-        top_enc = Encoder.Encoder(
+        top_enc = EncoderController.EncoderController(
             TOP_ENC_PIN_D,
             TOP_ENC_PIN_CLK,
             callback=self.mod.universal_encoder_select,
+            type=Token.NAV,
             sw_pin=1,
             shortpress=self.mod.universal_encoder_sw,
-            longpress=self.mod.universal_encoder_sw,
         )
         self.encoders.append(top_enc)
         # XXX: user-added encoders via config are not supported here yet (see v3).

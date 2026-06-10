@@ -18,9 +18,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 import logging
-from typing import TypedDict
+from typing import TYPE_CHECKING, TypedDict
 from common.parameter import Parameter
 from rtmidi import MidiOut
+
+if TYPE_CHECKING:
+    from pistomp.input.sink import InputSink
 
 
 class RoutingDestination(Enum):
@@ -68,6 +71,7 @@ class Controller:
         self.midi_max: int = 127
         self.midi_value: int = 0
         self.midiout: MidiOut | None = None
+        self.sink: "InputSink | None" = None
 
     def set_value(self, value: float) -> None:
         logging.error(f"Controller subclass ({self.__class__.__name__}) hasn't overriden the set_value method")

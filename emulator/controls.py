@@ -20,8 +20,8 @@ type checkers are satisfied, but bypasses any GPIO / SPI / ADC init.
 """
 
 import pistomp.analogcontrol as analogcontrol
-import pistomp.encoder as encoder
-from pistomp.encoder import Encoder
+import pistomp.encoder_controller as encoder_controller
+from pistomp.encoder_controller import EncoderController
 import pistomp.footswitch as footswitch
 
 try:
@@ -33,7 +33,7 @@ except ImportError:
     CONTROL_CHANGE = 0xB0
 
 
-class MockEncoder(encoder.Encoder):
+class MockEncoder(encoder_controller.EncoderController):
     """Nav encoder (no GPIO).  Driven externally via step() / press()."""
 
     def __init__(self, callback, type=None, id=None):
@@ -56,7 +56,7 @@ class MockEncoder(encoder.Encoder):
             self.press_callback(value)
 
 
-class MockEncoderMidi(Encoder):
+class MockEncoderMidi(EncoderController):
     """Tweak encoder with MIDI CC.  Driven externally via step() / press()."""
 
     def __init__(self, handler, callback, midi_channel, midi_CC, midiout,

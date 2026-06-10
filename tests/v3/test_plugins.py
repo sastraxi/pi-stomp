@@ -4,7 +4,7 @@ and instance_id normalization round-trips."""
 from unittest.mock import MagicMock
 
 import pistomp.switchstate as switchstate
-from pistomp.encoder import Encoder
+from pistomp.encoder_controller import EncoderController as Encoder
 from pistomp.footswitch import Footswitch
 from common.parameter import Parameter
 from modalapi.plugin import Plugin

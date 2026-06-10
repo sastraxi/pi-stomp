@@ -133,7 +133,7 @@ def test_footswitch_disabled_does_not_respond(v3_system: SystemFixture):
 
 
 # ---------------------------------------------------------------------------
-# Encoder longpress — the button is absorbed into Encoder; check _longpress.
+# Encoder longpress — stored as string name; resolved by handler at dispatch.
 # ---------------------------------------------------------------------------
 
 def _enc(hw, enc_id):
@@ -141,32 +141,29 @@ def _enc(hw, enc_id):
 
 
 def test_encoder_longpress_set_from_default(v3_system: SystemFixture):
-    """Enc1 longpress callback matches default_config (previous_snapshot) after boot."""
+    """Enc1 longpress name matches default_config (previous_snapshot) after boot."""
     hw = v3_system.hw
-    handler = v3_system.handler
 
-    assert _enc(hw, 1)._longpress is handler.callbacks["previous_snapshot"]
+    assert _enc(hw, 1).longpress == "previous_snapshot"
 
 
 def test_encoder_longpress_override(v3_system: SystemFixture):
     """Pedalboard config can change enc1 longpress to toggle_bypass."""
     hw = v3_system.hw
-    handler = v3_system.handler
 
     hw.reinit(_cfg(encoders=[{"id": 1, "longpress": "toggle_bypass"}]))
 
-    assert _enc(hw, 1)._longpress is handler.callbacks["toggle_bypass"]
+    assert _enc(hw, 1).longpress == "toggle_bypass"
 
 
 def test_encoder_longpress_reset_to_default(v3_system: SystemFixture):
     """After an encoder longpress override, reinit(None) restores the default."""
     hw = v3_system.hw
-    handler = v3_system.handler
 
     hw.reinit(_cfg(encoders=[{"id": 1, "longpress": "toggle_bypass"}]))
     hw.reinit(None)
 
-    assert _enc(hw, 1)._longpress is handler.callbacks["previous_snapshot"]
+    assert _enc(hw, 1).longpress == "previous_snapshot"
 
 
 def test_encoder_longpress_suppress_with_none(v3_system: SystemFixture):
@@ -175,14 +172,13 @@ def test_encoder_longpress_suppress_with_none(v3_system: SystemFixture):
 
     hw.reinit(_cfg(encoders=[{"id": 1, "longpress": None}]))
 
-    assert _enc(hw, 1)._longpress is None
+    assert _enc(hw, 1).longpress is None
 
 
 def test_encoder_unmentioned_keeps_default(v3_system: SystemFixture):
     """Overriding enc2 does not disturb enc1's default longpress."""
     hw = v3_system.hw
-    handler = v3_system.handler
 
     hw.reinit(_cfg(encoders=[{"id": 2, "longpress": "toggle_bypass"}]))
 
-    assert _enc(hw, 1)._longpress is handler.callbacks["previous_snapshot"]
+    assert _enc(hw, 1).longpress == "previous_snapshot"

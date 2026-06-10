@@ -27,6 +27,7 @@ import common.util as Util
 import pistomp.analogmidicontrol as AnalogMidiControl
 import pistomp.analogswitch as AnalogSwitch
 import pistomp.encoder as Encoder
+import pistomp.encoder_controller as EncoderController
 import pistomp.footswitch as Footswitch
 import pistomp.hardware as hardware
 import pistomp.relay as Relay
@@ -104,9 +105,15 @@ class Pistomp(hardware.Hardware):
             self.controllers[key] = control  # Controller.Controller(self.midi_channel, c[1], Controller.Type.ANALOG)
 
     def init_encoders(self):
-        top_enc = Encoder.Encoder(TOP_ENC_PIN_D, TOP_ENC_PIN_CLK, callback=self.mod.top_encoder_select)
+        top_enc = EncoderController.EncoderController(
+            TOP_ENC_PIN_D, TOP_ENC_PIN_CLK, callback=self.mod.top_encoder_select,
+            type=Token.NAV,
+        )
         self.encoders.append(top_enc)
-        bot_enc = Encoder.Encoder(BOT_ENC_PIN_D, BOT_ENC_PIN_CLK, callback=self.mod.bot_encoder_select)
+        bot_enc = EncoderController.EncoderController(
+            BOT_ENC_PIN_D, BOT_ENC_PIN_CLK, callback=self.mod.bot_encoder_select,
+            type=Token.NAV,
+        )
         self.encoders.append(bot_enc)
         control = AnalogSwitch.AnalogSwitch(self.spi, TOP_ENC_SWITCH_CHANNEL, ENC_SW_THRESHOLD,
                                             callback=self.mod.top_encoder_sw)
@@ -183,7 +190,7 @@ class Pistomp(hardware.Hardware):
             encoders = [["Turn the PBoard Knob", TOP_ENC_PIN_D, TOP_ENC_PIN_CLK],
                         ["Turn the Effect Knob", BOT_ENC_PIN_D, BOT_ENC_PIN_CLK]]
             for e in encoders:
-                enc = Encoder.Encoder(e[1], e[2], callback=self.test_passed)
+                enc = EncoderController.EncoderController(e[1], e[2], callback=self.test_passed)
                 self.mod.lcd.draw_info_message(e[0])
                 self.test_pass = False
                 timeout = 1000

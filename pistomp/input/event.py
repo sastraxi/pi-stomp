@@ -27,7 +27,6 @@ if TYPE_CHECKING:
 
 class SwitchEventKind(Enum):
     PRESS = auto()
-    RELEASE = auto()
     LONGPRESS = auto()
 
 
@@ -59,3 +58,4 @@ class AnalogEvent(ControllerEvent):
 @dataclass
 class SwitchEvent(ControllerEvent):
     kind: SwitchEventKind = SwitchEventKind.PRESS
+    timestamp: float = 0.0

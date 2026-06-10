@@ -13,10 +13,10 @@ from tests.types import SystemFixture
 
 
 def _blend_encoder(hw):
-    """Return the Encoder with id=1 used by the blend fixture."""
-    from pistomp.encoder import Encoder
+    """Return the EncoderController with id=1 used by the blend fixture."""
+    from pistomp.encoder_controller import EncoderController
 
-    return next(e for e in hw.encoders if isinstance(e, Encoder) and getattr(e, "id", None) == 1)
+    return next(e for e in hw.encoders if isinstance(e, EncoderController) and getattr(e, "id", None) == 1)
 
 
 # ---------------------------------------------------------------------------
