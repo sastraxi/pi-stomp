@@ -8,6 +8,7 @@ from unittest.mock import MagicMock
 import yaml
 
 import common.token as Token
+from pistomp.input.event import EncoderEvent
 from tests.conftest import FakeWebSocketBridge
 from tests.types import SystemFixture
 
@@ -50,7 +51,7 @@ def test_blend_auto_activates_on_blend_snapshot(blend_system: SystemFixture):
     assert handler.active_blend_mode.config.get("name") == "Blend"
 
     enc = _blend_encoder(hw)
-    assert enc.value_change_callback is not None
+    assert handler.active_blend_mode.input_controller.controlled_input is enc
 
 
 # ---------------------------------------------------------------------------
@@ -85,7 +86,7 @@ def test_blend_activate_sends_initial_params(blend_system: SystemFixture):
 
 
 def test_blend_full_sweep_reaches_lead_stop(blend_system: SystemFixture):
-    """handle_value_change at midi_value=127 (100%) should send Lead stop values."""
+    """handle_event at midi_value=127 (100%) should send Lead stop values."""
     handler = blend_system.handler
     hw = blend_system.hw
     assert handler.active_blend_mode
@@ -94,7 +95,9 @@ def test_blend_full_sweep_reaches_lead_stop(blend_system: SystemFixture):
     enc = _blend_encoder(hw)
     enc.current_step = 127
 
-    handler.active_blend_mode.input_controller.handle_value_change(127, enc)
+    handler.active_blend_mode.input_controller.handle_event(
+        EncoderEvent(controller=enc, rotations=0, new_value=enc.midi_value, new_midi_value=enc.midi_value)
+    )
 
     tone_values = test_ws.sent_values_for("BigMuff", "Tone")
     level_values = test_ws.sent_values_for("BigMuff", "Level")
@@ -113,12 +116,13 @@ def test_blend_dedup_suppresses_redundant_messages(blend_system: SystemFixture):
     enc.current_step = 64
 
     ic = handler.active_blend_mode.input_controller
-    ic.handle_value_change(64, enc)
+    event = EncoderEvent(controller=enc, rotations=0, new_value=enc.midi_value, new_midi_value=enc.midi_value)
+    ic.handle_event(event)
     sent_after_first = len(test_ws.sent)
     assert sent_after_first > 0
 
     # Second call at the same position — nothing new should be queued
-    ic.handle_value_change(64, enc)
+    ic.handle_event(event)
     assert len(test_ws.sent) == sent_after_first
 
 
@@ -137,7 +141,6 @@ def test_blend_deactivate_detaches_encoder(blend_system: SystemFixture):
 
     blend_mode.deactivate()
 
-    assert enc.value_change_callback is None
     assert blend_mode.input_controller.controlled_input is None
 
 
@@ -153,8 +156,6 @@ def test_pedalboard_switch_clears_blend_modes(blend_system: SystemFixture):
 
     assert handler.blend_modes == {}
     assert handler.active_blend_mode is None
-    enc = _blend_encoder(hw)
-    assert enc.value_change_callback is None
 
 
 # ---------------------------------------------------------------------------
@@ -174,7 +175,6 @@ def test_ws_pedal_snapshot_deactivates_blend(blend_system: SystemFixture):
     handler.poll_modui_changes()
 
     assert handler.active_blend_mode is None
-    assert enc.value_change_callback is None
 
 
 def test_ws_pedal_snapshot_activates_blend(blend_system: SystemFixture):
@@ -193,7 +193,7 @@ def test_ws_pedal_snapshot_activates_blend(blend_system: SystemFixture):
     assert handler.active_blend_mode is not None
     assert handler.active_blend_mode.config.get("name") == "Blend"
     enc = _blend_encoder(hw)
-    assert enc.value_change_callback is not None
+    assert handler.active_blend_mode.input_controller.controlled_input is enc
 
 
 # ---------------------------------------------------------------------------
@@ -257,7 +257,8 @@ def test_blend_halfway_produces_interpolated_values(blend_system: SystemFixture)
     enc.current_step = 64
 
     assert handler.active_blend_mode
-    handler.active_blend_mode.input_controller.handle_value_change(64, enc)
+    event = EncoderEvent(controller=enc, rotations=0, new_value=enc.midi_value, new_midi_value=enc.midi_value)
+    handler.active_blend_mode.input_controller.handle_event(event)
 
     tone_values = test_ws.sent_values_for("BigMuff", "Tone")
     level_values = test_ws.sent_values_for("BigMuff", "Level")
@@ -317,7 +318,8 @@ def test_edited_stop_values_take_effect_in_next_sweep(blend_system: SystemFixtur
 
     enc = _blend_encoder(hw)
     enc.current_step = 127
-    handler.active_blend_mode.input_controller.handle_value_change(127, enc)
+    event = EncoderEvent(controller=enc, rotations=0, new_value=enc.midi_value, new_midi_value=enc.midi_value)
+    handler.active_blend_mode.input_controller.handle_event(event)
 
     tone_values = test_ws.sent_values_for("BigMuff", "Tone")
     assert tone_values and abs(tone_values[-1] - 0.95) < 1e-6
@@ -418,7 +420,8 @@ def test_switching_between_blend_modes_applies_correct_initial_values(
     # Dial into Lead territory: encoder at 100%
     enc = _blend_encoder(hw)
     enc.current_step = 127
-    handler.active_blend_mode.input_controller.handle_value_change(127, enc)
+    event = EncoderEvent(controller=enc, rotations=0, new_value=enc.midi_value, new_midi_value=enc.midi_value)
+    handler.active_blend_mode.input_controller.handle_event(event)
 
     test_ws = cast(FakeWebSocketBridge, handler.ws_bridge)
     test_ws.sent.clear()
@@ -441,7 +444,8 @@ def test_switching_between_blend_modes_applies_correct_initial_values(
     # Roll the encoder back to ~50% — Blend B should interpolate between Clean and Crunch
     enc.current_step = 64
     test_ws.sent.clear()
-    handler.active_blend_mode.input_controller.handle_value_change(64, enc)
+    event = EncoderEvent(controller=enc, rotations=0, new_value=enc.midi_value, new_midi_value=enc.midi_value)
+    handler.active_blend_mode.input_controller.handle_event(event)
 
     tone_values = test_ws.sent_values_for("BigMuff", "Tone")
     level_values = test_ws.sent_values_for("BigMuff", "Level")
@@ -483,7 +487,8 @@ def test_midi_bound_param_excluded_from_blend_sweep(blend_system: SystemFixture)
 
     enc = _blend_encoder(hw)
     enc.current_step = 127
-    blend_mode.input_controller.handle_value_change(127, enc)
+    event = EncoderEvent(controller=enc, rotations=0, new_value=enc.midi_value, new_midi_value=enc.midi_value)
+    blend_mode.input_controller.handle_event(event)
 
     # Tone is MIDI-bound → excluded from diff map → must not appear in sent messages
     assert test_ws.sent_values_for("BigMuff", "Tone") == []

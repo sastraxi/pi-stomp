@@ -218,19 +218,19 @@ class Modhandler(Handler):
 
     def handle(self, event: ControllerEvent) -> bool:
         """Default sink. The LCD gets first crack (panels can intercept);
-        if not consumed, dispatch by event type. Returns True if handled.
-
-        This is plain code on purpose: no sink stack, no priority list.
-        The ordering (display → commit → emit) is a property of the code
-        you see here, not the framework."""
+        blend mode gets second crack; if neither consumes, dispatch by event type.
+        Returns True if handled."""
         if self._lcd is not None and self._lcd.handle(event):
             return True
-        if isinstance(event, EncoderEvent):
-            return self._handle_encoder(event)
-        if isinstance(event, AnalogEvent):
-            return self._handle_analog(event)
-        if isinstance(event, SwitchEvent):
-            return self._handle_switch(event)
+        if self.active_blend_mode and self.active_blend_mode.intercept(event):
+            return True
+        match event:
+            case EncoderEvent():
+                return self._handle_encoder(event)
+            case AnalogEvent():
+                return self._handle_analog(event)
+            case SwitchEvent():
+                return self._handle_switch(event)
         return False
 
     def _handle_encoder(self, event: EncoderEvent) -> bool:

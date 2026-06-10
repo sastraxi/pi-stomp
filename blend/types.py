@@ -70,7 +70,6 @@ class BlendInputProtocol(Protocol):
     """Protocol for blend mode input sources (expression pedal or encoder)."""
 
     id: int
-    value_change_callback: Callable[[int, Any], None] | None
 
     def get_normalized_value(self) -> float: ...
 

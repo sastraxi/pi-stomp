@@ -221,26 +221,26 @@ class Mod(Handler):
         hardware.register_sink(self)
 
     def handle(self, event: ControllerEvent) -> bool:
-        if isinstance(event, EncoderEvent):
-            c = event.controller
-            if c.type == Token.NAV:
-                if getattr(c, 'id', None) == 0:
-                    self.top_encoder_select(event.rotations)
-                else:
-                    self.bot_encoder_select(event.rotations)
+        if self.active_blend_mode and self.active_blend_mode.intercept(event):
+            return True
+        match event:
+            case EncoderEvent():
+                c = event.controller
+                if c.type == Token.NAV:
+                    if getattr(c, 'id', None) == 0:
+                        self.top_encoder_select(event.rotations)
+                    else:
+                        self.bot_encoder_select(event.rotations)
+                    return True
+                if c.parameter is not None:
+                    self.lcd.display_parameter_value(c.parameter, event.new_value)
+                self._emit_midi(c, event.new_midi_value)
                 return True
-            if c.parameter is not None:
-                self.lcd.display_parameter_value(c.parameter, event.new_value)
-            self._emit_midi(c, event.new_midi_value)
-            return True
-
-        if isinstance(event, AnalogEvent):
-            self._emit_midi(event.controller, event.midi_value)
-            return True
-
-        if isinstance(event, SwitchEvent):
-            return self._handle_switch_v1(event)
-
+            case AnalogEvent():
+                self._emit_midi(event.controller, event.midi_value)
+                return True
+            case SwitchEvent():
+                return self._handle_switch_v1(event)
         return False
 
     def _handle_switch_v1(self, event: SwitchEvent) -> bool:
