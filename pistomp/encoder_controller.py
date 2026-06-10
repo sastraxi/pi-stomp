@@ -197,7 +197,7 @@ class EncoderController(encoder.Encoder, controller.Controller):
         if self.value_change_callback:
             self.value_change_callback(new_value, self)
         elif self.parameter:
-            self.handler.encoder_value_changed(self.parameter, new_value, self.get_routing_info())
+            self.handler.encoder_value_changed(self, new_value)
 
     def _value_to_midi(self, value: float) -> int:
         """Convert parameter value to MIDI CC value [0-127]."""

@@ -41,7 +41,6 @@ from modalapi.websocket_bridge import AsyncWebSocketBridge
 from modalapi.ws_protocol import parse_message, LoadingEndMessage, PedalSnapshotMessage, PluginBypassMessage, WebSocketMessage
 from modalapi.pedalboard_monitor import FileChangeMonitor, read_pedalboard_bundle
 
-from pistomp.controller import RoutingDestination, RoutingInfo
 from pistomp.controller_manager import ControllerManager
 from pistomp.current import Current
 from pistomp.encoder_controller import EncoderController
@@ -792,10 +791,12 @@ class Modhandler(Handler):
 
         self.ws_bridge.send_parameter(param.instance_id, param.symbol, param.value)
 
-    def encoder_value_changed(self, param: Parameter, new_value: float, routing_info: RoutingInfo) -> None:
+    def encoder_value_changed(self, controller: EncoderController, new_value: float) -> None:
+        param = controller.parameter
+        assert param is not None  # caller (refresh) only dispatches here for bound encoders
         self.lcd.display_parameter_value(param, new_value)
-        if routing_info.destination == RoutingDestination.EXTERNAL:
-            return
+        if self.hardware.is_external(controller):
+            return  # externally-routed: the encoder already sent MIDI out; don't write to mod-host
         self.parameter_value_commit(param, new_value)
 
     #
