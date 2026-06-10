@@ -84,11 +84,6 @@ class TestOnSwitch:
             fs._on_switch(switchstate.Value.RELEASED)
             assert fs.sink.events == []
 
-    def test_no_sink_does_not_raise(self):
-        with _make_footswitch() as fs:
-            fs.sink = None
-            fs._on_switch(switchstate.Value.RELEASED)  # should not raise
-
 
 class TestHardwareMethods:
     def test_toggle_relays(self):

@@ -145,8 +145,7 @@ class Footswitch(controller.Controller):
             return
         kind = (SwitchEventKind.LONGPRESS if state is switchstate.Value.LONGPRESSED
                 else SwitchEventKind.PRESS)
-        if self.sink is not None:
-            self.sink.handle(SwitchEvent(controller=self, kind=kind, timestamp=timestamp))
+        self.sink.handle(SwitchEvent(controller=self, kind=kind, timestamp=timestamp))
 
     def set_display_label(self, label):
         self.display_label = label
