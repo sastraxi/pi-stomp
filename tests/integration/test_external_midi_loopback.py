@@ -6,9 +6,72 @@ macOS-only for now: virtual ports need CoreMIDI. Linux/CI needs the ALSA sequenc
 import sys
 import time
 import uuid
+from unittest.mock import MagicMock
 import pytest
 
+from rtmidi.midiconstants import CONTROL_CHANGE
 from modalapi.external_midi import ExternalMidiManager
+from pistomp.controller import RoutingInfo
+from pistomp.footswitch import Footswitch
+from pistomp.encoder_controller import EncoderController
+from pistomp.analogmidicontrol import AnalogMidiControl
+from pistomp.input.event import AnalogEvent, EncoderEvent, SwitchEvent, SwitchEventKind
+import pistomp.switchstate as switchstate
+
+
+class _FakeHardware:
+    """Minimal hardware stub: just enough for _emit_midi to resolve routing."""
+
+    def __init__(self, port_name: str):
+        self._port_name = port_name
+        self.midiout = MagicMock()
+        self.external_routing: dict = {}
+
+    def external_port_name(self, controller) -> str | None:
+        info = self.external_routing.get(controller)
+        return info.port_name if info is not None else None
+
+
+class _LoopbackHandler:
+    """Minimal InputSink that routes events → _emit_midi → ExternalMidiManager.
+
+    Uses the real _handle_footswitch from pistomp.handler.Handler so the
+    footswitch path exercises production code.
+    """
+
+    def __init__(self, hw: _FakeHardware, mgr: ExternalMidiManager):
+        from pistomp.footswitch_chords import FootswitchChords
+        self.hardware = hw
+        self.external_midi = mgr
+        self.chord_helper = FootswitchChords()
+
+    def _emit_midi(self, controller, midi_value: int) -> None:
+        if controller.midi_CC is None:
+            return
+        cc = [controller.midi_channel | CONTROL_CHANGE, controller.midi_CC, int(midi_value)]
+        port_name = self.hardware.external_port_name(controller)
+        if port_name is not None:
+            if self.external_midi.send_raw(port_name, cc):
+                return
+        self.hardware.midiout.send_message(cc)
+
+    def update_lcd_fs(self, footswitch=None, bypass_change=False):
+        pass
+
+    def get_callback(self, name):
+        return None
+
+    def handle(self, event) -> bool:
+        if isinstance(event, SwitchEvent) and isinstance(event.controller, Footswitch):
+            from pistomp.handler import Handler
+            return Handler._handle_footswitch(self, event.controller, event.kind, event.timestamp)
+        if isinstance(event, EncoderEvent):
+            self._emit_midi(event.controller, event.new_midi_value)
+            return True
+        if isinstance(event, AnalogEvent):
+            self._emit_midi(event.controller, event.midi_value)
+            return True
+        return False
 
 pytestmark = pytest.mark.skipif(
     sys.platform != "darwin",
@@ -128,26 +191,58 @@ class TestControlRoutesToRealPort:
     """
 
     def test_footswitch_press_reaches_real_port(self, loopback):
-        pytest.skip(
-            "input-router folds Footswitch into the sink pipeline: _on_switch "
-            "emits a SwitchEvent and no longer sends MIDI itself (handler._emit_midi "
-            "does). To restore this loopback, drive the footswitch through a real "
-            "handler+sink so _emit_midi runs. Tracked in project_input_router_finish."
-        )
+        port_name, received = loopback
+        mgr = _manager_for(port_name)
+        mgr.open_port(port_name)
+
+        hw = _FakeHardware(port_name)
+        handler = _LoopbackHandler(hw, mgr)
+
+        fs = Footswitch(id=0, led_pin=None, pixel=None, midi_CC=75,
+                        midi_channel=0xB0, refresh_callback=lambda **kw: None)
+        hw.external_routing[fs] = RoutingInfo.external(port_name)
+        fs.sink = handler
+
+        fs._on_switch(switchstate.Value.RELEASED)
+
+        assert _wait_for(lambda: received == [[0xB0 | CONTROL_CHANGE, 75, 127]])
+        mgr.close()
 
     def test_tweak_encoder_rotation_reaches_real_port(self, loopback):
-        pytest.skip(
-            "input-router folds the encoder into the sink pipeline: Encoder.refresh "
-            "emits an EncoderEvent and no longer sends MIDI itself (handler._emit_midi "
-            "does). To restore this loopback, drive the encoder through a real "
-            "handler+sink so _emit_midi runs. Tracked in project_input_router_finish "
-            "(finish-the-fold)."
-        )
+        port_name, received = loopback
+        mgr = _manager_for(port_name)
+        mgr.open_port(port_name)
+
+        hw = _FakeHardware(port_name)
+        handler = _LoopbackHandler(hw, mgr)
+
+        enc = EncoderController(d_pin=None, clk_pin=None, midi_channel=0xB0, midi_CC=7)
+        hw.external_routing[enc] = RoutingInfo.external(port_name)
+        enc.sink = handler
+
+        enc.refresh(1)
+        expected_value = enc.midi_value
+
+        assert _wait_for(lambda: received == [[0xB0 | CONTROL_CHANGE, 7, expected_value]])
+        mgr.close()
 
     def test_expression_movement_reaches_real_port(self, loopback):
-        pytest.skip(
-            "input-router folds AnalogMidiControl into the sink pipeline: _send_value "
-            "emits an AnalogEvent and no longer sends MIDI itself (handler._emit_midi "
-            "does). To restore this loopback, drive the control through a real "
-            "handler+sink so _emit_midi runs. Tracked in project_input_router_finish."
-        )
+        port_name, received = loopback
+        mgr = _manager_for(port_name)
+        mgr.open_port(port_name)
+
+        hw = _FakeHardware(port_name)
+        handler = _LoopbackHandler(hw, mgr)
+
+        spi = MagicMock()
+        spi.readChannel.return_value = 512
+        expr = AnalogMidiControl(spi, adc_channel=0, tolerance=0,
+                                 midi_CC=11, midi_channel=0xB0, type=None)
+        hw.external_routing[expr] = RoutingInfo.external(port_name)
+        expr.sink = handler
+
+        expr._send_value(512)
+        expected_value = expr.midi_value
+
+        assert _wait_for(lambda: received == [[0xB0 | CONTROL_CHANGE, 11, expected_value]])
+        mgr.close()
