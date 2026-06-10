@@ -22,7 +22,7 @@ import common.token as Token
 from common.parameter import Parameter, TTL_PROPERTIES, TTL_INTEGER
 from modalapi.external_midi import EXTERNAL_INSTANCE_ID
 from pistomp.analogmidicontrol import AnalogMidiControl
-from pistomp.controller import RoutingDestination
+from pistomp.controller import AnalogDisplayInfo
 from pistomp.current import Current
 from pistomp.footswitch import Footswitch
 
@@ -78,12 +78,11 @@ class ControllerManager:
                 if controller is None:
                     continue
 
-                routing = controller.get_routing_info()
                 # External controllers aren't bound to plugin parameters.
-                if routing.destination == RoutingDestination.EXTERNAL:
+                if self._hw.is_external(controller):
                     logging.warning(
                         f"Plugin parameter {plugin.name}:{param.name} is bound to external controller "
-                        f"{param.binding} (routed to {routing.port_name}) - ignoring plugin binding"
+                        f"{param.binding} (routed to {self._hw.external_port_name(controller)}) - ignoring plugin binding"
                     )
                     continue
 
@@ -117,21 +116,20 @@ class ControllerManager:
         """Externally-routed controllers: bind a synthetic parameter and show
         them under an "External" category."""
         for controller in self._hw.controllers.values():
-            routing = controller.get_routing_info()
-            if routing.destination != RoutingDestination.EXTERNAL or controller.midi_CC is None:
+            if not self._hw.is_external(controller) or controller.midi_CC is None:
                 continue
+            port_name = self._hw.external_port_name(controller)
 
-            # Create a synthetic parameter if not already bound.
-            # AnalogMidiControl uses EXTERNAL_INSTANCE_ID so parameter_value_commit can guard it;
-            # EncoderController routes through encoder_value_changed instead.
+            # AnalogMidiControl commits via parameter_value_commit (guarded by
+            # EXTERNAL_INSTANCE_ID); the encoder routes through encoder_value_changed.
             if controller.parameter is None:
                 if isinstance(controller, AnalogMidiControl):
                     controller.parameter = self._hw.create_external_parameter(
-                        controller, routing.port_name, controller.midi_channel, controller.midi_CC
+                        controller, port_name, controller.midi_channel, controller.midi_CC
                     )
                 else:
                     ext_info = {
-                        Token.NAME: f"{routing.port_name} CC{controller.midi_CC}",
+                        Token.NAME: f"{port_name} CC{controller.midi_CC}",
                         Token.SYMBOL: f"external_{controller.midi_CC}",
                         Token.RANGES: {Token.MINIMUM: 0, Token.MAXIMUM: 127},
                         TTL_PROPERTIES: [TTL_INTEGER],
@@ -140,7 +138,14 @@ class ControllerManager:
                         Parameter(ext_info, controller.midi_value, None, EXTERNAL_INSTANCE_ID)
                     )
 
+            if isinstance(controller, Footswitch):
+                continue  # footswitches don't appear in the analog/encoder display
+
             key = f"{controller.midi_channel}:{controller.midi_CC}"
-            display_info = controller.get_display_info()
-            display_info["category"] = "External"
-            current.analog_controllers[key] = display_info
+            entry: AnalogDisplayInfo = {
+                **controller.get_display_info(),
+                "port_name": port_name,
+                "midi_cc": controller.midi_CC,
+                "category": "External",
+            }
+            current.analog_controllers[key] = entry
