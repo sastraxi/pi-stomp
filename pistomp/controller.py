@@ -71,7 +71,18 @@ class Controller:
         self.midi_max: int = 127
         self.midi_value: int = 0
         self.midiout: MidiOut | None = None
-        self.sink: "InputSink | None" = None
+        self._sink: InputSink | None = None
+
+    @property
+    def sink(self) -> InputSink:
+        assert self._sink is not None, (
+            f"{self.__class__.__name__}.sink accessed before register_sink() was called"
+        )
+        return self._sink
+
+    @sink.setter
+    def sink(self, value: InputSink | None) -> None:
+        self._sink = value
 
     def set_value(self, value: float) -> None:
         logging.error(f"Controller subclass ({self.__class__.__name__}) hasn't overriden the set_value method")

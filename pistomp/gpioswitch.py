@@ -25,13 +25,12 @@ class GpioSwitch:
     The owning object (Footswitch or Encoder) is responsible for any
     MIDI / event-dispatch behavior."""
 
-    def __init__(self, gpio_input, callback, longpress_callback=None, taptempo=None):
+    def __init__(self, gpio_input, callback, longpress_callback=None):
         self.gpio_input = gpio_input
         self.cur_tstamp = None
         self.events = queue.Queue()
         self.callback = callback
         self.longpress_callback = longpress_callback
-        self.taptempo = taptempo
 
         # Long press threshold in seconds
         self.long_press_threshold = 0.5
@@ -55,8 +54,6 @@ class GpioSwitch:
         # release from the main loop.
         t = time.monotonic()
         self.events.put(t)
-        if self.taptempo:
-            self.taptempo.stamp(t)
 
     def poll(self):
         if not self.events.empty():
@@ -80,11 +77,12 @@ class GpioSwitch:
             state = switchstate.Value.RELEASED
         else:
             return
+        press_tstamp = self.cur_tstamp
         self.cur_tstamp = None
 
         if state == switchstate.Value.LONGPRESSED and self.longpress_callback is not None:
             logging.debug("GPIO Switch %d %s %s" % (self.gpio_input, state, self.longpress_callback))
-            self.longpress_callback(state)
+            self.longpress_callback(state, press_tstamp)
         else:
             logging.debug("GPIO Switch %d %s %s" % (self.gpio_input, state, self.callback))
-            self.callback(state)
+            self.callback(state, press_tstamp)

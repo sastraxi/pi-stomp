@@ -38,15 +38,14 @@ class EncoderController(controller.Controller):
     and optional absorbed button. Dispatches events via self.sink.
 
     Two modes, selected by constructor args:
-    - Nav mode (callback provided): raw callback per detent; no quantizer.
-      Used by navigation encoders until Step 3 completes the sink migration.
+    - Nav mode (type=Token.NAV): no quantizer, dispatches EncoderEvent via sink
+      with rotations only. Handler distinguishes by controller.type.
     - Param mode (midi_channel + midi_CC): quantizer advances on rotation;
-      dispatches EncoderEvent via self.sink.
+      dispatches EncoderEvent via sink.
 
     Button: if sw_pin is provided, owns a GpioSwitch that emits SwitchEvent
-    via self.sink (falling back to shortpress callable while sink is None).
-    Longpress is stored as a string callback name resolved by the handler at
-    dispatch time.
+    via self.sink. Longpress is stored as a string callback name resolved by
+    the handler at dispatch time.
     """
 
     # Speed amplification: at this per-detent interval, multiplier = 1×.
@@ -221,14 +220,13 @@ class EncoderController(controller.Controller):
         if self.parameter is not None:
             self.parameter.value = new_value
 
-        if self.sink is not None:
-            self.sink.handle(EncoderEvent(
-                controller=self,
-                rotations=rotations,
-                multiplier=multiplier,
-                new_value=new_value,
-                new_midi_value=self.midi_value,
-            ))
+        self.sink.handle(EncoderEvent(
+            controller=self,
+            rotations=rotations,
+            multiplier=multiplier,
+            new_value=new_value,
+            new_midi_value=self.midi_value,
+        ))
 
     # ── Button ───────────────────────────────────────────────────────────
 
@@ -237,12 +235,10 @@ class EncoderController(controller.Controller):
         on pedalboard load to overlay per-pedalboard config."""
         self.longpress = name
 
-    def _on_button(self, state) -> None:
+    def _on_button(self, state, timestamp: float) -> None:
         if state == switchstate.Value.LONGPRESSED:
             return
-        if self.sink is not None:
-            self.sink.handle(SwitchEvent(controller=self, kind=SwitchEventKind.PRESS))
+        self.sink.handle(SwitchEvent(controller=self, kind=SwitchEventKind.PRESS, timestamp=timestamp))
 
-    def _on_button_longpress(self, state) -> None:
-        if self.sink is not None:
-            self.sink.handle(SwitchEvent(controller=self, kind=SwitchEventKind.LONGPRESS))
+    def _on_button_longpress(self, state, timestamp: float) -> None:
+        self.sink.handle(SwitchEvent(controller=self, kind=SwitchEventKind.LONGPRESS, timestamp=timestamp))

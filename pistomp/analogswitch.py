@@ -18,22 +18,19 @@ from typing_extensions import override
 import time
 import pistomp.analogcontrol as analogcontrol
 import pistomp.switchstate as switchstate
-from pistomp.taptempo import TapTempo
 
 LONG_PRESS_TIME = 0.5  # Hold seconds which defines a long press
 FALLING_THRESHOLD = 800  # ASSUMES 10-bit ADC, can be changed for debounce handling
 
 
 class AnalogSwitch(analogcontrol.AnalogControl):
-    def __init__(self, spi, adc_channel, tolerance, callback, taptempo: TapTempo | None = None,
-                 longpress_callback=None):
+    def __init__(self, spi, adc_channel, tolerance, callback, longpress_callback=None):
         super(AnalogSwitch, self).__init__(spi, adc_channel, tolerance)
         self.callback = callback
         self.longpress_callback = longpress_callback
         self.state = switchstate.Value.RELEASED
         self.start_time = 0
         self.duration = 0
-        self.taptempo: TapTempo | None = taptempo
 
     @override
     def refresh(self):
@@ -45,19 +42,17 @@ class AnalogSwitch(analogcontrol.AnalogControl):
             if self.state is switchstate.Value.RELEASED:
                 self.state = switchstate.Value.PRESSED
                 self.start_time = time.monotonic()
-                if self.taptempo:
-                    self.taptempo.stamp(self.start_time)
             elif self.state is not switchstate.Value.LONGPRESSED:
                 # not longpress yet, but check how long
                 self.duration = time.monotonic() - self.start_time
                 if self.duration >= LONG_PRESS_TIME:
                     self.state = switchstate.Value.LONGPRESSED
                     lp = self.longpress_callback if self.longpress_callback is not None else self.callback
-                    lp(switchstate.Value.LONGPRESSED)
+                    lp(switchstate.Value.LONGPRESSED, self.start_time)
         elif new_value > FALLING_THRESHOLD:
             # switch released
             if self.state is switchstate.Value.PRESSED:
                 self.state = switchstate.Value.RELEASED
-                self.callback(switchstate.Value.RELEASED)
+                self.callback(switchstate.Value.RELEASED, self.start_time)
             elif self.state is switchstate.Value.LONGPRESSED:
                 self.state = switchstate.Value.RELEASED

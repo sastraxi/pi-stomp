@@ -1,3 +1,4 @@
+# pyright: reportGeneralTypeIssues=false, reportAttributeAccessIssue=false, reportOptionalMemberAccess=false, reportCallIssue=false, reportArgumentType=false, reportOptionalSubscript=false
 # This file is part of pi-stomp.
 #
 # pi-stomp is free software: you can redistribute it and/or modify
@@ -278,7 +279,7 @@ class Mod(Handler):
     # Assumption that the top encoder actions can be executed regardless of bottom encoder mode
     # Bottom encoder actions should be ignored while the system menu is active to avoid corrupting the LCD
 
-    def top_encoder_sw(self, value):
+    def top_encoder_sw(self, value, timestamp=None):
         # State machine for top rotary encoder
         mode = self.top_encoder_mode
         if value == switchstate.Value.RELEASED:
@@ -338,7 +339,7 @@ class Mod(Handler):
         elif mode == TopEncoderMode.INPUT_GAIN:
             self.parameter_value_change(direction, self.input_gain_commit)
 
-    def bottom_encoder_sw(self, value):
+    def bottom_encoder_sw(self, value, timestamp=None):
         # State machine for bottom rotary encoder switch
         if (self.top_encoder_mode == TopEncoderMode.SYSTEM_MENU or
                 self.top_encoder_mode == TopEncoderMode.HEADPHONE_VOLUME or
@@ -377,7 +378,7 @@ class Mod(Handler):
     # Universal Encoder State Machine (single encoder navigation for pi-Stomp Core)
     #
 
-    def universal_encoder_sw(self, value):
+    def universal_encoder_sw(self, value, timestamp=None):
         # State machine for universal rotary encoder switch
         mode = self.universal_encoder_mode
         if value == switchstate.Value.RELEASED:
@@ -1173,7 +1174,7 @@ class Mod(Handler):
             else:
                 logging.debug("saved")
         except:
-            logging.error("status %s" % resp.status_code)
+            logging.error("status %s" % resp.status_code)  # pyright: ignore[reportPossiblyUnboundVariable]
             return
 
     def system_menu_reload(self):
@@ -1360,7 +1361,7 @@ class Mod(Handler):
         self.deep.selected_parameter_index = 0
         self.menu_items = {0: {Token.NAME: "< Back to main screen", Token.ACTION: self.menu_back}}
         i = 1
-        for p in self.deep.parameters:
+        for p in self.deep.parameters:  # pyright: ignore[reportOptionalIterable]
             if p.symbol == ":bypass":
                 continue
             self.menu_items[i] = {Token.NAME: p.name,

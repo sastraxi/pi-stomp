@@ -59,12 +59,11 @@ class AnalogMidiControl(analogcontrol.AnalogControl, controller.Controller):
         self.value = value
         self.last_read = value
 
-        if self.sink is not None:
-            self.sink.handle(AnalogEvent(
-                controller=self,
-                raw_value=value,
-                midi_value=midi_value,
-            ))
+        self.sink.handle(AnalogEvent(
+            controller=self,
+            raw_value=value,
+            midi_value=midi_value,
+        ))
 
     def send_current_value(self):
         """Force-send the current ADC value unconditionally. Used by sync_analog_controls()."""

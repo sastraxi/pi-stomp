@@ -19,6 +19,8 @@ Each mock control subclasses the corresponding real hardware class so that
 type checkers are satisfied, but bypasses any GPIO / SPI / ADC init.
 """
 
+import time
+
 import pistomp.analogcontrol as analogcontrol
 import pistomp.encoder_controller as encoder_controller
 from pistomp.encoder_controller import EncoderController
@@ -52,10 +54,11 @@ class MockEncoder(encoder_controller.EncoderController):
         return {"type": self.type, "id": self.id, "category": None}
 
     def press(self, value):
+        ts = time.monotonic()
         if value == switchstate.Value.LONGPRESSED:
-            self._on_button_longpress(value)
+            self._on_button_longpress(value, ts)
         else:
-            self._on_button(value)
+            self._on_button(value, ts)
 
 
 class MockEncoderMidi(EncoderController):
@@ -75,10 +78,11 @@ class MockEncoderMidi(EncoderController):
         self.refresh(direction)
 
     def press(self, value):
+        ts = time.monotonic()
         if value == switchstate.Value.LONGPRESSED:
-            self._on_button_longpress(value)
+            self._on_button_longpress(value, ts)
         else:
-            self._on_button(value)
+            self._on_button(value, ts)
 
 
 class MockFootswitch(footswitch.Footswitch):

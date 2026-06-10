@@ -392,7 +392,7 @@ class Modhandler(Handler):
         if self._lcd is not None:
             self._lcd.enc_step(direction)
 
-    def universal_encoder_sw(self, value, obj=None):
+    def universal_encoder_sw(self, value, obj=None, timestamp=None):
         if self._lcd is not None:
             self._lcd.enc_sw(value)
 

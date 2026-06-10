@@ -54,7 +54,7 @@ class Hardware(ABC):
 
         # Standard hardware objects (not required to exist)
         self.relay: Relay.Relay | None = None
-        self.analog_controls: list[AnalogControl] = []
+        self.analog_controls: list[AnalogMidiControl.AnalogMidiControl] = []
         self.encoders = []
         self.controllers: dict[str, Controller] = {}
         self.footswitches: list[Footswitch.Footswitch] = []
@@ -70,9 +70,8 @@ class Hardware(ABC):
 
     def register_sink(self, sink: InputSink) -> None:
         """Assign `sink` as the default dispatch target for every controller
-        owned by this hardware. Called by v3 Handler.add_hardware after this
-        Hardware is fully constructed. v1 never calls this — its controllers
-        keep `sink = None` and take their legacy inline paths."""
+        owned by this hardware. Called by Handler.add_hardware after this
+        Hardware is fully constructed."""
         for ac in self.analog_controls:
             if isinstance(ac, Controller):
                 ac.sink = sink
@@ -117,7 +116,7 @@ class Hardware(ABC):
     def sync_analog_controls(self):
         """Send current values of analog controls with autosync enabled via MIDI."""
         for control in self.analog_controls:
-            if getattr(control, 'autosync', False) and hasattr(control, 'send_current_value'):
+            if isinstance(control, AnalogMidiControl.AnalogMidiControl) and control.autosync:
                 try:
                     control.send_current_value()
                 except Exception as e:

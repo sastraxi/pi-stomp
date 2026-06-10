@@ -108,6 +108,7 @@ def test_nav_encoder_press_dispatches_switch_event():
     event = sink.handle.call_args.args[0]
     assert isinstance(event, SwitchEvent)
     assert event.kind == SwitchEventKind.PRESS
+    assert event.timestamp > 0.0
 
 
 def test_nav_encoder_longpress_dispatches_longpress_event():
@@ -121,6 +122,7 @@ def test_nav_encoder_longpress_dispatches_longpress_event():
     event = sink.handle.call_args.args[0]
     assert isinstance(event, SwitchEvent)
     assert event.kind == SwitchEventKind.LONGPRESS
+    assert event.timestamp > 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -133,6 +135,7 @@ def _make_enc_midi(midi_CC=70, midi_channel=0):
     enc = MockEncoderMidi(
         midi_channel=midi_channel, midi_CC=midi_CC, midiout=midiout, type="TWEAK", id=1
     )
+    enc.sink = _make_sink()
     return enc, midiout
 
 
