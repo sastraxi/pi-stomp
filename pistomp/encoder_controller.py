@@ -38,11 +38,15 @@ class EncoderController(controller.Controller):
     """Rotary encoder Controller. Owns a hardware Encoder, parameter quantizer,
     and optional absorbed button. Dispatches events via self.sink.
 
-    Two modes, selected by constructor args:
-    - Nav mode (type=Token.NAV): no quantizer, dispatches EncoderEvent via sink
-      with rotations only. Handler distinguishes by controller.type.
-    - Param mode (midi_channel + midi_CC): quantizer advances on rotation;
-      dispatches EncoderEvent via sink.
+    Two modes, distinguished by the handler via controller.type — not by the
+    controller itself, which dispatches identically in both:
+    - Nav mode (type=Token.NAV): the quantizer still advances, but the handler
+      reads only event.rotations and ignores new_value/new_midi_value.
+    - Param mode (midi_channel + midi_CC): the handler consumes the quantized
+      new_value/new_midi_value.
+
+    In both modes the quantizer is built at construction (whenever type or
+    midi_CC is set); nav simply leaves its output unused downstream.
 
     Button: if sw_pin is provided, owns a GpioSwitch that emits SwitchEvent
     via self.sink. If sw_adc_chan is provided, owns an AnalogSwitch instead.
