@@ -89,6 +89,14 @@ class PluginBypassMessage:
 
 
 @dataclass
+class TransportMessage:
+    """Transport state changed (transport {rolling} {beatsPerBar} {bpm} {syncMode})."""
+
+    rolling: bool
+    bpm: float
+
+
+@dataclass
 class AddPluginMessage:
     """Plugin present in a (re)connect/load dump (add ...)."""
 

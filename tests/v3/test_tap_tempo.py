@@ -34,11 +34,12 @@ def test_tap_mode_takeover(v3_system: SystemFixture, snapshot):
     snapshot("default")
 
 
-def test_taps_update_bpm_and_send_ws(v3_system: SystemFixture, snapshot):
-    """Taps recompute the BPM, send transport-bpm over WS, and redraw the digits."""
+def test_taps_update_bpm_and_post_rest(v3_system: SystemFixture, snapshot):
+    """Taps recompute the BPM, POST it to /set_bpm (mod-ui then rebroadcasts
+    transport over WS), and redraw the digits."""
     handler = v3_system.handler
     hw = v3_system.hw
-    ws_bridge = v3_system.ws_bridge
+    mock_post = v3_system.mock_post
     _mock_bpm(v3_system.mock_get, "100.0")
 
     handler.toggle_tap_tempo_enable()
@@ -47,7 +48,10 @@ def test_taps_update_bpm_and_send_ws(v3_system: SystemFixture, snapshot):
     for i in range(4):
         fs._on_switch(switchstate.Value.RELEASED, base + i * 0.5)  # 120 BPM
 
-    assert any(m.startswith("transport-bpm 120") for m in ws_bridge.sent)
+    assert any(
+        "set_bpm" in call.args[0] and call.kwargs.get("json", {}).get("value") == 120.0
+        for call in mock_post.call_args_list
+    )
     assert fs.get_display_label() == "120"
     snapshot("tap-120")
 
