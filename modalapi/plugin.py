@@ -33,6 +33,7 @@ class Plugin:
         parameters: dict[str, Parameter],
         info: dict | None,
         category: str | None = None,
+        uri: str | None = None,
     ) -> None:
         self.instance_id: str = instance_id.lstrip("/")
         self.parameters: dict[str, Parameter] = parameters
@@ -41,6 +42,12 @@ class Plugin:
         self.controllers: list[Footswitch] = []
         self.has_footswitch: bool = False
         self.category: str | None = category
+        # LV2 plugin URI (e.g. "http://gareus.org/oss/lv2/fil4#mono").
+        # Used by full-screen panels that override the generic parameter menu.
+        self.uri: str | None = uri
+        # Snapshot of parameter values at pedalboard parse time. Cleared on
+        # pedalboard reload. Serves as the baseline for panel Reset.
+        self.pedalboard_snapshot: dict[str, float] = {}
 
     def is_bypassed(self) -> bool:
         param = self.parameters.get(":bypass")

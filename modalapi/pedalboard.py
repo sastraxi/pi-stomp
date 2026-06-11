@@ -222,7 +222,7 @@ class Pedalboard:
                             parameters[symbol] = param
 
                     #logging.debug("  Label: %s" % label)
-            inst = Plugin.Plugin(instance_id, parameters, plugin_info, category)
+            inst = Plugin.Plugin(instance_id, parameters, plugin_info, category, uri=plugin_uri)
 
             try:
                 index = plugin_order.index(block)
@@ -244,6 +244,11 @@ class Pedalboard:
             for i in range(0, len(sorted_dict)):
                 val = sorted_dict.get(i)
                 if val is not None:
+                    # Capture parse-time snapshot of all parameter values for Reset
+                    val.pedalboard_snapshot = {
+                        sym: float(p.value) if p.value is not None else 0.0
+                        for sym, p in val.parameters.items()
+                    }
                     self.plugins.append(val)
 
         # Done obtaining relevant lilv for the pedalboard

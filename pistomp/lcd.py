@@ -120,6 +120,20 @@ class Lcd(ABC):
     def refresh_zone(self, zone_idx):
         pass
 
+    # Panels
     @abstractmethod
-    def shorten_name(self):
+    def show_plugin_panel(self, panel):
+        pass
+
+    @abstractmethod
+    def hide_plugin_panel(self):
+        pass
+
+    @abstractmethod
+    def has_active_fullscreen_panel(self):
+        pass
+
+    @property
+    @abstractmethod
+    def plugin_panel(self):
         pass

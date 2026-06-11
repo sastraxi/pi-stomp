@@ -176,6 +176,20 @@ class Lcd(abstract_lcd.Lcd):
                     self._lcd.set_pixel(self.width - x - 1, self.height - y - y_offset, pixel)
         self._lcd.show()
 
+    # Plugin panels (not supported on monochrome LCD)
+    def show_plugin_panel(self, panel):
+        pass
+
+    def hide_plugin_panel(self):
+        pass
+
+    def has_active_fullscreen_panel(self):
+        return False
+
+    @property
+    def plugin_panel(self):
+        return None
+
     def refresh_plugins(self):
         for p in self.plugins:
             self.draw[p.lcd_xyz[2]].line(p.bypass_indicator_xy, not p.is_bypassed(), self.plugin_bypass_thickness)

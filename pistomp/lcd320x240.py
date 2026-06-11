@@ -29,6 +29,8 @@ from uilib.lcd_ili9341 import *
 
 from pistomp.footswitch import Footswitch  # TODO would like to avoid this module knowing such details
 from pistomp.tuner.panel import TunerPanel
+from plugins.base import PluginPanel
+from plugins import PANELS
 
 # Parameter dialog auto-dismiss timeout (seconds)
 PARAMETER_DIALOG_TIMEOUT = 1.0
@@ -134,6 +136,7 @@ class Lcd(abstract_lcd.Lcd):
         self.footswitch_panel = Panel(box=Box.xywh(0, 176, self.display_width, 64))
         self.pstack.push_panel(self.footswitch_panel, refresh=False)
         self._tuner_panel = None
+        self._plugin_panel = None
 
         self.pedalboards = {}
 
@@ -188,6 +191,14 @@ class Lcd(abstract_lcd.Lcd):
             self.main_panel_pushed = True
         #self.main_panel.refresh()
 
+    def handle(self, event: ControllerEvent) -> bool:
+        # When a plugin panel is top-most, ask it first.  It returns True
+        # to stop the event from reaching the normal handler cascade.
+        if self._plugin_panel is not None and self.pstack.current is self._plugin_panel:
+            if self._plugin_panel.handle(event):
+                return True
+        return False
+
     def poll_updates(self):
         for d in self.w_parameter_dialogs.values():
             d.tick()
@@ -195,19 +206,37 @@ class Lcd(abstract_lcd.Lcd):
         self.pstack.poll_updates()
         if self._tuner_panel is not None and self.pstack.current == self._tuner_panel:
             self._tuner_panel.tick()
+        if self._plugin_panel is not None and self.pstack.current == self._plugin_panel:
+            self._plugin_panel.tick()
 
     def show_tuner_panel(self, panel: TunerPanel) -> None:
         self._tuner_panel = panel
         self.pstack.push_panel(panel)
-        # push_panel composes the (still-blank) panel image onto the stack but
-        # doesn't draw the panel's children. Force a full redraw so bg, rules,
-        # header and hint are on screen before tick()'s partial refreshes start.
         panel.refresh()
 
     def hide_tuner_panel(self) -> None:
         if self._tuner_panel is not None:
             self.pstack.pop_panel(self._tuner_panel)
         self._tuner_panel: TunerPanel | None = None
+
+    # ── generic plugin panels ──────────────────────────────────────────────
+
+    def show_plugin_panel(self, panel: PluginPanel) -> None:
+        self._plugin_panel = panel
+        self.pstack.push_panel(panel)
+        panel.refresh()
+
+    def hide_plugin_panel(self) -> None:
+        if self._plugin_panel is not None:
+            self.pstack.pop_panel(self._plugin_panel)
+        self._plugin_panel: PluginPanel | None = None
+
+    def has_active_fullscreen_panel(self) -> bool:
+        return self._tuner_panel is not None or self._plugin_panel is not None
+
+    @property
+    def plugin_panel(self) -> PluginPanel | None:
+        return self._plugin_panel
 
     #
     # Toolbar
@@ -373,7 +402,11 @@ class Lcd(abstract_lcd.Lcd):
         if event == InputEvent.CLICK:
             self.handler.toggle_plugin_bypass(widget, plugin)
         elif event == InputEvent.LONG_CLICK:
-            self.draw_parameter_menu(plugin)
+            panel_cls = PANELS.get(plugin.uri)
+            if panel_cls is not None and hasattr(self.handler, 'show_plugin_panel'):
+                self.handler.show_plugin_panel(plugin, panel_cls)
+            else:
+                self.draw_parameter_menu(plugin)
 
 
     def color_plugin(self, widget, plugin):

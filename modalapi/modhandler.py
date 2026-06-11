@@ -130,6 +130,9 @@ class Modhandler(Handler):
         self._tuner_source_factory: TunerSourceFactory | None = None
         self._tuner_muted: bool = False
 
+        # Plugin panel state (generic full-screen UI for registered plugins)
+        self._plugin_panel = None
+
         # Callback function map.  Key is the user specified name, value is function from this handler
         # Used for calling handler callbacks pointed to by names which may be user set in the config file
         self.callbacks = {"set_mod_tap_tempo": self.set_mod_tap_tempo,
@@ -387,12 +390,10 @@ class Modhandler(Handler):
 
     @property
     def lcd_poll_divisor(self) -> int:
-        # Tick the LCD on every 10 ms main-loop pass (~100 fps) while the
-        # tuner panel is mounted. Strobe's worst-case redraw at STRIPE_W=4
-        # is ~4.3 ms of SPI, well inside the 10 ms budget; typical ticks
-        # are sub-millisecond. Otherwise fall back to the SPI-clock-derived
-        # divisor computed by the LCD itself.
-        if self._tuner_panel is not None:
+        # Tick the LCD on every 10 ms main-loop pass (~100 fps) while a
+        # fullscreen panel (tuner or plugin) is mounted. Otherwise fall back
+        # to the SPI-clock-derived divisor computed by the LCD itself.
+        if self._lcd is not None and self._lcd.has_active_fullscreen_panel():
             return 1
         return self._lcd.poll_divisor if self._lcd is not None else 8
 
@@ -1212,3 +1213,24 @@ class Modhandler(Handler):
         if self._tuner_panel is not None:
             self._tuner_panel.set_engine(engine)
             self._tuner_panel.set_input_port(new_port)
+
+    # ── generic plugin panels ──────────────────────────────────────────────
+
+    def show_plugin_panel(self, plugin, panel_cls) -> None:
+        """Open a full-screen panel for *plugin* using the registered class."""
+        if self._plugin_panel is not None:
+            return  # already open
+        panel = panel_cls(
+            plugin=plugin,
+            handler=self,
+            on_dismiss=self.hide_plugin_panel,
+        )
+        self._plugin_panel = panel
+        self.lcd.show_plugin_panel(panel)
+
+    def hide_plugin_panel(self) -> None:
+        """Dismiss the current plugin panel and clean up."""
+        if self._plugin_panel is None:
+            return
+        self.lcd.hide_plugin_panel()
+        self._plugin_panel = None
