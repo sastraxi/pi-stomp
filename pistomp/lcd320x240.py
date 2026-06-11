@@ -522,6 +522,7 @@ class Lcd(abstract_lcd.Lcd):
             if wfs.object == footswitch:
                 wfs.label = footswitch.get_display_label() or ""
                 wfs.toggle(footswitch.toggled == False)
+                wfs.refresh()
                 break
         self.footswitch_panel.refresh()
         self.refresh_plugins()  # TODO maybe not the most efficient, does exhibit some lag time
