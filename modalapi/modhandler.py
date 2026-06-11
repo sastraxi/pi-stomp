@@ -500,7 +500,8 @@ class Modhandler(Handler):
                 changed = msg.bpm != taptempo.get_bpm()
                 taptempo.set_bpm(msg.bpm)
                 if taptempo.is_enabled():
-                    self.update_lcd_fs()
+                    fs = next((f for f in self.hardware.footswitches if f.taptempo is taptempo), None)
+                    self.update_lcd_fs(footswitch=fs)
                 elif changed and self.lcd is not None:
                     self.lcd.show_bpm_toast(msg.bpm)
 
@@ -1141,7 +1142,7 @@ class Modhandler(Handler):
 
     def set_mod_tap_tempo(self, bpm):
         if bpm is not None:
-            self.ws_bridge.send_bpm(bpm)
+            self._rest_post(self.root_uri + "set_bpm", json={"value": bpm})
 
     def get_bpm(self):
         url = self.root_uri + "get_bpm"
