@@ -849,6 +849,11 @@ class Modhandler(Handler):
         logging.info("System Reboot")
         os.system('sudo systemctl reboot')
 
+    def system_menu_recovery(self, arg):
+        self.lcd.splash_show(False)
+        logging.info("Entering recovery mode")
+        os.system('sudo systemctl --no-block start pistomp-recovery.service')
+
     def check_usb(self):
         self.usbflash = False
         if not os.path.exists(self.backup_dir):

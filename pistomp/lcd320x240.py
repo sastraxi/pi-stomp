@@ -541,6 +541,7 @@ class Lcd(abstract_lcd.Lcd):
                  ("Tuner", self._toggle_tuner_from_menu, None),
                  ("System shutdown", self.handler.system_menu_shutdown, None),
                  ("System reboot",  self.handler.system_menu_reboot, None),
+                 ("Recovery mode...", self.handler.system_menu_recovery, None),
                  ("Restart sound engine", self.handler.system_menu_restart_sound, None),
                  ("Bank Select >", self.draw_bank_menu, None),
                  ("Pedalboard Management >", self.draw_pedalboard_mgmt_menu, None),
