@@ -166,7 +166,7 @@ def test_v3_toggle_plugin_bypass_no_footswitch_sends_websocket(v3_system: System
 
 
 def test_v3_toggle_plugin_bypass_via_footswitch(v3_system: SystemFixture, make_plugin, get_urls):
-    """Plugin with has_footswitch: toggle_plugin_bypass() routes through footswitch.pressed()."""
+    """Plugin with has_footswitch: toggle_plugin_bypass() routes through _handle_footswitch()."""
     handler = v3_system.handler
     hw = v3_system.hw
     mock_post = v3_system.mock_post
