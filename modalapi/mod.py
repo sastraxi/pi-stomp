@@ -31,7 +31,7 @@ import modalapi.wifi as Wifi
 
 from blend.snapshot import SnapshotManager
 from modalapi.websocket_bridge import AsyncWebSocketBridge
-from modalapi.ws_protocol import parse_message, LoadingEndMessage, PedalSnapshotMessage, PluginBypassMessage, WebSocketMessage
+from modalapi.ws_protocol import parse_message, LoadingEndMessage, PedalSnapshotMessage, PluginBypassMessage, TransportMessage, AddPluginMessage, ParamSetMessage, WebSocketMessage
 from modalapi.pedalboard_monitor import FileChangeMonitor, read_pedalboard_bundle
 
 from pistomp.analogmidicontrol import AnalogMidiControl
@@ -499,7 +499,8 @@ class Mod(Handler):
                 self.current.preset_index = msg.snapshot_id
                 self.update_lcd_title()
 
-        elif isinstance(msg, PluginBypassMessage):
+        elif isinstance(msg, (PluginBypassMessage, AddPluginMessage)):
+            # PluginBypassMessage: live delta. AddPluginMessage: (re)connect dump
             if self.current is not None:
                 for plugin in self.current.pedalboard.plugins:
                     if plugin.instance_id == msg.instance:
@@ -508,13 +509,35 @@ class Mod(Handler):
                         self.lcd.refresh_plugins()
                         break
 
-    def poll_modui_changes(self):
-        """Poll for changes from MOD-UI: websockets and file watching"""
+        elif isinstance(msg, TransportMessage):
+            if self.hardware and self.hardware.taptempo:
+                self.hardware.taptempo.set_bpm(msg.bpm)
+                if self.hardware.taptempo.is_enabled():
+                    fs = next((f for f in self.hardware.footswitches if f.taptempo is self.hardware.taptempo), None)
+                    self.update_lcd_fs(footswitch=fs)
+
+        elif isinstance(msg, ParamSetMessage):
+            # Keep the cached value fresh so a later edit opens at the current
+            # value. Not drawn anywhere live, so no LCD refresh.
+            if self.current is not None:
+                for plugin in self.current.pedalboard.plugins:
+                    if plugin.instance_id == msg.instance:
+                        param = plugin.parameters.get(msg.symbol)
+                        if param is not None:
+                            param.value = msg.value
+                        break
+
+    def poll_ws_messages(self):
+        """Drain and dispatch inbound WebSocket messages (fast ~10ms cadence)."""
         for msg in self.ws_bridge.get_received_messages():
             try:
                 self._handle_ws_message(parse_message(msg))
             except Exception as e:
                 logging.error(f"Error handling WebSocket message '{msg}': {e}")
+
+    def poll_modui_changes(self):
+        """Poll for changes from MOD-UI: websockets and file watching"""
+        self.poll_ws_messages()
 
         # Check for pedalboard change via last.json
         if self.last_json_monitor.check_for_change():
@@ -822,8 +845,7 @@ class Mod(Handler):
             logging.error("Bad Rest request: %s status: %d" % (url, resp.status_code))
         self.current.preset_index = index
 
-        #load of the preset might have changed plugin bypass status
-        self.preset_change_plugin_update()
+        # Bypass/param changes from the snapshot arrive via the WS drain (source of truth).
         self.bot_encoder_mode = BotEncoderMode.DEFAULT
 
     def preset_incr_and_change(self):
@@ -849,23 +871,6 @@ class Mod(Handler):
         if self.preset_select_index(index):
             self.preset_change()
         self.universal_encoder_mode = UniversalEncoderMode.DEFAULT
-
-    def preset_change_plugin_update(self):
-        # Now that the preset has changed on the host, update plugin bypass indicators
-        for p in self.current.pedalboard.plugins:
-            uri = self.root_uri + "effect/parameter/pi_stomp_get//graph/" + p.instance_id + "/:bypass"
-            try:
-                resp = req.get(uri)
-                if resp.status_code == 200:
-                    p.set_bypass(resp.text == "true")
-            except:
-                logging.error("failed to get bypass value for: %s" % p.instance_id)
-                continue
-        self.lcd.draw_tools(SelectedType.WIFI, SelectedType.EQ, SelectedType.BYPASS, SelectedType.SYSTEM)
-        self.lcd.draw_analog_assignments(self.current.analog_controllers)
-        self.lcd.draw_plugins(self.current.pedalboard.plugins)
-        self.lcd.draw_bound_plugins(self.current.pedalboard.plugins, self.hardware.footswitches)
-        self.lcd.draw_plugin_select()
 
     #
     # Plugin Stuff
@@ -899,13 +904,10 @@ class Mod(Handler):
                     if isinstance(c, Footswitch):
                         c.pressed(0)
                         return
-            # Regular (non footswitch plugin)
-            value = inst.toggle_bypass()
-            self.ws_bridge.send_parameter(inst.instance_id, ":bypass", 1.0 if value else 0.0)
-
-            #  Indicate change on LCD, and redraw selection(highlight)
-            self.update_lcd_plugins()
-            self.lcd.draw_plugin_select(inst)  # Not strictly required for original pi-stomp
+            # Non-footswitch plugin: emit only; the inbound echo updates state and LCD.
+            target_bypass = not inst.is_bypassed()
+            self.ws_bridge.send_parameter(inst.instance_id, ":bypass", 1.0 if target_bypass else 0.0)
+            self.lcd.draw_plugin_select(inst)  # selection highlight (navigation, not bypass)
 
     #
     # Generic Menu functions
@@ -1306,7 +1308,7 @@ class Mod(Handler):
 
     def set_mod_tap_tempo(self, bpm):
         if bpm is not None:
-            self.ws_bridge.send_bpm(bpm)
+            req.post(self.root_uri + "set_bpm", json={"value": bpm})
 
     #
     # Parameter Edit
