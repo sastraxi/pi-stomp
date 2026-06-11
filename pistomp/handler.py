@@ -114,6 +114,7 @@ class Handler(InputSink):
         # Short press
         if fs.taptempo and fs.taptempo.is_enabled():
             fs.taptempo.stamp(timestamp)
+            self.update_lcd_fs(footswitch=fs)  # redraw the BPM digits
             return True
         if fs.preset_callback is not None:
             if fs.preset_callback_arg is not None:

@@ -15,6 +15,7 @@
 
 import logging
 import os
+import time
 from typing import Optional
 import common.token as Token
 import common.parameter as Parameter
@@ -87,6 +88,7 @@ class Lcd(abstract_lcd.Lcd):
         self.splash_font = ImageFont.truetype('DejaVuSans.ttf', 48)
         self.small_font = ImageFont.truetype("DejaVuSans.ttf", 20)
         self.tiny_font = ImageFont.truetype("DejaVuSans.ttf", 16)
+        self.tap_font = ImageFont.truetype("DejaVuSans-Bold.ttf", 24)
         self.title_split_orig = 190
         self.title_split = self.title_split_orig
         self.display_width = 320
@@ -124,6 +126,8 @@ class Lcd(abstract_lcd.Lcd):
         self.w_splash = None
         self.w_info_msg = None
         self.w_parameter_dialogs = {}
+        self.w_bpm_toast = None
+        self._bpm_toast_expiry = None
 
         # panels
         self.pstack = PanelStack(display, image_format='RGB', use_dimming=True)  # TODO use dimming without loosing FS's
@@ -191,6 +195,12 @@ class Lcd(abstract_lcd.Lcd):
     def poll_updates(self):
         for d in self.w_parameter_dialogs.values():
             d.tick()
+
+        for wfs in self.w_footswitches:
+            wfs.tick()
+
+        if self._bpm_toast_expiry is not None and time.monotonic() >= self._bpm_toast_expiry:
+            self.hide_bpm_toast()
 
         self.pstack.poll_updates()
         if self._tuner_panel is not None and self.pstack.current == self._tuner_panel:
@@ -485,7 +495,8 @@ class Lcd(abstract_lcd.Lcd):
                 self.footswitch_slots[fs_id] = label
                 color = self.get_plugin_color(plugin)
                 p = FootswitchWidget(Box.xywh(x, y, self.plugin_width, self.plugin_height), self.small_font,
-                             label, color, plugin.is_bypassed(), parent=self.footswitch_panel, object=c)
+                             label, color, plugin.is_bypassed(), parent=self.footswitch_panel, object=c,
+                             taptempo=c.taptempo, tap_font=self.tap_font)
                 self.w_footswitches.append(p)
                 self.footswitch_panel.add_widget(p)
                 break
@@ -500,7 +511,8 @@ class Lcd(abstract_lcd.Lcd):
             y = 0
             x = self.get_footswitch_pitch() * slot
             p = FootswitchWidget(Box.xywh(x, y, self.plugin_width, self.plugin_height), self.small_font,
-                                 label, None, True, parent=self.footswitch_panel, object=fs)
+                                 label, None, True, parent=self.footswitch_panel, object=fs,
+                                 taptempo=fs.taptempo, tap_font=self.tap_font)
             self.w_footswitches.append(p)
             self.footswitch_panel.add_widget(p)
         self.footswitch_panel.refresh()
@@ -508,10 +520,8 @@ class Lcd(abstract_lcd.Lcd):
     def update_footswitch(self, footswitch):
         for wfs in self.w_footswitches:
             if wfs.object == footswitch:
+                wfs.label = footswitch.get_display_label() or ""
                 wfs.toggle(footswitch.toggled == False)
-                label = footswitch.get_display_label()
-                if label:
-                    wfs.label = label
                 break
         self.footswitch_panel.refresh()
         self.refresh_plugins()  # TODO maybe not the most efficient, does exhibit some lag time
@@ -801,6 +811,31 @@ class Lcd(abstract_lcd.Lcd):
 
             x += width_per_control
     
+    BPM_TOAST_SECS = 2.0
+
+    def show_bpm_toast(self, bpm):
+        # Transient mid-screen pill; deliberately clear of the footswitch row
+        # so it never hides footswitch labels.
+        if self.pstack.current != self.main_panel:
+            return
+        text = "%d BPM" % round(bpm)
+        if self.w_bpm_toast is None:
+            self.w_bpm_toast = TextWidget(box=Box.xywh(95, 64, 130, 40), text=text, font=self.title_font,
+                                          parent=self.main_panel, outline=2, outline_radius=10,
+                                          outline_color=(255, 180, 0), fgnd_color=(255, 180, 0),
+                                          bkgnd_color=(30, 22, 0), v_margin=4, sel_width=0)
+        else:
+            self.w_bpm_toast.set_text(text)
+        self.w_bpm_toast.refresh()
+        self._bpm_toast_expiry = time.monotonic() + self.BPM_TOAST_SECS
+
+    def hide_bpm_toast(self):
+        self._bpm_toast_expiry = None
+        if self.w_bpm_toast is not None:
+            self.w_bpm_toast.destroy()
+            self.w_bpm_toast = None
+            self.main_panel.refresh()
+
     def draw_info_message(self, text, refresh=False):
         if self.w_info_msg is None:
             self.w_info_msg = TextWidget(box=Box.xywh(0, 0, 0, 0), text='', parent=self.main_panel, outline=0,

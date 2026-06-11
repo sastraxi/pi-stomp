@@ -39,7 +39,7 @@ from pistomp.hardware import Hardware
 import pistomp.settings as Settings
 from blend.snapshot import SnapshotManager
 from modalapi.websocket_bridge import AsyncWebSocketBridge
-from modalapi.ws_protocol import parse_message, LoadingEndMessage, PedalSnapshotMessage, PluginBypassMessage, AddPluginMessage, ParamSetMessage, WebSocketMessage
+from modalapi.ws_protocol import parse_message, LoadingEndMessage, PedalSnapshotMessage, PluginBypassMessage, AddPluginMessage, ParamSetMessage, TransportMessage, WebSocketMessage
 from modalapi.pedalboard_monitor import FileChangeMonitor, read_pedalboard_bundle
 
 from pistomp.controller_manager import ControllerManager
@@ -493,6 +493,16 @@ class Modhandler(Handler):
                         plugin.set_bypass(msg.bypassed)
                         self.lcd.refresh_plugins()
                         break
+
+        elif isinstance(msg, TransportMessage):
+            if self.hardware and self.hardware.taptempo:
+                taptempo = self.hardware.taptempo
+                changed = msg.bpm != taptempo.get_bpm()
+                taptempo.set_bpm(msg.bpm)
+                if taptempo.is_enabled():
+                    self.update_lcd_fs()
+                elif changed and self.lcd is not None:
+                    self.lcd.show_bpm_toast(msg.bpm)
 
         elif isinstance(msg, ParamSetMessage):
             # Keep the cached value fresh so a later long-press edit opens at the

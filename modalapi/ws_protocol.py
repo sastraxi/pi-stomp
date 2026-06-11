@@ -106,6 +106,14 @@ class ParamSetMessage:
 
 
 @dataclass
+class TransportMessage:
+    """Transport state changed (transport {rolling} {beatsPerBar} {bpm} {syncMode})."""
+
+    rolling: bool
+    bpm: float
+
+
+@dataclass
 class UnknownMessage:
     """Message type we don't handle yet."""
 
@@ -122,6 +130,7 @@ WebSocketMessage = Union[
     RemoveHwPortMessage,
     TrueBypassMessage,
     PluginBypassMessage,
+    TransportMessage,
     AddPluginMessage,
     ParamSetMessage,
     UnknownMessage,
@@ -208,6 +217,11 @@ def parse_message(raw_message: str) -> WebSocketMessage:
                 instance = path.removeprefix("/graph/")
                 symbol, value_str = rest.split(" ", 1)
                 return ParamSetMessage(instance=instance, symbol=symbol, value=float(value_str))
+
+            # Format: transport {rolling} {beatsPerBar} {bpm} {syncMode}
+            case ["transport", rolling, rest]:
+                bpm = float(rest.split()[1])
+                return TransportMessage(rolling=rolling != "0", bpm=bpm)
 
             # Format: truebypass {left} {right}
             case ["truebypass", left, right_trailing]:

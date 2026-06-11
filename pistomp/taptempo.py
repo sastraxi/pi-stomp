@@ -13,6 +13,8 @@
 # You should have received a copy of the GNU General Public License
 # along with pi-stomp.  If not, see <https://www.gnu.org/licenses/>.
 
+import time
+
 from collections import deque
 
 TAP_TEMPO_SAMPLES = 4       # number of samples to consider in calculation, higher can skew the average for higher tempos
@@ -26,6 +28,7 @@ class TapTempo:
         self.taptempo = 0
         self.callback = callback
         self.enabled = False
+        self.anchor = 0.0  # monotonic time of last tap (or enable), for beat-phase display
 
     def __calc_tempo(self):
         if len(self.timestamps) < 2:
@@ -57,12 +60,14 @@ class TapTempo:
 
     def enable(self, enable):
         self.enabled = enable
+        if enable:
+            self.anchor = time.monotonic()
 
     def is_enabled(self):
         return self.enabled
 
     def toggle_enable(self):
-        self.enabled = not self.enabled
+        self.enable(not self.enabled)
 
     def get_bpm(self):
         return self.taptempo
@@ -74,6 +79,7 @@ class TapTempo:
     def stamp(self, t):
         if not self.enabled:
             return
+        self.anchor = t
         self.timestamps.append(t)
         if len(self.timestamps) > TAP_TEMPO_SAMPLES:
             self.timestamps.popleft()
