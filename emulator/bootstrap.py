@@ -70,6 +70,9 @@ def bootstrap_emulator(version: EmulatorVersion, cwd: str):
     hw = EmuHW(cfg, handler, midiout, refresh_callback=handler.update_lcd_fs)
     handler.add_hardware(hw)
 
+    # Force plugin panel registration (eq, etc.)
+    import plugins.eq.panel  # noqa: F401
+
     window = EmulatorWindow(hw)
     handler.set_window(window)
 
