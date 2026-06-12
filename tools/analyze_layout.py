@@ -31,6 +31,7 @@ from PIL import ImageColor, ImageFont  # noqa: E402
 from modalapi.layout import (  # noqa: E402
     Layout,
     build_layout,
+    build_layout_compress,
     build_layout_dp,
     layout_cost,
     occupied_cells,
@@ -272,6 +273,8 @@ def load_layout(bundle: Path, algo: str = "dp", max_rows: int = 4) -> tuple[Peda
     ids = [p.instance_id.lstrip("/") for p in pb.plugins]
     if algo == "dp":
         layout = build_layout_dp(ids, pb.connections, height_cap=max_rows)
+    elif algo == "compress":
+        layout = build_layout_compress(ids, pb.connections, height_cap=max_rows)
     else:
         layout = build_layout(ids, pb.connections)
     return pb, layout
@@ -323,7 +326,9 @@ def main() -> int:
     ap.add_argument("bundles", nargs="*", help="Pedalboard bundle paths")
     ap.add_argument("--all", action="store_true", help="Analyse every board in the MOD Desktop dirs")
     ap.add_argument("--summary", action="store_true", help="One metrics row per board, no ASCII grid")
-    ap.add_argument("--algo", choices=("sugiyama", "dp"), default="dp", help="Layout algorithm (default: dp)")
+    ap.add_argument(
+        "--algo", choices=("sugiyama", "dp", "compress"), default="dp", help="Layout algorithm (default: dp)"
+    )
     ap.add_argument("--max-rows", type=int, default=4, help="DP height_cap (default: 4)")
     ap.add_argument("--no-png", action="store_true", help=f"Skip writing PNG renders to {RENDER_DIR}")
     args = ap.parse_args()

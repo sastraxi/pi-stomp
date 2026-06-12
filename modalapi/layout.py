@@ -459,10 +459,26 @@ def route_edge(
 
 
 def routing_violations(layout: Layout) -> int:
-    """Count edges that have no invariant-1-legal route under the current
-    placement (i.e. blocked by a fully-packed column they must cross)."""
+    """Count edges with no invariant-1-legal route under the current placement.
+
+    Cross-column edges are blocked by a fully-packed column they must cross
+    (`route_edge`). Within-column edges (span 0, produced by column compression)
+    have no gutter to travel in yet, so they're blocked when an occupied tile
+    sits strictly between their endpoint rows — a wire through an intervening
+    plugin. Once the renderer gutter-routes within-column skips, this clause
+    can relax to a lane-pressure cost."""
     occ = occupied_cells(layout)
-    return sum(1 for e in layout.edges if route_edge(layout, e, occ) is None)
+    n = 0
+    for e in layout.edges:
+        if e.src.layer == e.dst.layer:
+            c = e.src.layer
+            lo, hi = sorted((e.src.row, e.dst.row))
+            if any((c, r) in occ for r in range(lo + 1, hi)):
+                n += 1
+            continue
+        if route_edge(layout, e, occ) is None:
+            n += 1
+    return n
 
 
 def layout_cost(
@@ -634,6 +650,207 @@ def _route_dp_edges(layout: Layout) -> None:
             prev, prev_row = d, row
         routed.append(LayoutEdge(prev, e.dst, e.src_port, e.dst_port))
     layout.edges = routed
+
+
+# --------------------------------------------------------------------------- #
+# Alternative layout: column-compression DP (preserves parallel rows).
+#
+# The serpentine fold flattens the DAG to a line and wraps it, destroying the
+# parallel-branch rows that make a clean narrow grid possible. Instead, keep the
+# layered (Sugiyama) structure and *merge contiguous layers* into columns until
+# the grid fits the viewport. Merges are order-preserving, so left->right flow
+# (invariant 2) holds by construction.
+#
+# Enumerating every contiguous partition is 2^(L-1) — fine for L=6 (Doom), but a
+# 48-plugin board has L~17 and 65k partitions, each rebuilt and re-routed: it
+# hangs. Two facts collapse it to a polynomial DP:
+#   * A merged column packs densely (rows 0..h-1, no interior gaps), so a
+#     within-column edge is a routing violation IFF its endpoints aren't on
+#     adjacent rows — a local, precomputable per-interval quantity.
+#   * Width and within-column violations are additive over columns; column count
+#     drives the width penalty; the grid's row count is the *max* column height.
+# So: fix a global vertical order (the uncompressed barycentric rows), bound the
+# max column height H, and run an O(L^3) cut-point DP minimising
+# violations + width over a range of H. ~L reconstructions, scored by the real
+# layout_cost. Runs in milliseconds on a Pi.
+# --------------------------------------------------------------------------- #
+
+
+def _compress_intervals(
+    plugin_layers: dict[str, int],
+    ys: dict[str, int],
+    edges: list[tuple[str, str]],
+    n_layers: int,
+) -> tuple[list[list[int]], list[list[int]]]:
+    """Precompute, for every layer interval [j, i), the merged column's height
+    and its within-column routing-violation count. A column orders its plugins
+    by (y, layer) and packs them densely, so an inside edge violates iff its
+    endpoints land >1 row apart in that order."""
+    by_layer: dict[int, list[str]] = defaultdict(list)
+    for pid, layer in plugin_layers.items():
+        by_layer[layer].append(pid)
+
+    height = [[0] * (n_layers + 1) for _ in range(n_layers + 1)]
+    viol = [[0] * (n_layers + 1) for _ in range(n_layers + 1)]
+    for j in range(n_layers):
+        members: list[str] = []
+        for i in range(j + 1, n_layers + 1):
+            members += by_layer[i - 1]
+            pos = {pid: r for r, pid in enumerate(sorted(members, key=lambda p: (ys[p], plugin_layers[p])))}
+            height[j][i] = len(members)
+            viol[j][i] = sum(
+                1 for a, b in edges if a in pos and b in pos and abs(pos[a] - pos[b]) > 1
+            )
+    return height, viol
+
+
+def _best_cuts(
+    height: list[list[int]],
+    viol: list[list[int]],
+    n_layers: int,
+    viewport_cols: int,
+    max_height: int,
+    infeasible_penalty: float,
+    width_penalty: float,
+) -> Optional[list[tuple[int, int]]]:
+    """Cut-point DP: partition [0, n_layers) into columns each no taller than
+    `max_height`, minimising infeasible_penalty*within-violations +
+    width_penalty*columns-over-viewport. Returns the column intervals, or None
+    if no column can satisfy the height bound."""
+    INF = float("inf")
+    # dp[i][k]: min violation-cost to cover layers [0, i) with exactly k columns.
+    dp = [[INF] * (n_layers + 1) for _ in range(n_layers + 1)]
+    par = [[-1] * (n_layers + 1) for _ in range(n_layers + 1)]
+    dp[0][0] = 0.0
+    for i in range(1, n_layers + 1):
+        for j in range(i):
+            if height[j][i] > max_height:
+                continue
+            step = infeasible_penalty * viol[j][i]
+            for k in range(1, i + 1):
+                if dp[j][k - 1] + step < dp[i][k]:
+                    dp[i][k] = dp[j][k - 1] + step
+                    par[i][k] = j
+
+    best_k, best_total = -1, INF
+    for k in range(1, n_layers + 1):
+        if dp[n_layers][k] == INF:
+            continue
+        total = dp[n_layers][k] + width_penalty * max(0, k - viewport_cols)
+        if total < best_total:
+            best_k, best_total = k, total
+    if best_k < 0:
+        return None
+
+    cuts: list[tuple[int, int]] = []
+    i, k = n_layers, best_k
+    while k > 0:
+        j = par[i][k]
+        cuts.append((j, i))
+        i, k = j, k - 1
+    cuts.reverse()
+    return cuts
+
+
+def _build_from_cuts(
+    plugin_layers: dict[str, int],
+    ys: dict[str, int],
+    connections: Iterable[Connection],
+    cuts: list[tuple[int, int]],
+) -> Layout:
+    """Build a Layout from a column partition. Each column packs its plugins
+    densely in (y, layer) order; multi-column edges are dummy-routed through gap
+    cells so the gutter renderer draws around tiles."""
+    col_of_layer: dict[int, int] = {}
+    for ci, (j, i) in enumerate(cuts):
+        for layer in range(j, i):
+            col_of_layer[layer] = ci
+
+    by_col: dict[int, list[str]] = defaultdict(list)
+    for pid, layer in plugin_layers.items():
+        by_col[col_of_layer[layer]].append(pid)
+
+    n_cols = len(cuts)
+    n_rows = max((len(v) for v in by_col.values()), default=0)
+    nodes: dict[str, LayoutNode] = {}
+    cols: list[list[Optional[LayoutNode]]] = [[None] * n_rows for _ in range(n_cols)]
+    for ci in range(n_cols):
+        for r, pid in enumerate(sorted(by_col[ci], key=lambda p: (ys[p], plugin_layers[p]))):
+            node = LayoutNode(id=pid, kind="plugin", layer=ci, row=r)
+            nodes[pid] = node
+            cols[ci][r] = node
+
+    edges: list[LayoutEdge] = []
+    seen: set[tuple[str, str, int, int]] = set()
+    for c in audio_connections(connections):
+        src, dst = nodes.get(c.src.id), nodes.get(c.dst.id)
+        if src is None or dst is None:
+            continue
+        key = (src.id, dst.id, c.src.port_idx, c.dst.port_idx)
+        if key in seen:
+            continue
+        seen.add(key)
+        edges.append(LayoutEdge(src, dst, c.src.port_idx, c.dst.port_idx))
+
+    layout = Layout(cols=cols, edges=edges)
+    _route_dp_edges(layout)  # split multi-column edges through gap cells
+    return layout
+
+
+def build_layout_compress(
+    plugin_instance_ids: Iterable[str],
+    connections: Iterable[Connection],
+    height_cap: int = 4,
+    viewport_cols: int = 4,
+) -> Layout:
+    """Layered layout compressed by merging adjacent columns. A cut-point DP
+    finds, for each max column height, the partition minimising routing
+    violations and width-over-viewport; the candidate with the lowest real
+    layout_cost wins. Stays <= viewport wide when feasible and only spills past
+    it to avoid running a wire through a plugin. A board that already fits keeps
+    its layered structure."""
+    # Uncompressed layered pass fixes each plugin's layer and a stable vertical
+    # order (barycentric row) that merges preserve.
+    base_nodes = build_nodes(plugin_instance_ids, connections)
+    longest_path_layers(base_nodes, connections)
+    nodes, base_edges = insert_dummies(base_nodes, connections)
+    barycentric_order(nodes, base_edges)
+
+    plugins = {nid: n for nid, n in nodes.items() if n.kind == "plugin"}
+    if not plugins:
+        return Layout()
+    used = sorted({n.layer for n in plugins.values()})
+    remap = {old: i for i, old in enumerate(used)}
+    plugin_layers = {pid: remap[n.layer] for pid, n in plugins.items()}
+    ys = {pid: n.row for pid, n in plugins.items()}
+    n_layers = len(used)
+
+    real_edges: list[tuple[str, str]] = []
+    seen_e: set[tuple[str, str]] = set()
+    for c in audio_connections(connections):
+        s, d = c.src.id, c.dst.id
+        if s in plugins and d in plugins and s != d and (s, d) not in seen_e:
+            seen_e.add((s, d))
+            real_edges.append((s, d))
+
+    height, viol = _compress_intervals(plugin_layers, ys, real_edges, n_layers)
+    min_h = max((height[layer][layer + 1] for layer in range(n_layers)), default=0)
+    max_h = height[0][n_layers]  # everything in one column
+
+    best: Optional[Layout] = None
+    best_cost = float("inf")
+    seen_cuts: set[tuple[tuple[int, int], ...]] = set()
+    for h in range(min_h, max_h + 1):
+        cuts = _best_cuts(height, viol, n_layers, viewport_cols, h, 1000.0, 10.0)
+        if cuts is None or tuple(cuts) in seen_cuts:
+            continue
+        seen_cuts.add(tuple(cuts))
+        layout = _build_from_cuts(plugin_layers, ys, connections, cuts)
+        cost = layout_cost(layout, height_cap, viewport_cols=viewport_cols)
+        if cost < best_cost:
+            best, best_cost = layout, cost
+    assert best is not None
+    return best
 
 
 def build_layout_dp(
