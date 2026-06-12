@@ -18,9 +18,8 @@ from __future__ import annotations
 
 from typing import Any
 
-import common.token as Token
 from pistomp.analogmidicontrol import AnalogMidiControl
-from pistomp.encodermidicontrol import EncoderMidiControl
+from pistomp.encoder_controller import EncoderController
 from pistomp.footswitch import Footswitch
 from pistomp.tuner.source import TunerSourceFactory
 
@@ -149,12 +148,11 @@ class Handler:
             plugin.has_footswitch = True
             controller.set_category(plugin.category)
             return True
-        elif isinstance(controller, (AnalogMidiControl, EncoderMidiControl)):
+        elif isinstance(controller, (AnalogMidiControl, EncoderController)):
             key = "%s:%s" % (plugin.instance_id, param.name)
-            controller.cfg[Token.CATEGORY] = plugin.category  # somewhat LAME adding to cfg dict
-            controller.cfg[Token.TYPE] = controller.type
-            controller.cfg[Token.ID] = controller.id
-            self.current.analog_controllers[key] = controller.cfg
+            display_info = controller.get_display_info()
+            display_info["category"] = plugin.category
+            self.current.analog_controllers[key] = display_info
         return False
 
     def _redraw_after_binding(self, controller, is_footswitch):
