@@ -164,9 +164,10 @@ class Lcd(abstract_lcd.Lcd):
 
     def enc_sw(self, v):
         if v == switchstate.Value.RELEASED:
-            self.pstack.input_event(InputEvent.CLICK)
+            return self.pstack.input_event(InputEvent.CLICK)
         elif v == switchstate.Value.LONGPRESSED:
-            self.pstack.input_event(InputEvent.LONG_CLICK)
+            return self.pstack.input_event(InputEvent.LONG_CLICK)
+        return False
 
     #
     # Main
