@@ -1,5 +1,6 @@
 #!/usr/bin/env sh
-# Run the layout analyser, wiring in lilv the same way run_emulator.sh does.
+# Run the layout analyser (build_layout_compress), wiring in lilv the same way
+# run_emulator.sh does.
 # Requires MOD Desktop running locally at http://127.0.0.1:18181 so plugin
 # audio-port ordering can be resolved.
 
