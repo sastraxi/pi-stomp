@@ -114,11 +114,18 @@ class ParamSetMessage:
 
 
 @dataclass
-class TransportMessage:
-    """Transport state changed (transport {rolling} {beatsPerBar} {bpm} {syncMode})."""
+class MidiMapMessage:
+    """A MIDI binding was learned/assigned in mod-ui (midi_map ...)."""
 
-    rolling: bool
-    bpm: float
+    instance: str  # canonical bare form, e.g. "CollisionDrive"
+    symbol: str  # e.g. "gain" or ":bypass"
+    channel: int
+    controller: int
+
+    @property
+    def binding(self) -> str:
+        # Matches Parameter.binding's "channel:controller" form.
+        return "%d:%d" % (self.channel, self.controller)
 
 
 @dataclass
@@ -141,6 +148,7 @@ WebSocketMessage = Union[
     TransportMessage,
     AddPluginMessage,
     ParamSetMessage,
+    MidiMapMessage,
     UnknownMessage,
 ]
 
@@ -226,10 +234,15 @@ def parse_message(raw_message: str) -> WebSocketMessage:
                 symbol, value_str = rest.split(" ", 1)
                 return ParamSetMessage(instance=instance, symbol=symbol, value=float(value_str))
 
-            # Format: transport {rolling} {beatsPerBar} {bpm} {syncMode}
-            case ["transport", rolling, rest]:
-                bpm = float(rest.split()[1])
-                return TransportMessage(rolling=rolling != "0", bpm=bpm)
+            # Format: midi_map /graph/{instance} {symbol} {channel} {controller} {min} {max}
+            case ["midi_map", path, rest]:
+                symbol, ch, ctrl = rest.split(" ")[:3]
+                return MidiMapMessage(
+                    instance=path.removeprefix("/graph/"),
+                    symbol=symbol,
+                    channel=int(ch),
+                    controller=int(ctrl),
+                )
 
             # Format: truebypass {left} {right}
             case ["truebypass", left, right_trailing]:

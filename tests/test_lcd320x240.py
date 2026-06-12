@@ -136,7 +136,7 @@ def test_parameter_dialog_snapshot(lcd, snapshot):
 
 def test_update_footswitch_off_snapshot(lcd, snapshot):
     instance, _ = lcd
-    mock_fs = MockObject(id=0, toggled=True, get_display_label=lambda: "Dist", color="Red", taptempo=None)
+    mock_fs = MockObject(id=0, toggled=True, get_display_label=lambda: "Dist", color="Red", taptempo=None, parameter=None)
     mock_current = MockObject(
         pedalboard=MockObject(title="PB", plugins=[]), presets={0: "Clean"}, preset_index=0, analog_controllers={}
     )
@@ -149,7 +149,7 @@ def test_update_footswitch_off_snapshot(lcd, snapshot):
 
 def test_update_footswitch_on_snapshot(lcd, snapshot):
     instance, _ = lcd
-    mock_fs = MockObject(id=1, toggled=False, get_display_label=lambda: "Drive", color="Orange", taptempo=None)
+    mock_fs = MockObject(id=1, toggled=False, get_display_label=lambda: "Drive", color="Orange", taptempo=None, parameter=None)
     mock_current = MockObject(
         pedalboard=MockObject(title="PB", plugins=[]), presets={0: "Clean"}, preset_index=0, analog_controllers={}
     )
@@ -232,7 +232,7 @@ def test_tap_tempo_snapshot(lcd, snapshot):
     taptempo = TapTempo()
     taptempo.enable(True)
     taptempo.set_bpm(120)
-    mock_fs = MockObject(id=2, toggled=True, get_display_label=lambda: "120", taptempo=taptempo)
+    mock_fs = MockObject(id=2, toggled=True, get_display_label=lambda: "120", taptempo=taptempo, parameter=None)
     mock_current = MockObject(
         pedalboard=MockObject(title="BPM Test", plugins=[]), presets={0: "Clean"}, preset_index=0, analog_controllers={}
     )
@@ -245,7 +245,7 @@ def test_tap_tempo_snapshot(lcd, snapshot):
 def test_tap_tempo_disable_clears_label(lcd, snapshot):
     instance, _ = lcd
     labels = ["120"]
-    mock_fs = MockObject(id=2, toggled=True, get_display_label=lambda: labels[0], taptempo=None)
+    mock_fs = MockObject(id=2, toggled=True, get_display_label=lambda: labels[0], taptempo=None, parameter=None)
     mock_current = MockObject(
         pedalboard=MockObject(title="BPM Test", plugins=[]), presets={0: "Clean"}, preset_index=0, analog_controllers={}
     )
@@ -267,7 +267,7 @@ def test_update_footswitch_clears_label_when_empty(lcd):
     def get_label():
         return labels[0]
 
-    mock_fs = MockObject(id=2, toggled=True, get_display_label=get_label, taptempo=None)
+    mock_fs = MockObject(id=2, toggled=True, get_display_label=get_label, taptempo=None, parameter=None)
     mock_current = MockObject(
         pedalboard=MockObject(title="BPM Test", plugins=[]), presets={0: "Clean"}, preset_index=0, analog_controllers={}
     )
