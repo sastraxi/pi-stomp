@@ -26,6 +26,7 @@ from abc import abstractmethod
 from collections.abc import Callable
 from typing import Generic, TypeVar
 
+import common.token as Token
 from pistomp.input.event import ControllerEvent, EncoderEvent
 from pistomp.input.sink import InputSink
 from uilib.box import Box
@@ -173,7 +174,7 @@ class PluginPanel(Panel, InputSink, Generic[TState]):
         if not self._param_queue:
             return
         instance_id = self.plugin.instance_id
-        bridge = getattr(self.handler, "ws_bridge", None)
+        bridge = self.handler.ws_bridge
         for symbol, value in self._param_queue.items():
             if bridge is not None:
                 bridge.send_parameter(instance_id, symbol, value)
@@ -184,28 +185,28 @@ class PluginPanel(Panel, InputSink, Generic[TState]):
     def _on_toggle_bypass(self) -> None:
         new_bypass = not self.plugin.is_bypassed()
         self.plugin.set_bypass(new_bypass)
-        bridge = getattr(self.handler, "ws_bridge", None)
+        bridge = self.handler.ws_bridge
         if bridge is not None:
             bridge.send_parameter(self.plugin.instance_id, ":bypass", 1.0 if new_bypass else 0.0)
         self._refresh_bypass_style()
         self._btn_bypass.refresh()
 
     def _on_reset(self) -> None:
-        """Restore all symbols from the parse-time snapshot, skipping locked ones."""
+        """Restore all symbols from the parse-time snapshot, skipping locked ones and :bypass."""
         self._flush_param_queue()
         snap = self.plugin.pedalboard_snapshot
         for symbol, value in snap.items():
+            if symbol == Token.COLON_BYPASS:
+                continue
             if self._is_symbol_locked(self.plugin.instance_id, symbol):
                 continue
             self.set_param(symbol, value)
         self._flush_param_queue()
         self.apply_state(self.snapshot_state())
+        self._refresh_bypass_style()
 
     def _is_symbol_locked(self, instance_id: str, symbol: str) -> bool:
-        handler = self.handler
-        if hasattr(handler, "is_symbol_locked"):
-            return handler.is_symbol_locked(instance_id, symbol)
-        return False
+        return self.handler.is_symbol_locked(instance_id, symbol)
 
     def _refresh_bypass_style(self) -> None:
         bypassed = self.plugin.is_bypassed()
@@ -216,7 +217,7 @@ class PluginPanel(Panel, InputSink, Generic[TState]):
     def handle(self, event: ControllerEvent) -> bool:
         """Return *True* to stop the event from reaching the normal handler cascade."""
         if isinstance(event, EncoderEvent):
-            cid = getattr(event.controller, "id", None)
+            cid = event.controller.id
             if cid in (1, 2, 3):
                 return self.on_encoder_rotation(cid, event.rotations)
         return False

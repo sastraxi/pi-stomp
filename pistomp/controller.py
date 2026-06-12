@@ -59,6 +59,7 @@ AnalogControllers = dict[str, AnalogDisplayInfo]
 
 class Controller:
     type: str | None = None  # class default; not in __init__ — Encoder sets its own type via the encoder MRO
+    id: int | None = None    # position/identifier for display routing or event filtering
 
     def __init__(self, midi_channel: int, midi_CC: int | None):
         self.midi_channel: int = midi_channel

@@ -28,7 +28,6 @@ from uilib import *
 from uilib.lcd_ili9341 import *
 
 from pistomp.footswitch import Footswitch  # TODO would like to avoid this module knowing such details
-from pistomp.tuner.panel import TunerPanel
 from plugins.base import PluginPanel
 from plugins import PANELS
 
@@ -135,8 +134,7 @@ class Lcd(abstract_lcd.Lcd):
         self.main_panel_pushed = False
         self.footswitch_panel = Panel(box=Box.xywh(0, 176, self.display_width, 64))
         self.pstack.push_panel(self.footswitch_panel, refresh=False)
-        self._tuner_panel = None
-        self._plugin_panel = None
+        self._fullscreen_panel: Panel | None = None
 
         self.pedalboards = {}
 
@@ -192,10 +190,10 @@ class Lcd(abstract_lcd.Lcd):
         #self.main_panel.refresh()
 
     def handle(self, event: ControllerEvent) -> bool:
-        # When a plugin panel is top-most, ask it first.  It returns True
-        # to stop the event from reaching the normal handler cascade.
-        if self._plugin_panel is not None and self.pstack.current is self._plugin_panel:
-            if self._plugin_panel.handle(event):
+        # When a fullscreen panel is top-most and is an InputSink, ask it first.
+        # It returns True to stop the event from reaching the normal handler cascade.
+        if self._fullscreen_panel is not None and self.pstack.current is self._fullscreen_panel:
+            if self._fullscreen_panel.handle(event):
                 return True
         return False
 
@@ -204,39 +202,25 @@ class Lcd(abstract_lcd.Lcd):
             d.tick()
 
         self.pstack.poll_updates()
-        if self._tuner_panel is not None and self.pstack.current == self._tuner_panel:
-            self._tuner_panel.tick()
-        if self._plugin_panel is not None and self.pstack.current == self._plugin_panel:
-            self._plugin_panel.tick()
+        if self._fullscreen_panel is not None and self.pstack.current is self._fullscreen_panel:
+            self._fullscreen_panel.tick()
 
-    def show_tuner_panel(self, panel: TunerPanel) -> None:
-        self._tuner_panel = panel
-        self.pstack.push_panel(panel)
-        panel.refresh()
-
-    def hide_tuner_panel(self) -> None:
-        if self._tuner_panel is not None:
-            self.pstack.pop_panel(self._tuner_panel)
-        self._tuner_panel: TunerPanel | None = None
-
-    # ── generic plugin panels ──────────────────────────────────────────────
-
-    def show_plugin_panel(self, panel: PluginPanel) -> None:
-        self._plugin_panel = panel
+    def show_plugin_panel(self, panel: Panel) -> None:
+        self._fullscreen_panel = panel
         self.pstack.push_panel(panel)
         panel.refresh()
 
     def hide_plugin_panel(self) -> None:
-        if self._plugin_panel is not None:
-            self.pstack.pop_panel(self._plugin_panel)
-        self._plugin_panel: PluginPanel | None = None
+        if self._fullscreen_panel is not None:
+            self.pstack.pop_panel(self._fullscreen_panel)
+        self._fullscreen_panel = None
 
     def has_active_fullscreen_panel(self) -> bool:
-        return self._tuner_panel is not None or self._plugin_panel is not None
+        return self._fullscreen_panel is not None
 
     @property
     def plugin_panel(self) -> PluginPanel | None:
-        return self._plugin_panel
+        return self._fullscreen_panel if isinstance(self._fullscreen_panel, PluginPanel) else None
 
     #
     # Toolbar
@@ -403,7 +387,7 @@ class Lcd(abstract_lcd.Lcd):
             self.handler.toggle_plugin_bypass(widget, plugin)
         elif event == InputEvent.LONG_CLICK:
             panel_cls = PANELS.get(plugin.uri)
-            if panel_cls is not None and hasattr(self.handler, 'show_plugin_panel'):
+            if panel_cls is not None:
                 self.handler.show_plugin_panel(plugin, panel_cls)
             else:
                 self.draw_parameter_menu(plugin)
@@ -509,15 +493,21 @@ class Lcd(abstract_lcd.Lcd):
     #
     # Footswitches
     #
+    def footswitch_label(self, footswitch):
+        """Label for a footswitch bound to a plugin param: the param name, or the plugin instance for a :bypass binding."""
+        param = footswitch.parameter
+        if param is None:
+            return None
+        if param.symbol != ":bypass":  # TODO token
+            return param.name
+        return self.shorten_name(param.instance_id, self.footswitch_width)
+
     def draw_footswitch(self, plugin):
         for c in plugin.controllers:
             if isinstance(c, Footswitch):
                 fs_id = c.id
                 #fss[fs_id] = None
-                if c.parameter.symbol != ":bypass":  # TODO token
-                    label = c.parameter.name
-                else:
-                    label = self.shorten_name(plugin.instance_id, self.footswitch_width)
+                label = self.footswitch_label(c)
                 c.set_display_label(label)
 
                 y = 0
@@ -548,6 +538,10 @@ class Lcd(abstract_lcd.Lcd):
     def update_footswitch(self, footswitch):
         for wfs in self.w_footswitches:
             if wfs.object == footswitch:
+                if footswitch.parameter is not None:
+                    # Binding may be new (e.g. MIDI learn) — reflect label + color.
+                    footswitch.set_display_label(self.footswitch_label(footswitch))
+                    wfs.color = self.get_category_color(footswitch.category)
                 wfs.toggle(footswitch.toggled == False)
                 wfs.label = footswitch.get_display_label() or ""
                 wfs.refresh()

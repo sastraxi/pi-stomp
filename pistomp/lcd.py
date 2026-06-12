@@ -122,6 +122,10 @@ class Lcd(ABC):
 
     # Panels
     @abstractmethod
+    def shorten_name(self, name, width):
+        pass
+
+    @abstractmethod
     def show_plugin_panel(self, panel):
         pass
 

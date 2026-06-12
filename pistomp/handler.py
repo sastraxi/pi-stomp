@@ -14,27 +14,36 @@
 # along with pi-stomp.  If not, see <https://www.gnu.org/licenses/>.
 
 
+from __future__ import annotations
+
 from typing import TYPE_CHECKING
 
+import common.token as Token
+from pistomp.analogmidicontrol import AnalogMidiControl
+from pistomp.current import Current
+from pistomp.footswitch import Footswitch
+from pistomp.footswitch_chords import FootswitchChords
 from pistomp.input.event import ControllerEvent, SwitchEventKind
 from pistomp.input.sink import InputSink
-from pistomp.footswitch_chords import FootswitchChords
 from pistomp.tuner.source import TunerSourceFactory
 
 if TYPE_CHECKING:
-    from pistomp.footswitch import Footswitch
+    from modalapi.websocket_bridge import AsyncWebSocketBridge
     from pistomp.hardware import Hardware
 
 
 class Handler(InputSink):
+    ws_bridge: "AsyncWebSocketBridge | None" = None
+
     def __init__(self):
         self.homedir = None
         self.lcd = None
         self.chord_helper = FootswitchChords()
+        self.current: Current | None = None
 
     @property
     def hardware(self) -> "Hardware":
-        raise NotImplementedError()
+        ...
 
     @property
     def lcd_poll_divisor(self) -> int:
@@ -166,3 +175,63 @@ class Handler(InputSink):
 
     def set_tuner_source_factory(self, factory: "TunerSourceFactory") -> None:
         pass
+
+    def is_symbol_locked(self, instance_id: str, symbol: str) -> bool:
+        return False
+
+    def show_plugin_panel(self, plugin, panel_cls) -> None:
+        pass
+
+    def hide_plugin_panel(self) -> None:
+        pass
+
+    #
+    # MIDI binding (shared by v1/v3 handlers)
+    #
+    def _apply_midi_binding(self, instance, symbol, binding):
+        # A MIDI mapping was learned in mod-ui. Update the matching parameter's
+        # binding and wire its hardware controller so the LCD reflects it without
+        # a pedalboard reload. Idempotent: replayed connect-dump maps are no-ops.
+        if self.current is None:
+            return
+        current = self.current
+        plugin = next((p for p in current.pedalboard.plugins
+                       if p is not None and p.instance_id == instance), None)
+        if plugin is None or plugin.parameters is None:
+            return
+        param = plugin.parameters.get(symbol)
+        if param is None or param.binding == binding:
+            return
+        controller = self.hardware.controllers.get(binding)
+        if controller is None:
+            return
+        param.binding = binding
+        is_footswitch = self._bind_controller_to_param(plugin, param, controller)
+        self._redraw_after_binding(controller, is_footswitch)
+
+    def _bind_controller_to_param(self, plugin, param, controller) -> bool:
+        # Wire a hardware controller to a plugin parameter. Returns True if the
+        # controller is a footswitch (so callers can track footswitch plugins).
+        # TODO possibly use a setter instead of accessing var directly
+        # What if multiple params could map to the same controller?
+        controller.parameter = param  # pyright: ignore[reportAttributeAccessIssue]
+        controller.set_value(param.value)
+        if controller not in plugin.controllers:
+            plugin.controllers.append(controller)
+        if isinstance(controller, Footswitch):
+            # TODO sort this list so selection orders correctly (sort on midi_CC?)
+            plugin.has_footswitch = True
+            controller.set_category(plugin.category)
+            return True
+        elif isinstance(controller, AnalogMidiControl):
+            assert self.current is not None
+            key = "%s:%s" % (plugin.instance_id, param.name)
+            display_info = controller.get_display_info()
+            display_info["category"] = plugin.category
+            self.current.analog_controllers[key] = display_info
+        return False
+
+    def _redraw_after_binding(self, controller, is_footswitch):
+        # Refresh the LCD after a learned binding. Subclasses redraw at their
+        # own granularity.
+        raise NotImplementedError()
