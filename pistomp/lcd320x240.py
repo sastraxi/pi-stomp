@@ -43,12 +43,12 @@ class Lcd(abstract_lcd.Lcd):
         self.flip = flip
         self.spi_speed_mhz = spi_speed_mhz
 
-        # Calculate optimal polling divisor based on LCD speed
-        # 24MHz: 78ms/frame → poll every 80ms (divisor=8)
-        # 48MHz: 39ms/frame → poll every 40ms (divisor=4)
-        # 56MHz: 34ms/frame → poll every 30ms (divisor=3)
-        frame_time_ms = (56.0 / spi_speed_mhz) * 33.6
-        self.poll_divisor = max(1, round(frame_time_ms / 10.0))
+        # Poll cadence is a responsiveness target, not a frame budget. Idle polls
+        # are guarded no-ops and real draws are event-driven + partial, so this is
+        # decoupled from SPI speed (measured: idle LCD poll cost is negligible vs
+        # the ~100 Hz main loop). Divide the 100 Hz loop down to the UI refresh rate.
+        TARGET_UI_HZ = 30
+        self.poll_divisor = max(1, round(100.0 / TARGET_UI_HZ))
 
         # TODO would be good to decouple the actual LCD hardware.  This file should work for any 320x240 display
         if display is None:
