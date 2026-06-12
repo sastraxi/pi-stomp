@@ -14,11 +14,13 @@
 # along with pi-stomp.  If not, see <https://www.gnu.org/licenses/>.
 
 
-from typing import TYPE_CHECKING, Any
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
 
 import common.token as Token
 from pistomp.analogmidicontrol import AnalogMidiControl
-from pistomp.encodermidicontrol import EncoderMidiControl
+from pistomp.current import Current
 from pistomp.footswitch import Footswitch
 from pistomp.footswitch_chords import FootswitchChords
 from pistomp.input.event import ControllerEvent, SwitchEventKind
@@ -34,11 +36,11 @@ class Handler(InputSink):
         self.homedir = None
         self.lcd = None
         self.chord_helper = FootswitchChords()
-        self.current = None
+        self.current: Current | None = None
 
     @property
     def hardware(self) -> "Hardware":
-        raise NotImplementedError()
+        ...
 
     @property
     def lcd_poll_divisor(self) -> int:
@@ -180,7 +182,8 @@ class Handler(InputSink):
         # a pedalboard reload. Idempotent: replayed connect-dump maps are no-ops.
         if self.current is None:
             return
-        plugin = next((p for p in self.current.pedalboard.plugins
+        current = self.current
+        plugin = next((p for p in current.pedalboard.plugins
                        if p is not None and p.instance_id == instance), None)
         if plugin is None or plugin.parameters is None:
             return
@@ -208,12 +211,12 @@ class Handler(InputSink):
             plugin.has_footswitch = True
             controller.set_category(plugin.category)
             return True
-        elif isinstance(controller, (AnalogMidiControl, EncoderMidiControl)):
+        elif isinstance(controller, AnalogMidiControl):
+            assert self.current is not None
             key = "%s:%s" % (plugin.instance_id, param.name)
-            controller.cfg[Token.CATEGORY] = plugin.category  # somewhat LAME adding to cfg dict
-            controller.cfg[Token.TYPE] = controller.type
-            controller.cfg[Token.ID] = controller.id
-            self.current.analog_controllers[key] = controller.cfg
+            display_info = controller.get_display_info()
+            display_info["category"] = plugin.category
+            self.current.analog_controllers[key] = display_info
         return False
 
     def _redraw_after_binding(self, controller, is_footswitch):
