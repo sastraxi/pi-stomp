@@ -20,6 +20,7 @@ Provides a thread-safe bridge between the synchronous main loop and
 async WebSocket communication with mod-ui.
 """
 
+import os
 import asyncio
 import logging
 import queue
@@ -27,13 +28,11 @@ import sys
 import threading
 from typing import Optional
 
-try:
-    import websockets
-except ImportError:
-    logging.error("websockets library not installed. Run: pip install websockets")
-    raise
-
+import websockets
 import uvloop
+
+# Service will restart after this
+MAX_RECONNECT_ATTEMPTS = 4
 
 
 class WebSocketWorker:
@@ -77,6 +76,7 @@ class WebSocketWorker:
     async def _async_worker(self):
         """Connects and drives the message loop, with exponential-backoff reconnection."""
         retry_delay = 1.0
+        reconnect_attempts = 0
 
         while self.running:
             try:
@@ -90,6 +90,7 @@ class WebSocketWorker:
                     self.ws = ws
                     logging.info(f"WebSocket connected to {self.ws_url}")
                     retry_delay = 1.0  # Reset on successful connect
+                    reconnect_attempts = 0  # Reset attempts on success
 
                     # Flush stale messages from before the disconnect.
                     # After a reconnect, mod-ui sends a fresh loading_end which re-syncs state.
@@ -108,8 +109,16 @@ class WebSocketWorker:
             except (websockets.exceptions.WebSocketException, OSError, ConnectionRefusedError) as e:
                 logging.error(f"WebSocket connection error: {e}")
                 self.ws = None
+
+                reconnect_attempts += 1
+                if reconnect_attempts > MAX_RECONNECT_ATTEMPTS:
+                    logging.critical(
+                        f"WebSocket failed to reconnect after {MAX_RECONNECT_ATTEMPTS} attempts. Restarting service..."
+                    )
+                    os._exit(1)
+
                 if self.running:
-                    logging.info(f"Reconnecting in {retry_delay}s...")
+                    logging.info(f"Reconnecting ({reconnect_attempts}/{MAX_RECONNECT_ATTEMPTS}) in {retry_delay}s...")
                     await asyncio.sleep(retry_delay)
                     retry_delay = min(retry_delay * 2, 30.0)
             except Exception as e:
