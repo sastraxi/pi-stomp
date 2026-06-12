@@ -254,29 +254,49 @@ class StrobeWidget(Widget):
             if 0 < wx1:
                 ctx.draw_rectangle(Box(0, y0, wx1, y1 + 1), fill=self._stripe_color)
 
-    # ── partial-column refresh ────────────────────────────────────────────────
+    # ── batched partial-column refresh ─────────────────────────────────────────
 
-    def _refresh_col(self, x: int, w: int) -> None:
-        """Refresh a w-pixel-wide column at x (with wrap at _W), full widget height."""
-        if w <= 0:
-            return
+    # Bridge gaps up to a stripe width when coalescing so a stripe's tail+lead
+    # edges (and overlapping old/new positions) collapse to one transaction,
+    # while the 53 px-spaced stripes stay separate.
+    _MERGE_GAP = STRIPE_W
+
+    def _flush_spans(self, spans: list[tuple[int, int]]) -> None:
+        """Coalesce (x, w) column spans (wrapping at _W) into the minimal set of
+        boxes and push one LCD transaction each. Per-tick overhead — set_window,
+        tobytes/frombytes, rotate — dominates at 80 MHz SPI, so fewer, slightly
+        wider transactions beat many thin ones."""
         bx = self.box
         if bx is None:
             return
-        if x + w <= _W:
-            self.refresh(Box(x, bx.y0, x + w, bx.y1))
-        else:
-            right_w = _W - x
-            if right_w > 0:
-                self.refresh(Box(x, bx.y0, _W, bx.y1))
-            wrap_w = w - right_w
-            if wrap_w > 0:
-                self.refresh(Box(0, bx.y0, wrap_w, bx.y1))
 
-    def _refresh_stripes_at(self, phase_int: int) -> None:
-        for i in range(self.N_STRIPES):
-            sx = (phase_int + i * self.STRIPE_P) % _W
-            self._refresh_col(sx, self.STRIPE_W)
+        runs: list[tuple[int, int]] = []
+        for x, w in spans:
+            if w <= 0:
+                continue
+            x %= _W
+            end = x + w
+            if end <= _W:
+                runs.append((x, end))
+            else:
+                runs.append((x, _W))
+                runs.append((0, end - _W))
+        if not runs:
+            return
+
+        runs.sort()
+        cs, ce = runs[0]
+        for s, e in runs[1:]:
+            if s <= ce + self._MERGE_GAP:
+                ce = max(ce, e)
+            else:
+                self.refresh(Box(cs, bx.y0, ce, bx.y1))
+                cs, ce = s, e
+        self.refresh(Box(cs, bx.y0, ce, bx.y1))
+
+    def _stripe_spans_at(self, phase_int: int) -> list[tuple[int, int]]:
+        return [((phase_int + i * self.STRIPE_P) % _W, self.STRIPE_W)
+                for i in range(self.N_STRIPES)]
 
     # ── tick ─────────────────────────────────────────────────────────────────
 
@@ -290,23 +310,20 @@ class StrobeWidget(Widget):
                 self._has_reading = False
                 self._zone = "accent"
                 self._stripe_color = _ZONE_COLORS["accent"]
-                self._refresh_stripes_at(int(self._phase))
+                self._flush_spans(self._stripe_spans_at(int(self._phase)))
             return
 
         if not self._has_reading:
             self._has_reading = True
-            self._refresh_stripes_at(int(self._phase))
+            self._flush_spans(self._stripe_spans_at(int(self._phase)))
             return
 
         new_zone: Zone = _zone(cents)
         if new_zone != self._zone:
             self._zone = new_zone
             self._stripe_color = _zone_color(cents)
-            self._refresh_stripes_at(int(self._phase))
+            self._flush_spans(self._stripe_spans_at(int(self._phase)))
             return
-
-        if self._zone == "in_tune":
-            return  # frozen — zero SPI writes
 
         K = (self.STRIPE_P / 50.0) * self.VELOCITY_SCALE
         velocity = max(-50.0, min(50.0, cents)) * K
@@ -318,11 +335,14 @@ class StrobeWidget(Widget):
             return
 
         if abs(k) >= self.STRIPE_W:
-            self._refresh_stripes_at(old_phase_int)
-            self._refresh_stripes_at(int(self._phase))
+            # Old and new stripe positions don't overlap; coalescing still merges
+            # any that landed within a stripe width of each other.
+            self._flush_spans(self._stripe_spans_at(old_phase_int)
+                              + self._stripe_spans_at(int(self._phase)))
             return
 
         ak = abs(k)
+        spans: list[tuple[int, int]] = []
         for i in range(self.N_STRIPES):
             old_sx = (old_phase_int + i * self.STRIPE_P) % _W
             if k > 0:
@@ -331,8 +351,9 @@ class StrobeWidget(Widget):
             else:
                 tail_x = (old_sx + self.STRIPE_W - ak) % _W
                 lead_x = (old_sx - ak) % _W
-            self._refresh_col(tail_x, ak)
-            self._refresh_col(lead_x, ak)
+            spans.append((tail_x, ak))
+            spans.append((lead_x, ak))
+        self._flush_spans(spans)
 
 
 # ── TunerPanel ───────────────────────────────────────────────────────────────

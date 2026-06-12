@@ -279,13 +279,11 @@ class Modhandler(Handler):
 
     @property
     def lcd_poll_divisor(self) -> int:
-        # Tick the LCD on every 10 ms main-loop pass (~100 fps) while the
-        # tuner panel is mounted. Strobe's worst-case redraw at STRIPE_W=4
-        # is ~4.3 ms of SPI, well inside the 10 ms budget; typical ticks
-        # are sub-millisecond. Otherwise fall back to the SPI-clock-derived
-        # divisor computed by the LCD itself.
+        # While the tuner panel is mounted, tick at the SPI-scaled strobe rate
+        # (Lcd.tuner_poll_divisor) so average draw stays ~10% of a frame —
+        # higher Hz on faster SPI. Otherwise use the normal UI divisor.
         if self._tuner_panel is not None:
-            return 1
+            return self._lcd.tuner_poll_divisor if self._lcd is not None else 1
         return self._lcd.poll_divisor if self._lcd is not None else 8
 
     def universal_encoder_select(self, direction):

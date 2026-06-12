@@ -50,6 +50,21 @@ class Lcd(abstract_lcd.Lcd):
         TARGET_UI_HZ = 30
         self.poll_divisor = max(1, round(100.0 / TARGET_UI_HZ))
 
+        # Tuner strobe ticks on the fast path while the panel is mounted. Budget
+        # its average draw to ~10% of a frame so the loop stays responsive and dt
+        # stays even. Draw cost is dominated by SPI byte transfer (worst-case full
+        # redraw ≈ 4.3 ms at 24 MHz, scaling inversely with clock; average active
+        # draw ≈ half that) plus a small fixed per-transaction overhead after
+        # batching. Inverting that against the 10%-of-10ms budget gives a divisor
+        # that shrinks as the clock rises — i.e. higher tick Hz on faster SPI
+        # (24 MHz→33 Hz, 48 MHz→50 Hz, 80 MHz→100 Hz).
+        _FRAME_BUDGET_MS = 0.10 * 10.0  # 1.0 ms target draw per frame
+        _AVG_DRAW_REF_MS = 2.0          # avg active strobe SPI at 24 MHz
+        _REF_SPI_MHZ = 24.0
+        _FIXED_MS = 0.8                 # per-tick batched transaction overhead
+        _draw_ms = _AVG_DRAW_REF_MS * _REF_SPI_MHZ / max(1.0, spi_speed_mhz) + _FIXED_MS
+        self.tuner_poll_divisor = min(5, max(1, round(_draw_ms / _FRAME_BUDGET_MS)))
+
         # TODO would be good to decouple the actual LCD hardware.  This file should work for any 320x240 display
         if display is None:
             import board
