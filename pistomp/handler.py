@@ -27,6 +27,8 @@ if TYPE_CHECKING:
 
 
 class Handler(InputSink):
+    ws_bridge: "AsyncWebSocketBridge | None" = None
+
     def __init__(self):
         self.homedir = None
         self.lcd = None
@@ -165,4 +167,13 @@ class Handler(InputSink):
         raise NotImplementedError()
 
     def set_tuner_source_factory(self, factory: "TunerSourceFactory") -> None:
+        pass
+
+    def is_symbol_locked(self, instance_id: str, symbol: str) -> bool:
+        return False
+
+    def show_plugin_panel(self, plugin, panel_cls) -> None:
+        pass
+
+    def hide_plugin_panel(self) -> None:
         pass

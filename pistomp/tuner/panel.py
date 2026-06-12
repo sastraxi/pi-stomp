@@ -13,6 +13,8 @@ from uilib.label import Label
 from uilib.text import Button
 from uilib.widget import Widget
 
+from pistomp.input.event import ControllerEvent
+from pistomp.input.sink import InputSink
 from pistomp.tuner.engine import TunerEngine, TunerReading
 
 _W = 320  # display width
@@ -337,7 +339,7 @@ class StrobeWidget(Widget):
 # ── TunerPanel ───────────────────────────────────────────────────────────────
 
 
-class TunerPanel(Panel):
+class TunerPanel(Panel, InputSink):
     STALE_SECS = 4.0
 
     def __init__(
@@ -397,6 +399,9 @@ class TunerPanel(Panel):
         self.add_sel_widget(self._btn_input)
         self._apply_mute_style(muted)
         self._cents_history: deque[float] = deque(maxlen=3)
+
+    def handle(self, event: ControllerEvent) -> bool:
+        return False
 
     def set_engine(self, engine: TunerEngine) -> None:
         self._engine = engine

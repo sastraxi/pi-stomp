@@ -126,12 +126,11 @@ class Modhandler(Handler):
 
         # Tuner state
         self._tuner_engine: TunerEngine | None = None
-        self._tuner_panel: TunerPanel | None = None
         self._tuner_source_factory: TunerSourceFactory | None = None
         self._tuner_muted: bool = False
 
-        # Plugin panel state (generic full-screen UI for registered plugins)
-        self._plugin_panel = None
+        # Full-screen panel state (tuner or generic plugin panel)
+        self._fullscreen_panel: TunerPanel | None = None
 
         # Callback function map.  Key is the user specified name, value is function from this handler
         # Used for calling handler callbacks pointed to by names which may be user set in the config file
@@ -166,7 +165,7 @@ class Modhandler(Handler):
                 self.audiocard.set_output_muted(False)
             self._tuner_engine.stop()
             self._tuner_engine = None
-            self._tuner_panel = None
+            self._fullscreen_panel = None
         if self._lcd is not None:
             self._lcd.cleanup()
         if self._hardware is not None:
@@ -1159,6 +1158,11 @@ class Modhandler(Handler):
         factory = self._tuner_source_factory or (lambda p, *, name: build_source("jack", p, name=name))
         return factory(port, name=f"pistomp-tuner-{port.split('_')[-1]}")
 
+    @property
+    def _tuner_panel(self) -> TunerPanel | None:
+        """Backwards-compatible alias."""
+        return self._fullscreen_panel if isinstance(self._fullscreen_panel, TunerPanel) else None
+
     def toggle_tuner_enable(self, *argv) -> None:
         if self._tuner_engine is None:
             muted = bool(self.settings.get_setting(Token.TUNER_MUTE))
@@ -1177,8 +1181,8 @@ class Modhandler(Handler):
                 muted=muted,
                 input_port=input_port,
             )
-            self._tuner_panel = panel
-            self.lcd.show_tuner_panel(panel)
+            self._fullscreen_panel = panel
+            self.lcd.show_plugin_panel(panel)
         else:
             self._dismiss_tuner()
 
@@ -1186,11 +1190,11 @@ class Modhandler(Handler):
         if self._tuner_muted:
             self.audiocard.set_output_muted(False)
             self._tuner_muted = False
-        self.lcd.hide_tuner_panel()
+        self.lcd.hide_plugin_panel()
         if self._tuner_engine is not None:
             self._tuner_engine.stop()
             self._tuner_engine = None
-        self._tuner_panel = None
+        self._fullscreen_panel = None
 
     def _toggle_tuner_mute(self) -> None:
         new_muted = not self._tuner_muted
@@ -1218,19 +1222,19 @@ class Modhandler(Handler):
 
     def show_plugin_panel(self, plugin, panel_cls) -> None:
         """Open a full-screen panel for *plugin* using the registered class."""
-        if self._plugin_panel is not None:
+        if self._fullscreen_panel is not None:
             return  # already open
         panel = panel_cls(
             plugin=plugin,
             handler=self,
             on_dismiss=self.hide_plugin_panel,
         )
-        self._plugin_panel = panel
+        self._fullscreen_panel = panel
         self.lcd.show_plugin_panel(panel)
 
     def hide_plugin_panel(self) -> None:
         """Dismiss the current plugin panel and clean up."""
-        if self._plugin_panel is None:
+        if self._fullscreen_panel is None:
             return
         self.lcd.hide_plugin_panel()
-        self._plugin_panel = None
+        self._fullscreen_panel = None
