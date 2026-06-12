@@ -11,6 +11,7 @@ from tests.conftest import PROJECT_ROOT
 from tests import pedalboard_fixtures
 from pistomp.lcd320x240 import Lcd
 import common.token as Token
+from modalapi.connections import Connection, Endpoint, EndpointKind
 
 
 class MockObject:
@@ -59,7 +60,15 @@ def setup_main_ui(instance):
             instance_id="chorus", is_bypassed=lambda: False, category="Modulator", has_footswitch=False, controllers=[]
         ),
     ]
-    mock_pedalboard = MockObject(title="Rock Rig", plugins=plugins, connections=[])
+    ids = [p.instance_id for p in plugins]  # pyright: ignore[reportAttributeAccessIssue]
+    connections = [
+        Connection(
+            src=Endpoint(kind=EndpointKind.PLUGIN, id=ids[i], port_symbol="", port_idx=0),
+            dst=Endpoint(kind=EndpointKind.PLUGIN, id=ids[i + 1], port_symbol="", port_idx=0),
+        )
+        for i in range(len(ids) - 1)
+    ]
+    mock_pedalboard = MockObject(title="Rock Rig", plugins=plugins, connections=connections)
     mock_current = MockObject(
         pedalboard=mock_pedalboard,
         presets={0: "Clean", 1: "Lead"},

@@ -14,6 +14,7 @@ from common.parameter import Parameter
 from modalapi.plugin import Plugin
 import common.token as Token
 from tests.types import SystemFixture
+from modalapi.connections import Connection, Endpoint, EndpointKind
 
 
 # ---------------------------------------------------------------------------
@@ -403,6 +404,12 @@ def test_v3_snapshot_sequence_applies_bypass_via_ws(v3_system: SystemFixture, ma
     drive = make_plugin("drive", category="Distortion", bypassed=False, has_footswitch=False)
     delay = make_plugin("delay", category="Delay", bypassed=False, has_footswitch=False)
     handler.current.pedalboard.plugins = [drive, delay]
+    handler.current.pedalboard.connections = [
+        Connection(
+            src=Endpoint(kind=EndpointKind.PLUGIN, id="drive", port_symbol="", port_idx=0),
+            dst=Endpoint(kind=EndpointKind.PLUGIN, id="delay", port_symbol="", port_idx=0),
+        )
+    ]
     handler.lcd.link_data(handler.pedalboard_list, handler.current, hw.footswitches)
     handler.lcd.draw_main_panel()
     snapshot("clean")  # snapshot 0: both active
@@ -439,6 +446,12 @@ def test_v3_reconnect_dump_reseeds_bypass_via_poll(v3_system: SystemFixture, mak
     drive = make_plugin("drive", category="Distortion", bypassed=False, has_footswitch=False)
     delay = make_plugin("delay", category="Delay", bypassed=False, has_footswitch=False)
     handler.current.pedalboard.plugins = [drive, delay]
+    handler.current.pedalboard.connections = [
+        Connection(
+            src=Endpoint(kind=EndpointKind.PLUGIN, id="drive", port_symbol="", port_idx=0),
+            dst=Endpoint(kind=EndpointKind.PLUGIN, id="delay", port_symbol="", port_idx=0),
+        )
+    ]
     handler.lcd.link_data(handler.pedalboard_list, handler.current, hw.footswitches)
     handler.lcd.draw_main_panel()
     snapshot("both_active")

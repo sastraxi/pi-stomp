@@ -2,9 +2,8 @@
 """Analyse pedalboard grid layouts against the real layout pipeline.
 
 Loads one or more .pedalboard bundles via the same lilv + MOD-Desktop path
-the device uses, runs modalapi.layout.build_layout, and reports metrics +
-an ASCII render of the grid. Intended as a scratchpad for iterating on the
-layout algorithm (the DP fold compaction vs. the original layered layout).
+the device uses, runs modalapi.layout.build_layout_compress, and reports
+metrics + an ASCII render of the grid.
 
 Run via ./analyze_layout.sh (sets up lilv on PYTHONPATH/DYLD_LIBRARY_PATH).
 Requires MOD Desktop running at http://127.0.0.1:18181 to resolve plugin
@@ -30,9 +29,7 @@ from PIL import ImageColor, ImageFont  # noqa: E402
 
 from modalapi.layout import (  # noqa: E402
     Layout,
-    build_layout,
     build_layout_compress,
-    build_layout_dp,
     layout_cost,
     occupied_cells,
 )
@@ -266,33 +263,27 @@ def render_png(layout: Layout, plugins_by_id: dict, path: Path) -> None:
     lcd.image.save(path)
 
 
-def load_layout(bundle: Path, algo: str = "dp", max_rows: int = 4) -> tuple[Pedalboard, Layout]:
+def load_layout(bundle: Path, max_rows: int = 4) -> tuple[Pedalboard, Layout]:
     title = bundle.stem
     pb = Pedalboard(title, str(bundle), root_uri=MOD_ROOT_URI)
     pb.load_bundle(str(bundle), {})
     ids = [p.instance_id.lstrip("/") for p in pb.plugins]
-    if algo == "dp":
-        layout = build_layout_dp(ids, pb.connections, height_cap=max_rows)
-    elif algo == "compress":
-        layout = build_layout_compress(ids, pb.connections, height_cap=max_rows)
-    else:
-        layout = build_layout(ids, pb.connections)
+    layout = build_layout_compress(ids, pb.connections, height_cap=max_rows)
     return pb, layout
 
 
-def render_for(pb: Pedalboard, layout: Layout, stem: str, algo: str) -> tuple[Path, int]:
-    # Both algos write the baseline name in place so `git diff` shows the change.
+def render_for(pb: Pedalboard, layout: Layout, stem: str) -> tuple[Path, int]:
     out = RENDER_DIR / f"{stem}.png"
     plugins_by_id = {p.instance_id.lstrip("/"): p for p in pb.plugins}
     render_png(layout, plugins_by_id, out)
     return out, count_violations(layout)
 
 
-def print_full(bundle: Path, algo: str = "dp", max_rows: int = 4, png: bool = True) -> Metrics:
-    pb, layout = load_layout(bundle, algo, max_rows)
+def print_full(bundle: Path, max_rows: int = 4, png: bool = True) -> Metrics:
+    pb, layout = load_layout(bundle, max_rows)
     m = compute_metrics(bundle.stem, len(pb.plugins), layout)
     if png:
-        out, violations = render_for(pb, layout, bundle.stem, algo)
+        out, violations = render_for(pb, layout, bundle.stem)
         note = f"  ({violations} through-plugin wires)" if violations else ""
         print(f"png: {out}{note}")
     print(f"\n=== {m.title} ===")
@@ -326,10 +317,7 @@ def main() -> int:
     ap.add_argument("bundles", nargs="*", help="Pedalboard bundle paths")
     ap.add_argument("--all", action="store_true", help="Analyse every board in the MOD Desktop dirs")
     ap.add_argument("--summary", action="store_true", help="One metrics row per board, no ASCII grid")
-    ap.add_argument(
-        "--algo", choices=("sugiyama", "dp", "compress"), default="dp", help="Layout algorithm (default: dp)"
-    )
-    ap.add_argument("--max-rows", type=int, default=4, help="DP height_cap (default: 4)")
+    ap.add_argument("--max-rows", type=int, default=4, help="height_cap (default: 4)")
     ap.add_argument("--no-png", action="store_true", help=f"Skip writing PNG renders to {RENDER_DIR}")
     args = ap.parse_args()
 
@@ -347,12 +335,12 @@ def main() -> int:
             continue
         try:
             if args.summary:
-                pb, layout = load_layout(b, args.algo, args.max_rows)
+                pb, layout = load_layout(b, args.max_rows)
                 if not args.no_png:
-                    render_for(pb, layout, b.stem, args.algo)
+                    render_for(pb, layout, b.stem)
                 metrics.append(compute_metrics(b.stem, len(pb.plugins), layout))
             else:
-                metrics.append(print_full(b, args.algo, args.max_rows, png=not args.no_png))
+                metrics.append(print_full(b, args.max_rows, png=not args.no_png))
         except Exception as e:  # keep going across a batch
             print(f"FAILED {b.stem}: {e}", file=sys.stderr)
 

@@ -4,13 +4,15 @@ Takes a flat list of plugins + parsed Connections (from modalapi.pedalboard)
 and produces a Layout: a 2D column-major grid (with holes) and a normalised
 edge list where every edge spans exactly one column.
 
-Algorithm (Sugiyama-lite):
+Algorithm (column-compression DP):
   1. Build a DAG over endpoints (plugins + capture/playback hardware ports).
   2. Longest-path layering: each node's column = longest path from any source.
   3. Insert dummy nodes for edges spanning >1 column so every edge is local.
   4. Barycentric sweeps to order rows within each layer (~4 passes,
      alternating direction) to reduce crossings.
-  5. Assign integer rows; pad columns with None to form a rectangular grid.
+  5. Merge contiguous layers into columns via a cut-point DP that minimises
+     routing violations while keeping the grid within the viewport.
+  6. Assign integer rows; pad columns with None to form a rectangular grid.
 """
 
 from __future__ import annotations
@@ -235,155 +237,6 @@ def barycentric_order(
                 sort_by(succs, layer)
 
 
-def _compact_hw_only_columns(
-    nodes: dict[str, LayoutNode],
-    edges: list[LayoutEdge],
-) -> tuple[dict[str, LayoutNode], list[LayoutEdge]]:
-    """Drop all source/sink nodes (and any column they leave empty) and
-    renumber remaining layers contiguously. Edges touching dropped nodes are
-    removed — wires from capture/to playback aren't visualised today; the
-    leftmost plugin's input port already implies "audio in", same for outputs.
-
-    We drop hw nodes *unconditionally*, not just hw-only columns: a leaf
-    plugin pinned at layer 0 alongside capture nodes would otherwise leave
-    a phantom row where a wire emanates from an invisible source cell.
-    """
-    kept_nodes = {nid: n for nid, n in nodes.items() if n.kind in ("plugin", "dummy")}
-    groups = _layer_groups(kept_nodes)
-    keep_layers = [i for i, g in enumerate(groups) if g]
-    old_to_new = {old: new for new, old in enumerate(keep_layers)}
-    for n in kept_nodes.values():
-        n.layer = old_to_new[n.layer]
-    kept_edges = [e for e in edges if e.src.id in kept_nodes and e.dst.id in kept_nodes]
-    return kept_nodes, kept_edges
-
-
-def build_layout(
-    plugin_instance_ids: Iterable[str],
-    connections: Iterable[Connection],
-) -> Layout:
-    """End-to-end: plugins + connections → Layout."""
-    base_nodes = build_nodes(plugin_instance_ids, connections)
-    longest_path_layers(base_nodes, connections)
-    nodes, edges = insert_dummies(base_nodes, connections)
-    barycentric_order(nodes, edges)
-    nodes, edges = _compact_hw_only_columns(nodes, edges)
-    # Re-pack rows after dropping hardware-only layers so each layer starts at row 0.
-    for layer in _layer_groups(nodes):
-        layer.sort(key=lambda n: n.row)
-        for i, n in enumerate(layer):
-            n.row = i
-
-    groups = _layer_groups(nodes)
-    n_rows = max((len(g) for g in groups), default=0)
-    cols: list[list[Optional[LayoutNode]]] = []
-    for layer in groups:
-        col: list[Optional[LayoutNode]] = [None] * n_rows
-        for n in layer:
-            col[n.row] = n
-        cols.append(col)
-    return Layout(cols=cols, edges=edges)
-
-
-# --------------------------------------------------------------------------- #
-# Alternative layout: topological snake (serpentine).
-#
-# Strategy: flatten the audio DAG to a single topological order, then lay it
-# out column-major in a serpentine — fill a column top->down, step one column
-# right, fill bottom->up, repeat. Horizontal motion is always left->right;
-# only the vertical direction alternates, so wires never run right->left.
-# Trades the layered layout's explicit parallel lanes for a compact ribbon
-# that collapses long linear chains into the vertical scroll axis. Real
-# connections are emitted as direct edges so wires still convey structure.
-# --------------------------------------------------------------------------- #
-
-
-def topological_order(
-    plugin_instance_ids: Iterable[str],
-    connections: Iterable[Connection],
-) -> list[str]:
-    """Kahn's algorithm over the plugin-only audio DAG. Ties (and any nodes
-    left over from a cycle) break by original input order for stability."""
-    ids = [pid.lstrip("/") for pid in plugin_instance_ids if pid.lstrip("/")]
-    idset = set(ids)
-    order_index = {pid: i for i, pid in enumerate(ids)}
-
-    succs: dict[str, list[str]] = {pid: [] for pid in ids}
-    indeg: dict[str, int] = {pid: 0 for pid in ids}
-    seen: set[tuple[str, str]] = set()
-    for c in audio_connections(connections):
-        s, d = c.src.id, c.dst.id
-        if s in idset and d in idset and s != d and (s, d) not in seen:
-            seen.add((s, d))
-            succs[s].append(d)
-            indeg[d] += 1
-
-    ready = sorted((pid for pid in ids if indeg[pid] == 0), key=lambda pid: order_index[pid])
-    out: list[str] = []
-    while ready:
-        n = ready.pop(0)
-        out.append(n)
-        for m in succs[n]:
-            indeg[m] -= 1
-            if indeg[m] == 0:
-                # Insert keeping `ready` sorted by original order.
-                lo, hi = 0, len(ready)
-                while lo < hi:
-                    mid = (lo + hi) // 2
-                    if order_index[ready[mid]] < order_index[m]:
-                        lo = mid + 1
-                    else:
-                        hi = mid
-                ready.insert(lo, m)
-
-    if len(out) < len(ids):  # cycle: append the stragglers in input order
-        out += [pid for pid in ids if pid not in set(out)]
-    return out
-
-
-def snake_position(index: int, max_rows: int) -> tuple[int, int]:
-    """Serpentine (col, row) for the `index`-th node. Even columns run
-    top->down, odd columns bottom->up."""
-    col, pos = divmod(index, max_rows)
-    row = pos if col % 2 == 0 else (max_rows - 1 - pos)
-    return col, row
-
-
-def build_layout_snake(
-    plugin_instance_ids: Iterable[str],
-    connections: Iterable[Connection],
-    max_rows: int = 4,
-) -> Layout:
-    """End-to-end snake layout. `max_rows` is the soft column height before
-    wrapping to the next column."""
-    order = topological_order(plugin_instance_ids, connections)
-    nodes: dict[str, LayoutNode] = {}
-    for i, pid in enumerate(order):
-        col, row = snake_position(i, max_rows)
-        nodes[pid] = LayoutNode(id=pid, kind="plugin", layer=col, row=row)
-
-    # Direct edges for every real plugin->plugin audio connection. No dummies:
-    # the snake renderer routes arbitrary spans, unlike the layered gutter.
-    edges: list[LayoutEdge] = []
-    seen: set[tuple[str, str, int, int]] = set()
-    for c in audio_connections(connections):
-        src, dst = nodes.get(c.src.id), nodes.get(c.dst.id)
-        if src is None or dst is None:
-            continue
-        key = (src.id, dst.id, c.src.port_idx, c.dst.port_idx)
-        if key in seen:
-            continue
-        seen.add(key)
-        edges.append(LayoutEdge(src, dst, c.src.port_idx, c.dst.port_idx))
-
-    n_cols = max((n.layer for n in nodes.values()), default=-1) + 1
-    n_rows = max((n.row for n in nodes.values()), default=-1) + 1
-    cols: list[list[Optional[LayoutNode]]] = [[None] * n_rows for _ in range(n_cols)]
-    for n in nodes.values():
-        cols[n.layer][n.row] = n
-    return Layout(cols=cols, edges=edges)
-
-
 # --------------------------------------------------------------------------- #
 # Heuristic (shared with the analysis tooling).
 # --------------------------------------------------------------------------- #
@@ -517,103 +370,6 @@ def layout_cost(
         + infeasible_penalty * routing_violations(layout)
         + span_weight * span
     )
-
-
-# --------------------------------------------------------------------------- #
-# Alternative layout: DP serpentine fold (post-process of the layered build).
-#
-# Starts from build_layout's column-major reading order (a topology-respecting
-# linearisation) and folds it into a serpentine, but — unlike the fixed-pitch
-# snake — chooses the fold height that minimises layout_cost and breaks a
-# column early whenever continuing it would route a wire *through* an
-# intervening plugin. Horizontal motion stays left->right (no right-to-left);
-# only the vertical direction alternates per column.
-# --------------------------------------------------------------------------- #
-
-
-def _reading_order(plugin_instance_ids: Iterable[str], connections: Iterable[Connection]) -> list[str]:
-    """Plugin ids in the original layered layout's column-major reading order.
-    Preserves the Sugiyama left-to-right flow as the fold linearisation."""
-    base = build_layout(plugin_instance_ids, connections)
-    return [n.id for col in base.cols for n in col if n is not None and n.kind == "plugin"]
-
-
-def _fold_columns(order: list[str], preds: dict[str, set[str]], height: int) -> list[list[str]]:
-    """Greedily chunk `order` into column runs of up to `height`, breaking a
-    run early when the next node connects to a non-adjacent member of the same
-    run (a vertical wire would otherwise pass over an intervening plugin)."""
-    columns: list[list[str]] = []
-    i, n = 0, len(order)
-    while i < n:
-        run = [order[i]]
-        i += 1
-        while len(run) < height and i < n:
-            cand = order[i]
-            # A predecessor sitting earlier than run[-1] would be skipped over.
-            if any(p in run and p != run[-1] for p in preds[cand]):
-                break
-            run.append(cand)
-            i += 1
-        columns.append(run)
-    return columns
-
-
-def _orient_columns(columns: list[list[str]], connections: Iterable[Connection]) -> dict[str, int]:
-    """Assign each plugin a row, choosing each column's vertical orientation
-    (as-is vs. flipped) to minimise misalignment with already-placed columns.
-
-    A blanket serpentine flip of odd columns gives short wraps for a linear
-    chain but *crosses* parallel branches (A→B over C→D). Picking the cheaper
-    of the two orientations per column recovers boustrophedon for chains and
-    keeps parallel branches on aligned rows."""
-    col_of = {pid: c for c, run in enumerate(columns) for pid in run}
-    cross_preds: dict[str, list[str]] = defaultdict(list)
-    for c in audio_connections(connections):
-        s, d = c.src.id, c.dst.id
-        if s in col_of and d in col_of and col_of[s] < col_of[d]:
-            cross_preds[d].append(s)
-
-    rows: dict[str, int] = {}
-
-    def misalignment(seq: list[str]) -> float:
-        return sum(abs(rows[p] - r) for r, pid in enumerate(seq) for p in cross_preds[pid] if p in rows)
-
-    for c, run in enumerate(columns):
-        if c == 0:
-            order = list(run)
-        else:
-            fwd, rev = list(run), list(reversed(run))
-            order = rev if misalignment(rev) < misalignment(fwd) else fwd
-        for r, pid in enumerate(order):
-            rows[pid] = r
-    return rows
-
-
-def _layout_from_columns(columns: list[list[str]], connections: Iterable[Connection]) -> Layout:
-    n_cols = len(columns)
-    n_rows = max((len(c) for c in columns), default=0)
-    rows = _orient_columns(columns, connections)
-    nodes: dict[str, LayoutNode] = {}
-    cols: list[list[Optional[LayoutNode]]] = [[None] * n_rows for _ in range(n_cols)]
-    for c_idx, run in enumerate(columns):
-        for pid in run:
-            row = rows[pid]
-            node = LayoutNode(id=pid, kind="plugin", layer=c_idx, row=row)
-            nodes[pid] = node
-            cols[c_idx][row] = node
-
-    edges: list[LayoutEdge] = []
-    seen: set[tuple[str, str, int, int]] = set()
-    for c in audio_connections(connections):
-        src, dst = nodes.get(c.src.id), nodes.get(c.dst.id)
-        if src is None or dst is None:
-            continue
-        key = (src.id, dst.id, c.src.port_idx, c.dst.port_idx)
-        if key in seen:
-            continue
-        seen.add(key)
-        edges.append(LayoutEdge(src, dst, c.src.port_idx, c.dst.port_idx))
-    return Layout(cols=cols, edges=edges)
 
 
 def _route_dp_edges(layout: Layout) -> None:
@@ -850,38 +606,4 @@ def build_layout_compress(
         if cost < best_cost:
             best, best_cost = layout, cost
     assert best is not None
-    return best
-
-
-def build_layout_dp(
-    plugin_instance_ids: Iterable[str],
-    connections: Iterable[Connection],
-    height_cap: int = 4,
-    max_height: int = 8,
-) -> Layout:
-    """Fold the layered layout into the min-cost serpentine. Searches fold
-    height in [1, max_height] and returns the arrangement minimising
-    layout_cost(..., height_cap). The winning layout's multi-column edges are
-    then dummy-routed through gap cells for the gutter renderer."""
-    order = _reading_order(plugin_instance_ids, connections)
-    if not order:
-        return Layout()
-
-    idset = set(order)
-    preds: dict[str, set[str]] = {pid: set() for pid in order}
-    for c in audio_connections(connections):
-        if c.src.id in idset and c.dst.id in idset and c.src.id != c.dst.id:
-            preds[c.dst.id].add(c.src.id)
-
-    best: Optional[Layout] = None
-    best_cost = float("inf")
-    for h in range(1, max_height + 1):
-        # Search on direct edges so layout_cost's routing_violations reflects
-        # true feasibility; dummy-routing happens once, on the winner.
-        layout = _layout_from_columns(_fold_columns(order, preds, h), connections)
-        cost = layout_cost(layout, height_cap)
-        if cost < best_cost:
-            best, best_cost = layout, cost
-    assert best is not None
-    _route_dp_edges(best)
     return best
