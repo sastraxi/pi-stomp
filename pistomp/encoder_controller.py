@@ -23,8 +23,11 @@ import bisect
 import common.util as util
 import pistomp.controller as controller
 import pistomp.encoder as encoder
-from pistomp.handler import Handler
 from common.parameter import Parameter, Type
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from pistomp.handler import Handler
 
 import logging
 
