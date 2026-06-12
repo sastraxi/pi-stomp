@@ -18,9 +18,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-import common.token as Token
 from pistomp.analogmidicontrol import AnalogMidiControl
 from pistomp.current import Current
+from pistomp.encoder_controller import EncoderController
 from pistomp.footswitch import Footswitch
 from pistomp.footswitch_chords import FootswitchChords
 from pistomp.input.event import ControllerEvent, SwitchEventKind
@@ -39,8 +39,7 @@ class Handler(InputSink):
         self.current: Current | None = None
 
     @property
-    def hardware(self) -> "Hardware":
-        ...
+    def hardware(self) -> "Hardware": ...
 
     @property
     def lcd_poll_divisor(self) -> int:
@@ -184,8 +183,7 @@ class Handler(InputSink):
         if self.current is None:
             return
         current = self.current
-        plugin = next((p for p in current.pedalboard.plugins
-                       if p is not None and p.instance_id == instance), None)
+        plugin = next((p for p in current.pedalboard.plugins if p is not None and p.instance_id == instance), None)
         if plugin is None or plugin.parameters is None:
             return
         param = plugin.parameters.get(symbol)
@@ -212,8 +210,7 @@ class Handler(InputSink):
             plugin.has_footswitch = True
             controller.set_category(plugin.category)
             return True
-        elif isinstance(controller, AnalogMidiControl):
-            assert self.current is not None
+        elif isinstance(controller, (AnalogMidiControl, EncoderController)):
             key = "%s:%s" % (plugin.instance_id, param.name)
             display_info = controller.get_display_info()
             display_info["category"] = plugin.category
