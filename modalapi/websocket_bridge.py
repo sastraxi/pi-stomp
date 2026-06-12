@@ -33,6 +33,8 @@ except ImportError:
     logging.error("websockets library not installed. Run: pip install websockets")
     raise
 
+import uvloop
+
 
 class WebSocketWorker:
     """
@@ -61,14 +63,16 @@ class WebSocketWorker:
 
     def run(self):
         """Entry point for the background thread."""
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
+        logging.info("Using uvloop for WebSocket bridge")
+
         try:
-            loop.run_until_complete(self._async_worker())
+            uvloop.run(self._async_worker())
         except Exception as e:
-            logging.error(f"WebSocket worker crashed: {e}", exc_info=True)
-        finally:
-            loop.close()
+            # uvloop.run raises if the loop was cancelled or crashed
+            if self.running:
+                logging.error(f"WebSocket worker crashed: {e}", exc_info=True)
+            else:
+                logging.debug(f"WebSocket worker stopped: {e}")
 
     async def _async_worker(self):
         """Connects and drives the message loop, with exponential-backoff reconnection."""
