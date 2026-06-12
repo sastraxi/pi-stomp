@@ -10,6 +10,7 @@ import pytest
 from tests.conftest import PROJECT_ROOT
 from pistomp.lcd320x240 import Lcd
 import common.token as Token
+from uilib.misc import InputEvent
 
 
 class MockObject:
@@ -40,6 +41,36 @@ def lcd(fake_lcd, mock_handler):
 
 
 def setup_main_ui(instance):
+    mock_gain = MockObject(
+        name="Gain",
+        instance_id="distortion",
+        value=0.5,
+        minimum=0.0,
+        maximum=1.0,
+        type=MockObject(value=0),
+        get_taper=lambda: 1,
+        format=lambda v: f"{v:.2f}",
+    )
+    mock_time = MockObject(
+        name="Time",
+        instance_id="delay",
+        value=0.3,
+        minimum=0.0,
+        maximum=1.0,
+        type=MockObject(value=0),
+        get_taper=lambda: 1,
+        format=lambda v: f"{v:.2f}",
+    )
+    mock_mix = MockObject(
+        name="Mix",
+        instance_id="reverb",
+        value=0.4,
+        minimum=0.0,
+        maximum=1.0,
+        type=MockObject(value=0),
+        get_taper=lambda: 1,
+        format=lambda v: f"{v:.2f}",
+    )
     plugins = [
         MockObject(
             instance_id="distortion",
@@ -47,15 +78,31 @@ def setup_main_ui(instance):
             category="Distortion",
             has_footswitch=True,
             controllers=[],
+            parameters={":bypass": MockObject(name=":bypass"), "gain": mock_gain},
         ),
         MockObject(
-            instance_id="delay", is_bypassed=lambda: False, category="Delay", has_footswitch=True, controllers=[]
+            instance_id="delay",
+            is_bypassed=lambda: False,
+            category="Delay",
+            has_footswitch=True,
+            controllers=[],
+            parameters={":bypass": MockObject(name=":bypass"), "time": mock_time},
         ),
         MockObject(
-            instance_id="reverb", is_bypassed=lambda: True, category="Reverb", has_footswitch=True, controllers=[]
+            instance_id="reverb",
+            is_bypassed=lambda: True,
+            category="Reverb",
+            has_footswitch=True,
+            controllers=[],
+            parameters={":bypass": MockObject(name=":bypass"), "mix": mock_mix},
         ),
         MockObject(
-            instance_id="chorus", is_bypassed=lambda: False, category="Modulator", has_footswitch=False, controllers=[]
+            instance_id="chorus",
+            is_bypassed=lambda: False,
+            category="Modulator",
+            has_footswitch=False,
+            controllers=[],
+            parameters={":bypass": MockObject(name=":bypass")},
         ),
     ]
     mock_pedalboard = MockObject(title="Rock Rig", plugins=plugins)
@@ -131,6 +178,17 @@ def test_parameter_dialog_snapshot(lcd, snapshot):
         format=lambda v: f"{v:.2f}",
     )
     instance.draw_parameter_dialog(mock_param)
+    snapshot()
+
+
+def test_plugin_longpress_opens_parameter_menu(lcd, snapshot):
+    """Long-click on a selected plugin widget opens the parameter menu."""
+    instance, _ = lcd
+    setup_main_ui(instance)
+    # Select the first plugin widget (distortion)
+    instance.main_panel.sel_widget(instance.w_plugins[0])
+    # Simulate the long-press event that travels through the panel stack
+    instance.main_panel.input_event(InputEvent.LONG_CLICK)
     snapshot()
 
 
