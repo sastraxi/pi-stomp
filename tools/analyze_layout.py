@@ -4,7 +4,7 @@
 Loads one or more .pedalboard bundles via the same lilv + MOD-Desktop path
 the device uses, runs modalapi.layout.build_layout, and reports metrics +
 an ASCII render of the grid. Intended as a scratchpad for iterating on the
-layout algorithm (e.g. the vertical-snake compaction).
+layout algorithm (the DP fold compaction vs. the original layered layout).
 
 Run via ./analyze_layout.sh (sets up lilv on PYTHONPATH/DYLD_LIBRARY_PATH).
 Requires MOD Desktop running at http://127.0.0.1:18181 to resolve plugin
@@ -19,7 +19,6 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -27,22 +26,36 @@ from pathlib import Path
 # Keep the repo root importable regardless of CWD.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from PIL import Image, ImageDraw, ImageFont  # noqa: E402
+from PIL import ImageColor, ImageFont  # noqa: E402
 
-from modalapi.layout import Layout, LayoutEdge, build_layout  # noqa: E402
+from modalapi.layout import (  # noqa: E402
+    Layout,
+    build_layout,
+    build_layout_dp,
+    layout_cost,
+    occupied_cells,
+)
 from modalapi.pedalboard import Pedalboard  # noqa: E402
-# Geometry + wire colors: reuse the real GridPanel so renders match the device.
+from uilib.box import Box  # noqa: E402
+
+# Render through the real device stack so PNGs are pixel-faithful to the LCD.
 from uilib.gridpanel import (  # noqa: E402
     CHANNEL,
-    DEFAULT_WIRE_COLORS,
     ROW_GAP,
     TILE_H,
     TILE_W,
     GridPanel,
 )
+from uilib.panel import Panel, PanelStack  # noqa: E402
+from uilib.text import TextWidget  # noqa: E402
 
 MOD_ROOT_URI = "http://127.0.0.1:18181/"
-MOD_PEDALBOARD_DIR = Path.home() / "Documents" / "MOD Desktop" / "pedalboards"
+# Boards live in two places: factory/GSYNTH bundles ship inside the app, user
+# boards land in ~/Documents. --all scans both.
+MOD_PEDALBOARD_DIRS = (
+    Path("/Applications/MOD Desktop.app/Contents/Resources/pedalboards"),
+    Path.home() / "Documents" / "MOD Desktop" / "pedalboards",
+)
 RENDER_DIR = Path(__file__).resolve().parent / "renders"
 
 # Visible LCD grid band (see lcd320x240.draw_plugins): 320w x 130h.
@@ -57,8 +70,8 @@ class Metrics:
     n_plugins: int
     cols: int
     rows: int
-    parallelism: int      # max plugin tiles in any single column (layer)
-    dummies: int          # waypoint cells inserted for multi-column edges
+    parallelism: int  # max plugin tiles in any single column (layer)
+    dummies: int  # waypoint cells inserted for multi-column edges
     plugin_cells: int
     total_cells: int
 
@@ -132,109 +145,161 @@ def ascii_grid(layout: Layout, cell_w: int = 10) -> str:
 
 
 # --------------------------------------------------------------------------- #
-# PNG render — faithful to GridPanel: same cell geometry, same 3-segment
-# gutter wire routing (out-stub -> vertical lane -> in-stub).
+# PNG render — drive the real device stack (PanelStack + GridPanel + tile
+# widgets) and capture the composited LCD image. Tile coloring and wire
+# routing are exactly what the device draws; we own no drawing code here.
 # --------------------------------------------------------------------------- #
 
 MARGIN = 8
-BG = (24, 24, 28)
-TILE_FILL = (60, 64, 72)
-TILE_OUTLINE = (180, 184, 192)
-DUMMY_DOT = (90, 90, 100)
-TEXT_COLOR = (235, 235, 240)
+
+# Mirror of lcd320x240.Lcd's tile palette so the analyzer's tiles match the
+# device pixel-for-pixel (the Lcd ctor needs SPI/GPIO, so we can't reuse it).
+_BACKGROUND = (0, 0, 0)
+_FOREGROUND = (255, 255, 255)
+_DEFAULT_PLUGIN_COLOR = "Silver"
+_CATEGORY_COLOR_MAP = {
+    "Delay": "MediumVioletRed",
+    "Distortion": "Lime",
+    "Dynamics": "OrangeRed",
+    "Filter": (205, 133, 40),
+    "Generator": "Indigo",
+    "Midiutility": "Gray",
+    "Modulator": (50, 50, 255),
+    "Reverb": (20, 160, 255),
+    "Simulator": "SaddleBrown",
+    "Spacial": "Gray",
+    "Spectral": "Red",
+    "Utility": "Gray",
+}
+_FONTS_DIR = Path(__file__).resolve().parent.parent / "fonts"
+_PLUGIN_FONT = ImageFont.truetype(str(_FONTS_DIR / "DejaVuSans.ttf"), 20)
+_PLUGIN_LABEL_LENGTH = 7
 
 
-def _edge_endpoints(edge: LayoutEdge):
-    """Replica of GridPanel._edge_endpoints (instance-free): resolve
-    (src_xy, dst_xy, lane_x) for one column-spanning edge."""
-    src, dst = edge.src, edge.dst
-    clamp = GridPanel._clamp_port
-    src_y = clamp(src.carried_src_port if src.kind == "dummy" else edge.src_port)
-    dst_y = clamp(dst.carried_src_port if dst.kind == "dummy" else edge.dst_port)
-    lane = clamp(edge.src_port)
-    src_xy = GridPanel.out_port_xy(src.layer, src.row, src_y)
-    if dst.kind == "dummy":
-        dst_xy = GridPanel.out_port_xy(dst.layer, dst.row, dst_y)
+class _CaptureLcd:
+    """Minimal LcdBase: PanelStack composites into an image and hands it to
+    update(); we keep a copy so the render can be saved."""
+
+    def __init__(self, size: tuple[int, int]) -> None:
+        self._size = size
+        self.image = None
+
+    def dimensions(self) -> tuple[int, int]:
+        return self._size
+
+    def default_format(self) -> str:
+        return "RGB"
+
+    def update(self, image, box=None) -> None:
+        self.image = image.copy()
+
+
+def _get_plugin_color(plugin):
+    category = getattr(plugin, "category", None)
+    if not category:
+        return _DEFAULT_PLUGIN_COLOR
+    c = _CATEGORY_COLOR_MAP.get(category, _DEFAULT_PLUGIN_COLOR)
+    if isinstance(c, tuple):
+        return c
+    try:
+        return ImageColor.getrgb(c)
+    except ValueError:
+        return _FOREGROUND
+
+
+def _shorten(label: str, width: int) -> str:
+    while label and _PLUGIN_FONT.getbbox(label)[2] > width:
+        label = label[:-1]
+    return label
+
+
+def _color_tile(tile, plugin) -> None:
+    # Same branch as lcd320x240.color_plugin().
+    color = _get_plugin_color(plugin)
+    if plugin.is_bypassed():
+        tile.set_outline(1, color)
+        tile.set_background(_BACKGROUND)
+        tile.set_foreground(_FOREGROUND)
     else:
-        dst_xy = GridPanel.in_port_xy(dst.layer, dst.row, dst_y)
-    lane_x = GridPanel.gutter_lane_x(src.layer, lane)
-    return src_xy, dst_xy, lane_x
+        tile.set_outline(2, _BACKGROUND)
+        tile.set_background(color)
+        tile.set_foreground(_BACKGROUND)
 
 
-def _font(size: int = 11):
-    for name in ("Menlo.ttc", "Monaco.ttf", "DejaVuSansMono.ttf", "Arial.ttf"):
-        try:
-            return ImageFont.truetype(name, size)
-        except Exception:
-            continue
-    return ImageFont.load_default()
+def count_violations(layout: Layout) -> int:
+    """Through-plugin wires: dummy waypoints the DP had to drop onto a plugin
+    cell because the crossed column had no gap (invariant 1 broken)."""
+    occ = occupied_cells(layout)
+    bad = {n.id for e in layout.edges for n in (e.src, e.dst) if n.kind == "dummy" and (n.layer, n.row) in occ}
+    return len(bad)
 
 
-def render_png(layout: Layout, title: str, path: Path) -> None:
-    w = max(1, layout.n_cols * (TILE_W + CHANNEL) - CHANNEL) + 2 * MARGIN
-    h = max(1, layout.n_rows * (TILE_H + ROW_GAP) - ROW_GAP) + 2 * MARGIN
-    img = Image.new("RGB", (w, h), BG)
-    draw = ImageDraw.Draw(img)
-    font = _font(11)
+def render_png(layout: Layout, plugins_by_id: dict, path: Path) -> None:
+    """Render the layout exactly as the device would: build the real
+    GridPanel inside a PanelStack and save the composited image."""
+    grid_w = max(1, layout.n_cols * COL_PITCH - CHANNEL)
+    grid_h = max(1, layout.n_rows * ROW_PITCH - ROW_GAP)
+    w, h = grid_w + 2 * MARGIN, grid_h + 2 * MARGIN
 
-    # Wires first, under the tiles (matches GridPanel draw order).
-    for edge in layout.edges:
-        (sx, sy), (dx, dy), lane_x = _edge_endpoints(edge)
-        color = DEFAULT_WIRE_COLORS[GridPanel._clamp_port(edge.src_port)]
-        ox = oy = MARGIN
-        draw.line([(ox + sx, oy + sy), (ox + lane_x, oy + sy)], fill=color, width=1)
-        draw.line([(ox + lane_x, oy + sy), (ox + lane_x, oy + dy)], fill=color, width=1)
-        draw.line([(ox + lane_x, oy + dy), (ox + dx, oy + dy)], fill=color, width=1)
+    lcd = _CaptureLcd((w, h))
+    pstack = PanelStack(lcd, image_format="RGB", use_dimming=False)
+    host = Panel(box=Box.xywh(0, 0, w, h))
+    pstack.push_panel(host, refresh=False)
 
-    for c, col in enumerate(layout.cols):
-        for r, node in enumerate(col):
-            if node is None:
-                continue
-            x, y = GridPanel.cell_xy(c, r)
-            x += MARGIN
-            y += MARGIN
-            if node.kind == "dummy":
-                cx, cy = x + TILE_W // 2, y + TILE_H // 2
-                draw.ellipse([cx - 2, cy - 2, cx + 2, cy + 2], fill=DUMMY_DOT)
-                continue
-            draw.rounded_rectangle([x, y, x + TILE_W, y + TILE_H], radius=5,
-                                   fill=TILE_FILL, outline=TILE_OUTLINE, width=1)
-            label = node.id[:11]
-            draw.text((x + 4, y + TILE_H // 2 - 6), label, fill=TEXT_COLOR, font=font)
+    def tile_factory(node, box, parent):
+        plugin = plugins_by_id[node.id]
+        label = plugin.instance_id[:_PLUGIN_LABEL_LENGTH].lstrip("/").replace("_", "")
+        label = _shorten(label, box.width)
+        tile = TextWidget(box=box, text=label, font=_PLUGIN_FONT, outline_radius=5, parent=parent)
+        _color_tile(tile, plugin)
+        return tile
 
+    # Whole grid in view (no scroll): box spans the full virtual extent.
+    GridPanel(layout, tile_factory, box=Box.xywh(MARGIN, MARGIN, grid_w, grid_h), parent=host)
+    # Render the panel into its backing image and composite up to the LCD
+    # (mirrors lcd320x240.draw_plugins -> main_panel.refresh()).
+    host.refresh()
+
+    assert lcd.image is not None
     path.parent.mkdir(parents=True, exist_ok=True)
-    img.save(path)
+    lcd.image.save(path)
 
 
-def load_layout(bundle: Path) -> tuple[Pedalboard, Layout]:
+def load_layout(bundle: Path, algo: str = "dp", max_rows: int = 4) -> tuple[Pedalboard, Layout]:
     title = bundle.stem
     pb = Pedalboard(title, str(bundle), root_uri=MOD_ROOT_URI)
     pb.load_bundle(str(bundle), {})
     ids = [p.instance_id.lstrip("/") for p in pb.plugins]
-    layout = build_layout(ids, pb.connections)
+    if algo == "dp":
+        layout = build_layout_dp(ids, pb.connections, height_cap=max_rows)
+    else:
+        layout = build_layout(ids, pb.connections)
     return pb, layout
 
 
-def print_full(bundle: Path, png: bool = True) -> Metrics:
-    pb, layout = load_layout(bundle)
+def render_for(pb: Pedalboard, layout: Layout, stem: str, algo: str) -> tuple[Path, int]:
+    # Both algos write the baseline name in place so `git diff` shows the change.
+    out = RENDER_DIR / f"{stem}.png"
+    plugins_by_id = {p.instance_id.lstrip("/"): p for p in pb.plugins}
+    render_png(layout, plugins_by_id, out)
+    return out, count_violations(layout)
+
+
+def print_full(bundle: Path, algo: str = "dp", max_rows: int = 4, png: bool = True) -> Metrics:
+    pb, layout = load_layout(bundle, algo, max_rows)
     m = compute_metrics(bundle.stem, len(pb.plugins), layout)
     if png:
-        out = RENDER_DIR / f"{bundle.stem}.png"
-        render_png(layout, bundle.stem, out)
-        print(f"png: {out}")
+        out, violations = render_for(pb, layout, bundle.stem, algo)
+        note = f"  ({violations} through-plugin wires)" if violations else ""
+        print(f"png: {out}{note}")
     print(f"\n=== {m.title} ===")
     print(
         f"plugins={m.n_plugins}  grid={m.cols}x{m.rows} (cols x rows)  "
-        f"parallelism={m.parallelism}  dummies={m.dummies}"
+        f"parallelism={m.parallelism}  dummies={m.dummies}  "
+        f"cost={layout_cost(layout, max_rows):.3f}"
     )
-    print(
-        f"cells: {m.plugin_cells}/{m.total_cells} filled  "
-        f"empty={m.empty_pct:.0f}%"
-    )
-    print(
-        f"pixels: {m.px_w}x{m.px_h}  scroll: {m.h_screens:.2f} screens horiz, "
-        f"{m.v_screens:.2f} vert"
-    )
+    print(f"cells: {m.plugin_cells}/{m.total_cells} filled  empty={m.empty_pct:.0f}%")
+    print(f"pixels: {m.px_w}x{m.px_h}  scroll: {m.h_screens:.2f} screens horiz, {m.v_screens:.2f} vert")
     print(ascii_grid(layout))
     return m
 
@@ -256,17 +321,17 @@ def summary_row(m: Metrics) -> str:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("bundles", nargs="*", help="Pedalboard bundle paths")
-    ap.add_argument("--all", action="store_true",
-                    help=f"Analyse every board in {MOD_PEDALBOARD_DIR}")
-    ap.add_argument("--summary", action="store_true",
-                    help="One metrics row per board, no ASCII grid")
-    ap.add_argument("--no-png", action="store_true",
-                    help=f"Skip writing PNG renders to {RENDER_DIR}")
+    ap.add_argument("--all", action="store_true", help="Analyse every board in the MOD Desktop dirs")
+    ap.add_argument("--summary", action="store_true", help="One metrics row per board, no ASCII grid")
+    ap.add_argument("--algo", choices=("sugiyama", "dp"), default="dp", help="Layout algorithm (default: dp)")
+    ap.add_argument("--max-rows", type=int, default=4, help="DP height_cap (default: 4)")
+    ap.add_argument("--no-png", action="store_true", help=f"Skip writing PNG renders to {RENDER_DIR}")
     args = ap.parse_args()
 
     bundles: list[Path] = [Path(b) for b in args.bundles]
     if args.all:
-        bundles += sorted(MOD_PEDALBOARD_DIR.glob("*.pedalboard"))
+        for d in MOD_PEDALBOARD_DIRS:
+            bundles += sorted(d.glob("*.pedalboard"))
     if not bundles:
         ap.error("no bundles given (pass paths or --all)")
 
@@ -277,12 +342,12 @@ def main() -> int:
             continue
         try:
             if args.summary:
-                pb, layout = load_layout(b)
+                pb, layout = load_layout(b, args.algo, args.max_rows)
                 if not args.no_png:
-                    render_png(layout, b.stem, RENDER_DIR / f"{b.stem}.png")
+                    render_for(pb, layout, b.stem, args.algo)
                 metrics.append(compute_metrics(b.stem, len(pb.plugins), layout))
             else:
-                metrics.append(print_full(b, png=not args.no_png))
+                metrics.append(print_full(b, args.algo, args.max_rows, png=not args.no_png))
         except Exception as e:  # keep going across a batch
             print(f"FAILED {b.stem}: {e}", file=sys.stderr)
 

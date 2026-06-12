@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import logging
 
+from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from typing import Iterable, Literal, Optional
 
@@ -282,3 +283,388 @@ def build_layout(
             col[n.row] = n
         cols.append(col)
     return Layout(cols=cols, edges=edges)
+
+
+# --------------------------------------------------------------------------- #
+# Alternative layout: topological snake (serpentine).
+#
+# Strategy: flatten the audio DAG to a single topological order, then lay it
+# out column-major in a serpentine — fill a column top->down, step one column
+# right, fill bottom->up, repeat. Horizontal motion is always left->right;
+# only the vertical direction alternates, so wires never run right->left.
+# Trades the layered layout's explicit parallel lanes for a compact ribbon
+# that collapses long linear chains into the vertical scroll axis. Real
+# connections are emitted as direct edges so wires still convey structure.
+# --------------------------------------------------------------------------- #
+
+
+def topological_order(
+    plugin_instance_ids: Iterable[str],
+    connections: Iterable[Connection],
+) -> list[str]:
+    """Kahn's algorithm over the plugin-only audio DAG. Ties (and any nodes
+    left over from a cycle) break by original input order for stability."""
+    ids = [pid.lstrip("/") for pid in plugin_instance_ids if pid.lstrip("/")]
+    idset = set(ids)
+    order_index = {pid: i for i, pid in enumerate(ids)}
+
+    succs: dict[str, list[str]] = {pid: [] for pid in ids}
+    indeg: dict[str, int] = {pid: 0 for pid in ids}
+    seen: set[tuple[str, str]] = set()
+    for c in audio_connections(connections):
+        s, d = c.src.id, c.dst.id
+        if s in idset and d in idset and s != d and (s, d) not in seen:
+            seen.add((s, d))
+            succs[s].append(d)
+            indeg[d] += 1
+
+    ready = sorted((pid for pid in ids if indeg[pid] == 0), key=lambda pid: order_index[pid])
+    out: list[str] = []
+    while ready:
+        n = ready.pop(0)
+        out.append(n)
+        for m in succs[n]:
+            indeg[m] -= 1
+            if indeg[m] == 0:
+                # Insert keeping `ready` sorted by original order.
+                lo, hi = 0, len(ready)
+                while lo < hi:
+                    mid = (lo + hi) // 2
+                    if order_index[ready[mid]] < order_index[m]:
+                        lo = mid + 1
+                    else:
+                        hi = mid
+                ready.insert(lo, m)
+
+    if len(out) < len(ids):  # cycle: append the stragglers in input order
+        out += [pid for pid in ids if pid not in set(out)]
+    return out
+
+
+def snake_position(index: int, max_rows: int) -> tuple[int, int]:
+    """Serpentine (col, row) for the `index`-th node. Even columns run
+    top->down, odd columns bottom->up."""
+    col, pos = divmod(index, max_rows)
+    row = pos if col % 2 == 0 else (max_rows - 1 - pos)
+    return col, row
+
+
+def build_layout_snake(
+    plugin_instance_ids: Iterable[str],
+    connections: Iterable[Connection],
+    max_rows: int = 4,
+) -> Layout:
+    """End-to-end snake layout. `max_rows` is the soft column height before
+    wrapping to the next column."""
+    order = topological_order(plugin_instance_ids, connections)
+    nodes: dict[str, LayoutNode] = {}
+    for i, pid in enumerate(order):
+        col, row = snake_position(i, max_rows)
+        nodes[pid] = LayoutNode(id=pid, kind="plugin", layer=col, row=row)
+
+    # Direct edges for every real plugin->plugin audio connection. No dummies:
+    # the snake renderer routes arbitrary spans, unlike the layered gutter.
+    edges: list[LayoutEdge] = []
+    seen: set[tuple[str, str, int, int]] = set()
+    for c in audio_connections(connections):
+        src, dst = nodes.get(c.src.id), nodes.get(c.dst.id)
+        if src is None or dst is None:
+            continue
+        key = (src.id, dst.id, c.src.port_idx, c.dst.port_idx)
+        if key in seen:
+            continue
+        seen.add(key)
+        edges.append(LayoutEdge(src, dst, c.src.port_idx, c.dst.port_idx))
+
+    n_cols = max((n.layer for n in nodes.values()), default=-1) + 1
+    n_rows = max((n.row for n in nodes.values()), default=-1) + 1
+    cols: list[list[Optional[LayoutNode]]] = [[None] * n_rows for _ in range(n_cols)]
+    for n in nodes.values():
+        cols[n.layer][n.row] = n
+    return Layout(cols=cols, edges=edges)
+
+
+# --------------------------------------------------------------------------- #
+# Heuristic (shared with the analysis tooling).
+# --------------------------------------------------------------------------- #
+
+
+def empty_fraction(layout: Layout) -> float:
+    """Fraction of the bounding-box cells that are NOT plugin tiles (gaps +
+    dummies). 0.0 == perfectly packed."""
+    total = layout.n_cols * layout.n_rows
+    if total == 0:
+        return 0.0
+    filled = sum(1 for col in layout.cols for n in col if n is not None and n.kind == "plugin")
+    return (total - filled) / total
+
+
+# --------------------------------------------------------------------------- #
+# Invariant-1 router (the feasibility oracle).
+#
+# Routing model: horizontal runs travel through a row's *cells* and may only
+# cross GAP cells; vertical moves / turns happen in the column gutters and are
+# free. So a wire is a monotone staircase: slide vertically (free), step right
+# only into a gap cell (or the destination). Leftward steps are banned
+# (invariant 2). Consequence: an edge is unroutable iff some column it must
+# cross is fully packed — gaps are the routing medium.
+# --------------------------------------------------------------------------- #
+
+
+def occupied_cells(layout: Layout) -> set[tuple[int, int]]:
+    return {
+        (c, r) for c, col in enumerate(layout.cols) for r, n in enumerate(col) if n is not None and n.kind == "plugin"
+    }
+
+
+def route_edge(
+    layout: Layout, edge: LayoutEdge, occupied: Optional[set[tuple[int, int]]] = None
+) -> Optional[list[tuple[int, int]]]:
+    """Shortest invariant-1-legal staircase from src to dst as a list of cells,
+    or None if no legal route exists. Vertical moves are free (gutters); a
+    rightward move is allowed only into a gap cell or the destination."""
+    if occupied is None:
+        occupied = occupied_cells(layout)
+    src = (edge.src.layer, edge.src.row)
+    dst = (edge.dst.layer, edge.dst.row)
+    if src == dst:
+        return [src]
+
+    n_rows = layout.n_rows
+    prev: dict[tuple[int, int], Optional[tuple[int, int]]] = {src: None}
+    q = deque([src])
+    while q:
+        c, r = q.popleft()
+        if (c, r) == dst:
+            path = [(c, r)]
+            cur = prev[(c, r)]
+            while cur is not None:
+                path.append(cur)
+                cur = prev[cur]
+            return path[::-1]
+        nbrs: list[tuple[int, int]] = []
+        if r > 0:
+            nbrs.append((c, r - 1))  # vertical: free
+        if r < n_rows - 1:
+            nbrs.append((c, r + 1))  # vertical: free
+        if c < dst[0]:  # rightward only, not past dst
+            right = (c + 1, r)
+            if right == dst or right not in occupied:
+                nbrs.append(right)
+        for nb in nbrs:
+            if nb not in prev:
+                prev[nb] = (c, r)
+                q.append(nb)
+    return None
+
+
+def routing_violations(layout: Layout) -> int:
+    """Count edges that have no invariant-1-legal route under the current
+    placement (i.e. blocked by a fully-packed column they must cross)."""
+    occ = occupied_cells(layout)
+    return sum(1 for e in layout.edges if route_edge(layout, e, occ) is None)
+
+
+def layout_cost(
+    layout: Layout,
+    height_cap: int = 4,
+    viewport_cols: int = 4,
+    width_penalty: float = 10.0,
+    over_penalty: float = 10.0,
+    row_weight: float = 0.1,
+    infeasible_penalty: float = 1000.0,
+    span_weight: float = 0.05,
+) -> float:
+    """Heuristic the search minimises.
+
+    - **Infeasibility** (edges with no invariant-1 route) dominates: an illegal
+      layout is never preferred to a legal one.
+    - **Overflow** is the primary legal objective: only columns beyond the
+      `viewport_cols`-wide screen — and rows beyond `height_cap` — cost. Width
+      *within* the viewport is free, so a chain that already fits (e.g. 4x1) is
+      never folded narrower-and-taller just to shed columns.
+    - **Rows** carry a mild weight so, among layouts that fit the viewport
+      width, the search fills columns before wrapping (4x2 beats 2x4) and a
+      short chain stays a flat row rather than a tall stack.
+    - **Span** of multi-column edges is mildly penalised, since each crossed
+      column must keep a gap to stay routable — short edges need fewer gaps.
+    - `empty_fraction` (< 1) breaks remaining ties toward the denser layout.
+    """
+    width_over = max(0, layout.n_cols - viewport_cols)
+    height_over = max(0, layout.n_rows - height_cap)
+    span = sum(max(0, e.dst.layer - e.src.layer - 1) for e in layout.edges)
+    return (
+        width_penalty * width_over
+        + over_penalty * height_over
+        + row_weight * layout.n_rows
+        + empty_fraction(layout)
+        + infeasible_penalty * routing_violations(layout)
+        + span_weight * span
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Alternative layout: DP serpentine fold (post-process of the layered build).
+#
+# Starts from build_layout's column-major reading order (a topology-respecting
+# linearisation) and folds it into a serpentine, but — unlike the fixed-pitch
+# snake — chooses the fold height that minimises layout_cost and breaks a
+# column early whenever continuing it would route a wire *through* an
+# intervening plugin. Horizontal motion stays left->right (no right-to-left);
+# only the vertical direction alternates per column.
+# --------------------------------------------------------------------------- #
+
+
+def _reading_order(plugin_instance_ids: Iterable[str], connections: Iterable[Connection]) -> list[str]:
+    """Plugin ids in the original layered layout's column-major reading order.
+    Preserves the Sugiyama left-to-right flow as the fold linearisation."""
+    base = build_layout(plugin_instance_ids, connections)
+    return [n.id for col in base.cols for n in col if n is not None and n.kind == "plugin"]
+
+
+def _fold_columns(order: list[str], preds: dict[str, set[str]], height: int) -> list[list[str]]:
+    """Greedily chunk `order` into column runs of up to `height`, breaking a
+    run early when the next node connects to a non-adjacent member of the same
+    run (a vertical wire would otherwise pass over an intervening plugin)."""
+    columns: list[list[str]] = []
+    i, n = 0, len(order)
+    while i < n:
+        run = [order[i]]
+        i += 1
+        while len(run) < height and i < n:
+            cand = order[i]
+            # A predecessor sitting earlier than run[-1] would be skipped over.
+            if any(p in run and p != run[-1] for p in preds[cand]):
+                break
+            run.append(cand)
+            i += 1
+        columns.append(run)
+    return columns
+
+
+def _orient_columns(columns: list[list[str]], connections: Iterable[Connection]) -> dict[str, int]:
+    """Assign each plugin a row, choosing each column's vertical orientation
+    (as-is vs. flipped) to minimise misalignment with already-placed columns.
+
+    A blanket serpentine flip of odd columns gives short wraps for a linear
+    chain but *crosses* parallel branches (A→B over C→D). Picking the cheaper
+    of the two orientations per column recovers boustrophedon for chains and
+    keeps parallel branches on aligned rows."""
+    col_of = {pid: c for c, run in enumerate(columns) for pid in run}
+    cross_preds: dict[str, list[str]] = defaultdict(list)
+    for c in audio_connections(connections):
+        s, d = c.src.id, c.dst.id
+        if s in col_of and d in col_of and col_of[s] < col_of[d]:
+            cross_preds[d].append(s)
+
+    rows: dict[str, int] = {}
+
+    def misalignment(seq: list[str]) -> float:
+        return sum(abs(rows[p] - r) for r, pid in enumerate(seq) for p in cross_preds[pid] if p in rows)
+
+    for c, run in enumerate(columns):
+        if c == 0:
+            order = list(run)
+        else:
+            fwd, rev = list(run), list(reversed(run))
+            order = rev if misalignment(rev) < misalignment(fwd) else fwd
+        for r, pid in enumerate(order):
+            rows[pid] = r
+    return rows
+
+
+def _layout_from_columns(columns: list[list[str]], connections: Iterable[Connection]) -> Layout:
+    n_cols = len(columns)
+    n_rows = max((len(c) for c in columns), default=0)
+    rows = _orient_columns(columns, connections)
+    nodes: dict[str, LayoutNode] = {}
+    cols: list[list[Optional[LayoutNode]]] = [[None] * n_rows for _ in range(n_cols)]
+    for c_idx, run in enumerate(columns):
+        for pid in run:
+            row = rows[pid]
+            node = LayoutNode(id=pid, kind="plugin", layer=c_idx, row=row)
+            nodes[pid] = node
+            cols[c_idx][row] = node
+
+    edges: list[LayoutEdge] = []
+    seen: set[tuple[str, str, int, int]] = set()
+    for c in audio_connections(connections):
+        src, dst = nodes.get(c.src.id), nodes.get(c.dst.id)
+        if src is None or dst is None:
+            continue
+        key = (src.id, dst.id, c.src.port_idx, c.dst.port_idx)
+        if key in seen:
+            continue
+        seen.add(key)
+        edges.append(LayoutEdge(src, dst, c.src.port_idx, c.dst.port_idx))
+    return Layout(cols=cols, edges=edges)
+
+
+def _route_dp_edges(layout: Layout) -> None:
+    """Split each multi-column edge into single-column hops through dummy
+    waypoints placed in gap cells, so the gutter renderer draws *around*
+    plugins instead of hiding the wire behind them. Single-column and
+    vertical (span-0) edges are left untouched.
+
+    Mutates ``layout.edges`` in place. Dummies live only on the edges, not in
+    ``layout.cols`` — they don't render as tiles or count as occupied cells.
+    A column with no gap leaves its dummy on a plugin cell (the unavoidable
+    through-plugin case the heuristic is trying to avoid); the analyzer's
+    violation count detects exactly that.
+    """
+    occ = occupied_cells(layout)
+    n_rows = layout.n_rows
+    routed: list[LayoutEdge] = []
+    dummy_n = 0
+    for e in layout.edges:
+        span = e.dst.layer - e.src.layer
+        if span <= 1:
+            routed.append(e)
+            continue
+        prev, prev_row = e.src, e.src.row
+        for c in range(e.src.layer + 1, e.dst.layer):
+            # Aim at the straight-line interpolation; snap to the nearest gap
+            # (tie-break toward the previous hop's row for a tidier staircase).
+            ideal = round(e.src.row + (c - e.src.layer) / span * (e.dst.row - e.src.row))
+            gaps = [r for r in range(n_rows) if (c, r) not in occ]
+            row = min(gaps, key=lambda r: (abs(r - ideal), abs(r - prev_row))) if gaps else ideal
+            dummy_n += 1
+            d = LayoutNode(id=f"__dpdummy_{dummy_n}", kind="dummy", layer=c, row=row, carried_src_port=e.src_port)
+            routed.append(LayoutEdge(prev, d, e.src_port, e.src_port))
+            prev, prev_row = d, row
+        routed.append(LayoutEdge(prev, e.dst, e.src_port, e.dst_port))
+    layout.edges = routed
+
+
+def build_layout_dp(
+    plugin_instance_ids: Iterable[str],
+    connections: Iterable[Connection],
+    height_cap: int = 4,
+    max_height: int = 8,
+) -> Layout:
+    """Fold the layered layout into the min-cost serpentine. Searches fold
+    height in [1, max_height] and returns the arrangement minimising
+    layout_cost(..., height_cap). The winning layout's multi-column edges are
+    then dummy-routed through gap cells for the gutter renderer."""
+    order = _reading_order(plugin_instance_ids, connections)
+    if not order:
+        return Layout()
+
+    idset = set(order)
+    preds: dict[str, set[str]] = {pid: set() for pid in order}
+    for c in audio_connections(connections):
+        if c.src.id in idset and c.dst.id in idset and c.src.id != c.dst.id:
+            preds[c.dst.id].add(c.src.id)
+
+    best: Optional[Layout] = None
+    best_cost = float("inf")
+    for h in range(1, max_height + 1):
+        # Search on direct edges so layout_cost's routing_violations reflects
+        # true feasibility; dummy-routing happens once, on the winner.
+        layout = _layout_from_columns(_fold_columns(order, preds, h), connections)
+        cost = layout_cost(layout, height_cap)
+        if cost < best_cost:
+            best, best_cost = layout, cost
+    assert best is not None
+    _route_dp_edges(best)
+    return best
