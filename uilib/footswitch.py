@@ -33,6 +33,8 @@ class FootswitchWidget(Widget):
     KEYCAP_PAD_TOP = 3  # gap between keycap top and label
     KEYCAP_PAD_BOTTOM = 3  # how far the open legs extend below the label
 
+    ERASE_PAD = 1  # px around the keycap to absorb anti-aliasing fringe
+
     def __init__(self, box, num, label, color, is_bypassed, **kwargs):
         self._init_attrs(Widget.INH_ATTRS, kwargs)
         super(FootswitchWidget, self).__init__(box, **kwargs)
@@ -41,9 +43,21 @@ class FootswitchWidget(Widget):
         self.label = label
         self.color = color
         self.is_bypassed = is_bypassed
+        self._drawn = None  # last keycap rect, relative to slot origin
 
     def _draw_erase(self, image, draw, box):
-        pass  # shroud panel owns the background; erasing here would wipe it out
+        # Repaint black over the previously drawn keycap so a wider one is fully
+        # cleared before a narrower one is drawn (single-widget refresh skips the
+        # panel-wide erase). The keycap stays centered within its slot, so erasing
+        # just its own footprint never touches a neighbouring switch.
+        if self._drawn is None:
+            return
+        p = self.ERASE_PAD
+        kx0, ky0, kx1, ky1 = self._drawn
+        draw.rectangle(
+            [box.x0 + kx0 - p, box.y0 + ky0 - p, box.x0 + kx1 + p, box.y0 + ky1 + p],
+            fill=(0, 0, 0, 255),
+        )
 
     def _draw(self, image, draw, real_box):
         x0, y0 = real_box.x0, real_box.y0
@@ -68,6 +82,10 @@ class FootswitchWidget(Widget):
 
         bg = (0, 0, 0, 255) if not is_on else None
         self._draw_keycap(draw, kx0, ky0, kx1, ky1, accent, bg)
+
+        # Remember the keycap footprint (slot-relative) so the next refresh can
+        # erase it even if the new label is narrower.
+        self._drawn = (kx0 - x0, ky0 - y0, kx1 - x0, ky1 - y0)
 
         tx = kx0 + self.KEYCAP_PAD_X - bbox[0]
         ty = ky0 + self.KEYCAP_PAD_TOP - bbox[1]
