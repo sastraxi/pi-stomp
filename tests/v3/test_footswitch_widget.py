@@ -46,3 +46,15 @@ def test_v3_footswitch_widget_off_configs(fake_lcd, snapshot):
     ]
     fake_lcd.frames.append(_render(configs, is_on=False))
     snapshot()
+
+
+def test_v3_footswitch_widget_truncates_long_labels(fake_lcd, snapshot):
+    # Over-long labels must be cut so the padded keycap stays within its slot.
+    configs = [
+        ((255, 235, 59), "Reverberation"),
+        ((26, 58, 138),  "DistortionPlus"),
+        (None,           "WWWWWWWWWWWW"),
+        (None,           "Solo Channel 3"),
+    ]
+    fake_lcd.frames.append(_render(configs, is_on=True))
+    snapshot()
