@@ -196,6 +196,9 @@ class Lcd(abstract_lcd.Lcd):
         self.pstack.poll_updates()
         if self._tuner_panel is not None and self.pstack.current == self._tuner_panel:
             self._tuner_panel.tick()
+        elif (self.grid_panel is not None
+              and self.pstack.current in (self.main_panel, self.footswitch_panel)):
+            self.grid_panel.tick()
 
     def show_tuner_panel(self, panel: TunerPanel) -> None:
         self._tuner_panel = panel

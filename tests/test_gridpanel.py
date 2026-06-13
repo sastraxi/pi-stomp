@@ -14,12 +14,16 @@ from modalapi.connections import Connection, Endpoint, EndpointKind
 from uilib.box import Box
 from uilib.gridpanel import (
     CHANNEL,
+    DEFAULT_WIRE_COLORS,
+    FLOW_DASH,
+    FLOW_PERIOD,
     LANE_OFFSETS,
     PORT_OFFSETS_Y,
     ROW_GAP,
     TILE_H,
     TILE_W,
     GridPanel,
+    WireFlowOverlay,
 )
 from uilib.panel import PanelStack
 from uilib.text import TextWidget
@@ -263,3 +267,105 @@ def test_dummy_passes_wire_straight_through(panel_stack) -> None:
         # Both endpoints at the OUT1 y (PORT_OFFSETS_Y[1]) within their cells
         assert sy % (TILE_H + ROW_GAP) == PORT_OFFSETS_Y[1]
         assert dy % (TILE_H + ROW_GAP) == PORT_OFFSETS_Y[1]
+
+
+# --------------------------------------------------------------------------- #
+# Wire-flow overlay (marching dots).
+# --------------------------------------------------------------------------- #
+
+
+def test_polyline_pixels_continuous_no_dup_corners() -> None:
+    # L-shape: right 2, then down 2. Arc index continuous, corner not doubled.
+    pts = [(0, 0), (2, 0), (2, 2)]
+    got = list(WireFlowOverlay._polyline_pixels(pts))
+    assert got == [
+        (0, 0, 0), (1, 1, 0), (2, 2, 0),  # ->right
+        (3, 2, 1), (4, 2, 2),             # ->down
+    ]
+
+
+def test_flow_lit_pattern_is_2px_dash_1px_gap() -> None:
+    # FLOW_DASH lit then a gap, repeating every FLOW_PERIOD along arc length.
+    assert (FLOW_PERIOD, FLOW_DASH) == (3, 2)
+    phase = 0.0
+    lit = [((s - phase) % FLOW_PERIOD) < FLOW_DASH for s in range(9)]
+    assert lit == [True, True, False] * 3
+
+
+def test_flow_phase_marches_toward_dst() -> None:
+    # Advancing phase by 1px shifts the lit set one step up in arc length
+    # (i.e. toward dst), not down.
+    lit0 = {s for s in range(9) if ((s - 0.0) % FLOW_PERIOD) < FLOW_DASH}
+    lit1 = {s for s in range(9) if ((s - 1.0) % FLOW_PERIOD) < FLOW_DASH}
+    assert lit1 == {s + 1 for s in lit0 if s + 1 < 9}  # shifted up by one (toward dst)
+
+
+def _render_overlay(panel, node_id, phase, box=None):
+    box = box or Box.xywh(0, 0, 320, 240)
+    img = Image.new("RGB", (320, 240), (0, 0, 0))
+    draw = __import__("PIL.ImageDraw", fromlist=["ImageDraw"]).Draw(img)
+    panel._flow._node = node_id
+    panel._flow._dots = node_id is not None
+    panel._flow._phase = phase
+    panel._flow._draw(img, draw, box)
+    return img
+
+
+def test_overlay_draws_dash_then_gap_along_out_stub(panel_stack) -> None:
+    conns = [_conn("A", "B")]
+    layout = build_layout_compress(["A", "B"], conns)
+    panel = _make_panel(layout, panel_stack)
+
+    base = DEFAULT_WIRE_COLORS[0]
+    bright = WireFlowOverlay._brighten(base)
+    img = _render_overlay(panel, "A", phase=0.0)
+
+    # A out-port at (TILE_W, 8); stub runs right into the gutter lane.
+    y = PORT_OFFSETS_Y[0]
+    assert img.getpixel((TILE_W, y)) == bright       # s=0 lit
+    assert img.getpixel((TILE_W + 1, y)) == bright   # s=1 lit
+    assert img.getpixel((TILE_W + 2, y)) == base     # s=2 gap
+
+
+def test_overlay_inert_when_nothing_selected(panel_stack) -> None:
+    conns = [_conn("A", "B")]
+    layout = build_layout_compress(["A", "B"], conns)
+    panel = _make_panel(layout, panel_stack)
+    img = _render_overlay(panel, None, phase=0.0)
+    assert img.getbbox() is None  # fully black: no wires, no dots
+
+
+def test_overlay_skips_pixels_behind_tiles(panel_stack) -> None:
+    # Same-column serpentine: A above B in one column. The spine runs behind
+    # both tiles; only the row-gap segment should ever be painted.
+    conns = [
+        _conn("capture_1", "A", EndpointKind.SOURCE, EndpointKind.PLUGIN),
+        _conn("capture_1", "B", EndpointKind.SOURCE, EndpointKind.PLUGIN),
+        _conn("A", "B"),
+    ]
+    layout = build_layout_compress(["A", "B"], conns)
+    panel = _make_panel(layout, panel_stack)
+    # All of A/B tiles are filled solid colour; assert no overlay pixel landed
+    # inside either tile rect.
+    img = _render_overlay(panel, "A", phase=0.0)
+    for (tx0, ty0, tx1, ty1) in panel.tile_rects():
+        for x in range(tx0, tx1):
+            for yy in range(ty0, ty1):
+                assert img.getpixel((x, yy)) == (0, 0, 0)
+
+
+def test_tick_tracks_selection(panel_stack) -> None:
+    conns = [_conn("A", "B")]
+    layout = build_layout_compress(["A", "B"], conns)
+    panel = _make_panel(layout, panel_stack)
+
+    panel.tick()
+    assert panel._flow._node is None  # nothing selected -> inert
+
+    panel.widget_for("A").set_selected(True)
+    panel.tick()
+    assert panel._flow._node == "A"
+
+    panel.widget_for("A").set_selected(False)
+    panel.tick()
+    assert panel._flow._node is None
