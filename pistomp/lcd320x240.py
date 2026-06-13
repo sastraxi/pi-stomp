@@ -394,6 +394,12 @@ class Lcd(abstract_lcd.Lcd):
         elif event == InputEvent.LONG_CLICK:
             self.draw_parameter_menu(plugin)
 
+    def footswitch_event(self, event, widget, footswitch):
+        if event == InputEvent.CLICK:
+            footswitch.pressed(switchstate.Value.RELEASED)
+        elif event == InputEvent.LONG_CLICK:
+            footswitch.pressed(switchstate.Value.LONGPRESSED)
+
 
     def color_plugin(self, widget, plugin):
         color = self.get_plugin_color(plugin)
@@ -519,7 +525,7 @@ class Lcd(abstract_lcd.Lcd):
                 color = self.get_plugin_color(plugin)
                 p = FootswitchWidget(Box.xywh(x, y, self.footswitch_width, self.footswitch_height),
                              fs_id, label, color, plugin.is_bypassed(),
-                             parent=self.footswitch_panel, action=self.plugin_event, object=plugin)
+                             parent=self.footswitch_panel, action=self.footswitch_event, object=c)
                 self.w_footswitches.append(p)
                 self.footswitch_panel.add_sel_widget(p)
                 break
