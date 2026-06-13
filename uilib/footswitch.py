@@ -25,13 +25,15 @@ class FootswitchWidget(Widget):
     DIMMED_BG when OFF. Unbound slots show "A".."D" as a placeholder.
     """
 
-    DIMMED_BG = (50, 50, 50)
+    UNBOUND_BG = (50, 50, 50)
+    BOUND_OFF_BG = (90, 90, 90)
     DEFAULT_COLOR = (255, 255, 255)
 
     KEYCAP_RADIUS = 4  # top-corner radius
     KEYCAP_PAD_X = 7  # horizontal gap between label and keycap sides
     KEYCAP_PAD_TOP = 3  # gap between keycap top and label
     KEYCAP_PAD_BOTTOM = 3  # how far the open legs extend below the label
+    KEYCAP_HEIGHT = 20  # total outline height including the padding
 
     ERASE_PAD = 1  # px around the keycap to absorb anti-aliasing fringe
 
@@ -44,6 +46,8 @@ class FootswitchWidget(Widget):
         self.color = color
         self.is_bypassed = is_bypassed
         self._drawn = None  # last keycap rect, relative to slot origin
+        self._cap_height = self.KEYCAP_HEIGHT - self.KEYCAP_PAD_TOP - self.KEYCAP_PAD_BOTTOM
+        self._font_ascent = self.font.getmetrics()[0]
 
     def _draw_erase(self, image, draw, box):
         # Repaint black over the previously drawn keycap so a wider one is fully
@@ -75,7 +79,11 @@ class FootswitchWidget(Widget):
         w, h = real_box.width, real_box.height
 
         is_on = not self.is_bypassed
-        accent = (self.color if self.color is not None else self.DEFAULT_COLOR) if is_on else self.DIMMED_BG
+        if is_on:
+            accent = self.color if self.color is not None else self.DEFAULT_COLOR
+        else:
+            # Bound-but-off is slightly brighter than an unbound slot.
+            accent = self.BOUND_OFF_BG if self.color is not None else self.UNBOUND_BG
 
         assert self.font
         text = self.label if self.label else chr(ord("A") + self.num)
@@ -84,11 +92,10 @@ class FootswitchWidget(Widget):
         text = self._fit(text, w - 2 * self.KEYCAP_PAD_X)
         bbox = self.font.getbbox(text)
         tw = bbox[2] - bbox[0]
-        th = bbox[3] - bbox[1]
 
         # Center the keycap+label block in the slot.
         kw = tw + 2 * self.KEYCAP_PAD_X
-        kh = th + self.KEYCAP_PAD_TOP + self.KEYCAP_PAD_BOTTOM
+        kh = self._cap_height + self.KEYCAP_PAD_TOP + self.KEYCAP_PAD_BOTTOM
         kx0 = x0 + (w - kw) // 2
         ky0 = y0 + (h - kh) // 2
         kx1 = kx0 + kw - 1
@@ -102,7 +109,8 @@ class FootswitchWidget(Widget):
         self._drawn = (kx0 - x0, ky0 - y0, kx1 - x0, ky1 - y0)
 
         tx = kx0 + self.KEYCAP_PAD_X - bbox[0]
-        ty = ky0 + self.KEYCAP_PAD_TOP - bbox[1]
+        baseline_y = ky0 + self.KEYCAP_PAD_TOP + self._cap_height
+        ty = baseline_y - self._font_ascent
         draw.text((tx, ty), text, fill=accent, font=self.font)
 
     def _draw_keycap(self, draw, x0, y0, x1, y1, color, fill=None):

@@ -519,7 +519,7 @@ class Lcd(abstract_lcd.Lcd):
             y = 0
             x = self.get_footswitch_pitch() * slot
             p = FootswitchWidget(Box.xywh(x, y, self.footswitch_width, self.footswitch_height),
-                                 slot, label, None, True, parent=self.footswitch_panel, object=fs)
+                                 slot, label, None, not fs.toggled, parent=self.footswitch_panel, object=fs)
             self.w_footswitches.append(p)
             self.footswitch_panel.add_sel_widget(p)
         self.footswitch_panel.refresh()
