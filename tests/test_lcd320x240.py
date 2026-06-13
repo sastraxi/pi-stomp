@@ -311,3 +311,15 @@ def test_routing_snapshot(lcd, snapshot, topology):
     instance, _ = lcd
     _setup_pedalboard(instance, pedalboard_fixtures.REGISTRY[topology]())
     snapshot(topology)
+
+
+def test_tall_parallel_scrolled_to_last(lcd, snapshot):
+    """Selecting the last plugin in a 5-row tall pedalboard must scroll it
+    clear of the footswitch bar (bottom_inset ensures this)."""
+    instance, _ = lcd
+    pb = pedalboard_fixtures.tall_parallel()
+    _setup_pedalboard(instance, pb)
+    snapshot("initial")
+    for _ in range(len(pb.plugins) + 2):
+        instance.main_panel.sel_next()
+    snapshot("scrolled_to_last")

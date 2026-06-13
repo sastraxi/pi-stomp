@@ -376,6 +376,7 @@ class Lcd(abstract_lcd.Lcd):
         self.grid_panel = GridPanel(
             layout, tile_factory,
             box=Box.xywh(0, 78, self.display_width, self.display_height - 78),
+            bottom_inset=self.footswitch_height,
             parent=self.main_panel,
         )
         self.main_panel.add_sel_widget(self.grid_panel)
