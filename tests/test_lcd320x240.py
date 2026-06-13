@@ -74,6 +74,7 @@ def setup_main_ui(instance):
     plugins = [
         MockObject(
             instance_id="distortion",
+            uri="mock://distortion",
             is_bypassed=lambda: False,
             category="Distortion",
             has_footswitch=True,
@@ -82,6 +83,7 @@ def setup_main_ui(instance):
         ),
         MockObject(
             instance_id="delay",
+            uri="mock://delay",
             is_bypassed=lambda: False,
             category="Delay",
             has_footswitch=True,
@@ -90,6 +92,7 @@ def setup_main_ui(instance):
         ),
         MockObject(
             instance_id="reverb",
+            uri="mock://reverb",
             is_bypassed=lambda: True,
             category="Reverb",
             has_footswitch=True,
@@ -98,6 +101,7 @@ def setup_main_ui(instance):
         ),
         MockObject(
             instance_id="chorus",
+            uri="mock://chorus",
             is_bypassed=lambda: False,
             category="Modulator",
             has_footswitch=False,
