@@ -394,7 +394,7 @@ class Lcd(abstract_lcd.Lcd):
             widget.set_background(self.background)
             widget.set_foreground(self.foreground)
         else:
-            widget.set_outline(2, self.background)
+            widget.set_outline(1, self.background)
             widget.set_background(color)
             widget.set_foreground(self.background)
 
