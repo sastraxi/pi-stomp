@@ -265,7 +265,8 @@ class Modhandler(Handler):
             if event.kind == SwitchEventKind.LONGPRESS:
                 # Give the LCD first crack so the selected widget sees LONG_CLICK.
                 # Only run the configured callback if nothing on the LCD consumed it.
-                if self._lcd is not None and self._lcd.enc_sw(switchstate.Value.LONGPRESSED):
+                # Only the nav encoder button routes through the LCD panel stack.
+                if controller.type == Token.NAV and self._lcd is not None and self._lcd.enc_sw(switchstate.Value.LONGPRESSED):
                     return True
                 callback_name = controller.longpress
                 if callback_name:
