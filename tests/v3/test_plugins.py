@@ -602,6 +602,54 @@ def test_v3_websocket_bypass_event_matches_canonical_id(v3_system):
     assert plugin.is_bypassed()
 
 
+# ---------------------------------------------------------------------------
+# Footswitch strip visual states
+# ---------------------------------------------------------------------------
+
+
+def test_v3_footswitch_states_snapshot(v3_system: SystemFixture, make_plugin, snapshot):
+    """Full main-panel snapshot covering bound and unbound footswitches before and after toggles."""
+    import pistomp.switchstate as switchstate
+
+    handler = v3_system.handler
+    hw = v3_system.hw
+
+    assert handler.current
+    assert handler.lcd
+
+    on_plugin = make_plugin("fuzz", category="Distortion", bypassed=False, has_footswitch=True)
+    off_plugin = make_plugin("delay", category="Delay", bypassed=True, has_footswitch=True)
+
+    fs0 = hw.footswitches[0]
+    fs1 = hw.footswitches[1]
+    fs2 = hw.footswitches[2]
+    fs3 = hw.footswitches[3]
+    binding0 = next(k for k, v in hw.controllers.items() if v is fs0)
+    binding1 = next(k for k, v in hw.controllers.items() if v is fs1)
+    on_plugin.parameters[":bypass"].binding = binding0
+    off_plugin.parameters[":bypass"].binding = binding1
+
+    # fs2 unbound but already toggled on (e.g. tap-tempo enabled); fs3 unbound off.
+    fs2.toggled = True
+    fs3.toggled = False
+
+    handler.current.pedalboard.plugins = [on_plugin, off_plugin]
+    handler.bind_current_pedalboard()
+    handler.lcd.link_data(handler.pedalboard_list, handler.current, hw.footswitches)
+    handler.lcd.draw_main_panel()
+    snapshot("initial")
+
+    # Toggle one bound and one unbound footswitch.
+    fs1.pressed(switchstate.Value.RELEASED)  # bound delay: off -> on
+    fs3.pressed(switchstate.Value.RELEASED)  # unbound: off -> on
+    snapshot("toggled")
+
+
+# ---------------------------------------------------------------------------
+# Instance ID normalization
+# ---------------------------------------------------------------------------
+
+
 def test_v3_websocket_bypass_event_with_multiword_id(v3_system):
     """WS parser correctly strips /graph/ prefix from multi-word instance IDs."""
     handler = v3_system.handler
