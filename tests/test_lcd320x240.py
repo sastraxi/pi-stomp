@@ -306,7 +306,7 @@ def _setup_pedalboard(instance, pb):
     instance.draw_main_panel()
 
 
-@pytest.mark.parametrize("topology", ["blank", "linear", "parallel", "stereo"])
+@pytest.mark.parametrize("topology", ["blank", "linear", "parallel", "stereo", "tall_parallel"])
 def test_routing_snapshot(lcd, snapshot, topology):
     instance, _ = lcd
     _setup_pedalboard(instance, pedalboard_fixtures.REGISTRY[topology]())
