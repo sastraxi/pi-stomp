@@ -48,22 +48,25 @@ class Panel(ContainerWidget):
             self.decorator = None
         super(Panel, self).__init__(**kwargs)
 
-    def _flat_sel(self):
-        """Lazy-expand sel_list via each entry's sel_children() into a flat
-           list of leaf widgets. Rebuilt on every nav — cheap for ≤30 items
-           and keeps us correct when subtrees change between calls."""
+    def sel_children(self):
+        """Expand this panel's sel_list entries into a flat list of leaf widgets."""
         flat = []
         for entry in self.sel_list:
             flat.extend(entry.sel_children())
         return flat
+
+    def _flat_sel(self):
+        """Lazy-expand sel_list via each entry's sel_children() into a flat
+           list of leaf widgets. Rebuilt on every nav — cheap for ≤30 items
+           and keeps us correct when subtrees change between calls."""
+        return self.sel_children()
+
 
     def del_sel_widget(self, widget):
         previously_selectable = widget.selectable
         widget.selectable = False
         if widget in self.sel_list:
             self.sel_list.remove(widget)
-        # If the current leaf was removed (or lived inside a removed subtree),
-        # fall back to the first leaf of the rebuilt flat view.
         flat = self._flat_sel()
         if self.sel_ref not in flat:
             self.sel_ref = None
@@ -74,6 +77,8 @@ class Panel(ContainerWidget):
         """Add a widget to the selectable list. The widget may be a leaf
            or a container that exposes its own selectables via sel_children()."""
         assert(widget.visible)
+        if widget in self.sel_list:
+            return
         self.sel_list.append(widget)
         widget.selectable = True
         if self.sel_ref is None:

@@ -1,9 +1,9 @@
 """Tests for the selection-tree API on Widget + Panel.
 
-Verifies the Path-A model: any entry in `Panel.sel_list` is treated as a
-subtree, lazily expanded via `Widget.sel_children()` into a flat list of
-leaves. The default leaf returns `[self]`. Containers override to yield
-their grouped selectables in their own iteration order.
+Verifies that any entry in Panel.sel_list is treated as a subtree,
+lazily expanded via Widget.sel_children() into a flat list of leaves.
+The default leaf returns [self]. Containers override to yield their
+grouped selectables in their own iteration order.
 
 These tests pin the contract independently of any GridPanel specifics.
 """
@@ -52,7 +52,7 @@ class _Group(Widget):
 
     def __init__(self, box, parent, members_order):
         super().__init__(box=box, parent=parent)
-        self.members_order = members_order  # list[Widget]
+        self.members_order = members_order
 
     def sel_children(self):
         return list(self.members_order)
@@ -86,7 +86,6 @@ def test_flat_sel_expands_subtree_in_place(panel):
     panel.add_sel_widget(a)
     panel.add_sel_widget(group)
     panel.add_sel_widget(d)
-    # group expands inline between a and d; group itself not in flat list.
     assert panel._flat_sel() == [a, b, c, d]
 
 
@@ -96,7 +95,6 @@ def test_sel_next_walks_into_and_out_of_subtree(panel):
     panel.add_sel_widget(a)
     panel.add_sel_widget(group)
     panel.add_sel_widget(d)
-    # sel_ref auto-set to first leaf (a) on first add.
     assert panel.sel_ref is a
     panel.sel_next()
     assert panel.sel_ref is b
@@ -145,10 +143,10 @@ def test_sel_widget_can_target_leaf_inside_subtree(panel):
 
 def test_sel_widget_silently_ignores_unknown(panel):
     a = _txt(panel, "a")
-    other = _txt(panel, "other")  # not added to sel_list, not in any subtree
+    other = _txt(panel, "other")
     panel.add_sel_widget(a)
     panel.sel_widget(other)
-    assert panel.sel_ref is a  # unchanged
+    assert panel.sel_ref is a
 
 
 # --------------------------------------------------------------------------- #
@@ -163,20 +161,19 @@ def test_detaching_subtree_falls_back_to_first_leaf(panel):
     panel.add_sel_widget(group)
     panel.sel_widget(c)
     panel.del_sel_widget(group)
-    # Cursor was on c (inside the removed subtree) — must snap somewhere valid.
     assert panel.sel_ref is a
 
 
 def test_subtree_can_grow_after_creation(panel):
     a = _txt(panel, "a")
     b = _txt(panel, "b")
-    group = _Group(Box.xywh(0, 0, 10, 10), panel, [])  # empty subtree initially
+    group = _Group(Box.xywh(0, 0, 10, 10), panel, [])
     panel.add_sel_widget(a)
     panel.add_sel_widget(group)
     assert panel._flat_sel() == [a]
-    group.members_order.append(b)  # subtree grew; flat list reflects on next rebuild
+    group.members_order.append(b)
     assert panel._flat_sel() == [a, b]
-    panel.sel_next()  # a -> b
+    panel.sel_next()
     assert panel.sel_ref is b
 
 
@@ -187,6 +184,5 @@ def test_subtree_can_shrink_during_navigation(panel):
     panel.add_sel_widget(group)
     panel.sel_widget(c)
     group.members_order.remove(c)
-    # c is no longer in the flat list — sel_next should still produce a valid leaf.
     panel.sel_next()
     assert panel.sel_ref in (a, b)

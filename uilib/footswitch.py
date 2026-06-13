@@ -124,5 +124,14 @@ class FootswitchWidget(Widget):
         draw.arc([x0, y0, x0 + 2 * r, y0 + 2 * r], 180, 270, fill=color, width=1)
         draw.arc([x1 - 2 * r, y0, x1, y0 + 2 * r], 270, 360, fill=color, width=1)
 
+    def set_selected(self, selected):
+        parent = self.parent
+        super().set_selected(selected)
+        # ShroudedPanel owns the background; incremental refresh leaves
+        # selection artefacts because _draw_erase is a no-op.  Refresh
+        # the whole panel so the shroud is re-applied cleanly.
+        if parent is not None:
+            parent.refresh()
+
     def toggle(self, is_bypassed):
         self.is_bypassed = is_bypassed
