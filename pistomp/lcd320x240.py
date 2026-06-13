@@ -371,10 +371,12 @@ class Lcd(abstract_lcd.Lcd):
             self.w_plugins.append(tile)
             return tile
 
-        # Grid area: below title (y=78), above footswitch panel (y=208).
+        # Grid area: below title (y=78) to bottom of LCD (y=240).
+        # footswitch_panel is pushed on top of pstack and renders over this.
         self.grid_panel = GridPanel(
             layout, tile_factory,
-            box=Box.xywh(0, 78, self.display_width, 130),
+            box=Box.xywh(0, 78, self.display_width, self.display_height - 78),
+            bottom_inset=self.footswitch_height,
             parent=self.main_panel,
         )
         self.main_panel.add_sel_widget(self.grid_panel)
