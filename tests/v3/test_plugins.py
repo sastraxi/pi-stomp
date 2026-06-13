@@ -137,9 +137,11 @@ def test_v3_toggle_plugin_bypass_no_footswitch_sends_websocket(v3_system: System
 
 
 def test_v3_toggle_plugin_bypass_via_footswitch(v3_system: SystemFixture, make_plugin, get_urls):
-    """Plugin with has_footswitch: toggle_plugin_bypass() routes through footswitch.pressed()."""
+    """Plugin with has_footswitch: toggle_plugin_bypass() sends MIDI and waits
+    for the WS echo to update state and display."""
     handler = v3_system.handler
     hw = v3_system.hw
+    ws_bridge = v3_system.ws_bridge
     mock_post = v3_system.mock_post
 
     assert handler.current
@@ -147,33 +149,52 @@ def test_v3_toggle_plugin_bypass_via_footswitch(v3_system: SystemFixture, make_p
     plugin = make_plugin("fuzz", has_footswitch=True)
     plugin.controllers = [hw.footswitches[0]]
     handler.current.pedalboard.plugins = [plugin]
+    handler.lcd.link_data(handler.pedalboard_list, handler.current, hw.footswitches)
+    handler.lcd.draw_main_panel()
 
     handler.toggle_plugin_bypass(None, plugin)
 
     assert not any("pi_stomp_set" in u for u in get_urls(mock_post))
+    assert hw.footswitches[0].toggled is True  # local intent only
+    assert plugin.is_bypassed() is False  # echo not yet received
+
+    # Simulate mod-host broadcasting the bypass change back.
+    ws_bridge.inject("param_set /graph/fuzz :bypass 0.0")
+    handler.poll_ws_messages()
+    assert plugin.is_bypassed() is False
     assert hw.footswitches[0].toggled is True
 
 
-def test_v3_bound_footswitch_emits_absolute_values_and_updates_display(v3_system: SystemFixture, make_plugin):
+def test_v3_bound_footswitch_emits_absolute_values_and_updates_on_echo(v3_system: SystemFixture, make_plugin):
     """A bound :bypass footswitch sends alternating absolute CC values from local
-    intent — so rapid presses that outrun the echo stay correct — and updates its
-    indicators optimistically, while leaving the cached parameter for the echo."""
+    intent — so rapid presses that outrun the echo stay correct — and only updates
+    its indicators when the mod-ui echo arrives."""
+    handler = v3_system.handler
     hw = v3_system.hw
+    ws_bridge = v3_system.ws_bridge
     fs = hw.footswitches[0]
     fs.refresh_callback = MagicMock()
     fs.midiout.send_message.reset_mock()
 
     plugin = make_plugin("fuzz")
     fs.parameter = plugin.parameters[":bypass"]
+    plugin.controllers.append(fs)
+    handler.current.pedalboard.plugins = [plugin]
+    handler.lcd.link_data(handler.pedalboard_list, handler.current, hw.footswitches)
+    handler.lcd.draw_main_panel()
 
-    bypass_before = fs.parameter.value
     for _ in range(3):
         fs.pressed(switchstate.Value.RELEASED)
 
     sent = [c.args[0][2] for c in fs.midiout.send_message.call_args_list]
     assert sent == [127, 0, 127]
-    assert fs.refresh_callback.call_count == 3  # display updates on each press
-    assert fs.parameter.value == bypass_before  # cached value still echo-authoritative
+    assert fs.refresh_callback.call_count == 0  # no display update before echo
+
+    # Echo the final state back; display updates once.
+    ws_bridge.inject("param_set /graph/fuzz :bypass 0.0")
+    handler.poll_ws_messages()
+    assert fs.refresh_callback.call_count == 1
+    assert fs.toggled is True
 
 
 def test_v3_preset_change_leans_on_ws_drain_not_rest(v3_system: SystemFixture, make_plugin, get_urls):
@@ -613,6 +634,7 @@ def test_v3_footswitch_states_snapshot(v3_system: SystemFixture, make_plugin, sn
 
     handler = v3_system.handler
     hw = v3_system.hw
+    ws_bridge = v3_system.ws_bridge
 
     assert handler.current
     assert handler.lcd
@@ -640,8 +662,12 @@ def test_v3_footswitch_states_snapshot(v3_system: SystemFixture, make_plugin, sn
     snapshot("initial")
 
     # Toggle one bound and one unbound footswitch.
-    fs1.pressed(switchstate.Value.RELEASED)  # bound delay: off -> on
-    fs3.pressed(switchstate.Value.RELEASED)  # unbound: off -> on
+    fs1.pressed(switchstate.Value.RELEASED)  # bound delay: off -> on (MIDI sent)
+    fs3.pressed(switchstate.Value.RELEASED)  # unbound: off -> on (immediate)
+
+    # Simulate mod-host echoing the bypass change for the bound footswitch.
+    ws_bridge.inject("param_set /graph/delay :bypass 0.0")
+    handler.poll_ws_messages()
     snapshot("toggled")
 
 
