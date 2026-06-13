@@ -59,6 +59,17 @@ class FootswitchWidget(Widget):
             fill=(0, 0, 0, 255),
         )
 
+    def _fit(self, text, max_w):
+        # Largest leading substring whose width fits max_w (hard cut, no ellipsis).
+        if max_w <= 0 or self.font.getbbox(text)[2] <= max_w:
+            return text
+        out = ""
+        for ch in text:
+            if self.font.getbbox(out + ch)[2] > max_w:
+                break
+            out += ch
+        return out
+
     def _draw(self, image, draw, real_box):
         x0, y0 = real_box.x0, real_box.y0
         w, h = real_box.width, real_box.height
@@ -68,6 +79,9 @@ class FootswitchWidget(Widget):
 
         assert self.font
         text = self.label if self.label else chr(ord("A") + self.num)
+        # Cap the keycap to the slot: hard-cut the label so the padded keycap
+        # never exceeds the slot width, just like plugin labels.
+        text = self._fit(text, w - 2 * self.KEYCAP_PAD_X)
         bbox = self.font.getbbox(text)
         tw = bbox[2] - bbox[0]
         th = bbox[3] - bbox[1]
