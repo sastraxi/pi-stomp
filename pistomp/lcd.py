@@ -91,9 +91,6 @@ class Lcd(ABC):
         pass
 
     # Analog Assignments (Tweak, Expression Pedal, etc.)
-    def draw_analog_assignments(self, controllers):
-        pass
-
     def render_assignments(self, assignments) -> None:
         pass
 

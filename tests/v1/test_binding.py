@@ -4,8 +4,6 @@ Pins behavior that differs from the v3 (modhandler) twin so a future shared
 controller-manager extraction can't silently flatten the asymmetry:
 
   - v1 reorders the plugin chain so footswitch-controlled plugins sit last.
-  - v1 analog controls have no explicit slot id, so they are bound to their
-    parameter but do not appear in current.assignments (no display slot).
 """
 
 import common.token as Token
@@ -39,10 +37,8 @@ def test_v1_bind_footswitch_and_analog(v1_system, make_plugin):
     assert fs.parameter is fuzz.parameters[":bypass"]
     assert fuzz.has_footswitch is True
 
-    # Analog control is bound to its parameter even without a display slot.
     assert knob.parameter is tone.parameters[":bypass"]
-    # v1 analog controls have no slot_id, so they don't appear in assignments.
-    assert not any(a.kind == ControlKind.KNOB for a in handler.current.assignments.values())
+    assert any(a.kind == ControlKind.KNOB for a in handler.current.assignments.values())
 
 
 def test_v1_bind_reorders_footswitch_plugins_to_end(v1_system, make_plugin):

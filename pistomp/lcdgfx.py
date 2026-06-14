@@ -21,6 +21,7 @@ import pistomp.lcd as abstract_lcd
 from typing import Any
 from PIL import Image, ImageFont, ImageDraw
 
+from pistomp.controller import AssignmentSource, ControlKind
 from pistomp.footswitch import Footswitch  # TODO would like to avoid this module knowing such details
 
 
@@ -324,25 +325,23 @@ class Lcd(abstract_lcd.Lcd):
         self.refresh_zone(0)
 
     # Zone 1 - Analog Assignments (Tweak, Expression Pedal, etc.)
-    def draw_analog_assignments(self, controllers):
+    def render_assignments(self, assignments):
         zone = 1
         self.erase_zone(zone)
 
         exp = Token.NONE
         knob = Token.NONE
-        for k, v in controllers.items():
-            control_type = util.DICT_GET(v, Token.TYPE)
-            if util.DICT_GET(v, Token.CATEGORY) == 'External':
-                port = util.DICT_GET(v, 'port_name') or ''
-                text = "%s:%s" % (self.shorten_name(port, self.plugin_width), util.DICT_GET(v, 'midi_cc'))
-            else:
-                s = k.split(":")
-                text = "%s:%s" % (self.shorten_name(s[0], self.plugin_width),
-                                  self.shorten_name(s[1], self.plugin_width_medium))
-            if control_type == Token.EXPRESSION:
-                exp = text
-            elif control_type == Token.KNOB:
-                knob = text
+        for a in assignments.values():
+            match a.source:
+                case AssignmentSource.EXTERNAL:
+                    text = "%s:%s" % (self.shorten_name(a.port_name or '', self.plugin_width), a.midi_cc)
+                case _:
+                    text = self.shorten_name(a.label or Token.NONE, self.plugin_width + self.plugin_width_medium)
+            match a.kind:
+                case ControlKind.EXPRESSION:
+                    exp = text
+                case ControlKind.KNOB:
+                    knob = text
 
         # Expression Pedal assignment
         self.draw[zone].line(((0, 5), (8, 1)), True, 1)

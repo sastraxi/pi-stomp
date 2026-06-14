@@ -754,7 +754,7 @@ class Mod(Handler):
                     logging.info(f"Activated blend mode: '{first_snapshot_name}'")
 
                 # Redraw analog assignments to use BlendMode object for expression pedal
-                self.lcd.draw_analog_assignments(self.current.analog_controllers)
+                self.lcd.render_assignments(self.current.assignments)
 
         except Exception as e:
             logging.error(f"Failed to prepare blend modes: {e}")
@@ -1432,7 +1432,7 @@ class Mod(Handler):
         self.lcd.update_bypass(self.hardware.relay.enabled)
         self.lcd.update_eq(self.eq_status)
         self.update_lcd_title()
-        self.lcd.draw_analog_assignments(self.current.analog_controllers)
+        self.lcd.render_assignments(self.current.assignments)
         self.lcd.draw_plugins(self.current.pedalboard.plugins)
         self.lcd.draw_bound_plugins(self.current.pedalboard.plugins, self.hardware.footswitches)
         self.lcd.draw_plugin_select()

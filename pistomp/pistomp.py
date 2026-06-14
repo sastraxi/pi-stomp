@@ -95,12 +95,12 @@ class Pistomp(hardware.Hardware):
         self.mod.add_lcd(Lcd.Lcd(self.mod.homedir))
 
     def init_analog_controls(self):
-        for c in ANALOG_CONTROL:
+        for idx, c in enumerate(ANALOG_CONTROL):
             control = AnalogMidiControl.AnalogMidiControl(self.spi, c[0], c[1], c[2], self.midi_channel,
-                                                          c[3])
+                                                          c[3], id=idx)
             self.analog_controls.append(control)
             key = format("%d:%d" % (self.midi_channel, c[2]))
-            self.controllers[key] = control  # Controller.Controller(self.midi_channel, c[1], Controller.Type.ANALOG)
+            self.controllers[key] = control
 
     def init_encoders(self):
         top_enc = EncoderController.EncoderController(
