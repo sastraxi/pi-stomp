@@ -4,6 +4,7 @@ from unittest.mock import MagicMock
 
 import common.token as Token
 from pistomp.analogmidicontrol import AnalogMidiControl
+from pistomp.controller import AssignmentSource
 from pistomp.controller_manager import ControllerManager
 from pistomp.current import Current
 
@@ -63,7 +64,8 @@ def test_external_controller_bound_and_displayed():
     ControllerManager(hw).bind(current)
 
     assert ctrl.parameter == "SYNTH_PARAM"
-    entry = current.analog_controllers["0:75"]
-    assert entry.get("category") == "External"
-    assert entry.get("port_name") == "c4"
-    assert entry.get("midi_cc") == 75
+    entry = current.assignments[3]  # ctrl_id=3
+    assert entry.category == "External"
+    assert entry.source == AssignmentSource.EXTERNAL
+    assert entry.port_name == "c4"
+    assert entry.midi_cc == 75

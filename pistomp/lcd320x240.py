@@ -22,6 +22,7 @@ from ui.wifi_menu import WifiMenu
 import pistomp.category as Category
 import pistomp.lcd as abstract_lcd
 import pistomp.switchstate as switchstate
+from pistomp.controller import AssignmentSource, ControlAssignment, ControlKind
 from PIL import Image, ImageColor
 
 from uilib import *
@@ -121,6 +122,10 @@ class Lcd(abstract_lcd.Lcd):
         self.w_plugins = []
         self.w_footswitches = []
         self.w_controls = []
+        self._assignments: dict[int, ControlAssignment] = {}
+        self._slots: dict[int, Icon] = {}
+        self._slot_width: int = 0
+        self._slot_count: int = 0
         self.w_splash = None
         self.w_info_msg = None
         self.w_parameter_dialogs = {}
@@ -181,7 +186,7 @@ class Lcd(abstract_lcd.Lcd):
         self.draw_tools(None, None, None, None)
         self.main_panel.sel_widget(self.w_wrench)  # Make the System tool (wrench) the initial selected item
         self.draw_title()
-        self.draw_analog_assignments(self.current.analog_controllers)
+        self.render_assignments(self.current.assignments)
         self.draw_plugins()
         self.draw_unbound_footswitches()
         if not self.main_panel_pushed:
@@ -750,71 +755,61 @@ class Lcd(abstract_lcd.Lcd):
         pass
 
     # Analog Assignments (Tweak, Expression Pedal, etc.)
-    def draw_analog_assignments(self, controllers):
-        # Quite a few assumptions here
-        # Expression pedal in first position, then 3 knobs (for v3)
-        # Should work for more or fewer but won't likely look great on the LCD
+    def render_assignments(self, assignments: dict[int, ControlAssignment]) -> None:
+        self._assignments = dict(assignments)
 
-        # spacing and scaling of text
         minimum = 4 if self.handler.hardware.version >= 3 else 3
-        num = max(minimum, len(controllers) + 1)
-        width_per_control = int(round(self.display_width / num))
-        text_per_control = width_per_control - 16  # minus height of control icon
+        num = max(minimum, (max(assignments.keys()) + 1) if assignments else 0)
+        self._slot_width = int(round(self.display_width / num))
+        self._slot_count = num
 
-        # clean up previous control widgets
-        for w in self.w_controls:
+        for w in self._slots.values():
             w.destroy()
+        self._slots.clear()
+        self.w_controls.clear()
 
-        x = 0
-        y = 56  # vertical position on screen
-        for i in range(0, num):
-            k = None
-            v = None
-            for key, value in controllers.items():
-                id = util.DICT_GET(value, Token.ID)
-                if id is not None and int(id) == i:
-                    k = key
-                    v = value
-                    break
+        for i in range(num):
+            w = self._build_slot_icon(i, assignments.get(i))
+            self._slots[i] = w
+            self.w_controls.append(w)
 
-            if k is None:
-                # Non-mapped control
-                name = "none"
-                control_type = Token.EXPRESSION if i == 0 else Token.KNOB  # HACK cuz we don't know type of unmapped
-                color = Category.get_category_color(None)
-                text_color = color
-            else:
-                # Mapped control or Volume
-                control_type = util.DICT_GET(v, Token.TYPE)
-                if control_type == Token.VOLUME:
-                    name = "volume"
-                    control_type = Token.KNOB
-                    color = self.default_plugin_color
-                    text_color = color
-                else:
-                    n = k.split(":")[1]
-                    name = self.shorten_name(n, text_per_control)
-                    color = util.DICT_GET(v, Token.COLOR)
-                    if color is None:
-                        # color not specified for control in config file
-                        category = util.DICT_GET(v, Token.CATEGORY)
-                        text_color = Category.get_category_color(category)
-                        color = self.default_plugin_color
-                    else:
-                        text_color = color
+    def update_assignment(self, assignment: ControlAssignment) -> None:
+        self._assignments[assignment.slot_id] = assignment
+        old = self._slots.get(assignment.slot_id)
+        if old is not None:
+            old.destroy()
+        w = self._build_slot_icon(assignment.slot_id, assignment)
+        self._slots[assignment.slot_id] = w
+        self.w_controls = list(self._slots.values())
+        self.main_panel.refresh()
 
-            if control_type == Token.KNOB:
-                w = Icon(box=Box.xywh(x, y, 0, 0), text=name, text_color=text_color, parent=self.main_panel, outline=0)
-                w.set_foreground(color)
-                w.add_knob()
-                self.w_controls.append(w)
-            elif control_type == Token.EXPRESSION:
-                w = Icon(box=Box.xywh(x, y, 0, 0), text=name, text_color=text_color, parent=self.main_panel, outline=0)
-                w.set_foreground(color)
-                w.add_pedal()
-                self.w_controls.append(w)
+    def _build_slot_icon(self, slot_id: int, assignment: ControlAssignment | None) -> "Icon":
+        text_per_control = self._slot_width - 16
+        x = slot_id * self._slot_width
 
-            x += width_per_control
+        if assignment is None:
+            name = "none"
+            is_expression = slot_id == 0
+            color = Category.get_category_color(None)
+            text_color = color
+        elif assignment.source == AssignmentSource.VOLUME:
+            name = "volume"
+            is_expression = False
+            color = self.default_plugin_color
+            text_color = color
+        else:
+            name = self.shorten_name(assignment.label, text_per_control) if assignment.label else "none"
+            is_expression = assignment.kind == ControlKind.EXPRESSION
+            text_color = Category.get_category_color(assignment.category)
+            color = self.default_plugin_color
+
+        w = Icon(box=Box.xywh(x, 56, 0, 0), text=name, text_color=text_color, parent=self.main_panel, outline=0)
+        w.set_foreground(color)
+        if is_expression:
+            w.add_pedal()
+        else:
+            w.add_knob()
+        return w
     
     def draw_info_message(self, text, refresh=False):
         if self.w_info_msg is None:

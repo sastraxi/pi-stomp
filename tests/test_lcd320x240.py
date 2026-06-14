@@ -8,8 +8,8 @@ from unittest.mock import patch, MagicMock
 import pytest
 
 from tests.conftest import PROJECT_ROOT
+from pistomp.controller import AssignmentSource, ControlAssignment, ControlKind
 from pistomp.lcd320x240 import Lcd
-import common.token as Token
 from uilib.misc import InputEvent
 
 
@@ -110,8 +110,8 @@ def setup_main_ui(instance):
         pedalboard=mock_pedalboard,
         presets={0: "Clean", 1: "Lead"},
         preset_index=0,
-        analog_controllers={
-            "exp:pedal": {Token.ID: 0, Token.TYPE: Token.EXPRESSION, Token.COLOR: "Red", Token.NAME: "Wah"},
+        assignments={
+            0: ControlAssignment(slot_id=0, kind=ControlKind.EXPRESSION, label="Wah", category=None, source=AssignmentSource.MIDI_LEARNED),
         },
     )
     mock_footswitches = [MockObject(id=i, toggled=False, get_display_label=lambda: "") for i in range(4)]
@@ -138,10 +138,10 @@ def test_analog_assignments_snapshot(lcd, snapshot):
         pedalboard=mock_pedalboard,
         presets={0: "Clean"},
         preset_index=0,
-        analog_controllers={
-            "exp:pedal": {Token.ID: 0, Token.TYPE: Token.EXPRESSION, Token.COLOR: "Red", Token.NAME: "Wah"},
-            "gain:knob": {Token.ID: 1, Token.TYPE: Token.KNOB, Token.COLOR: "Green", Token.NAME: "Gain"},
-            "vol:knob": {Token.ID: 2, Token.TYPE: Token.VOLUME, Token.COLOR: "Blue", Token.NAME: "Volume"},
+        assignments={
+            0: ControlAssignment(slot_id=0, kind=ControlKind.EXPRESSION, label="Wah", category=None, source=AssignmentSource.MIDI_LEARNED),
+            1: ControlAssignment(slot_id=1, kind=ControlKind.KNOB, label="Gain", category=None, source=AssignmentSource.MIDI_LEARNED),
+            2: ControlAssignment(slot_id=2, kind=ControlKind.KNOB, label="Volume", category=None, source=AssignmentSource.VOLUME),
         },
     )
     instance.link_data(pedalboards=[mock_pedalboard], current=mock_current, footswitches=[])
@@ -196,7 +196,7 @@ def test_update_footswitch_off_snapshot(lcd, snapshot):
     instance, _ = lcd
     mock_fs = MockObject(id=0, toggled=True, get_display_label=lambda: "Dist", color="Red", parameter=None)
     mock_current = MockObject(
-        pedalboard=MockObject(title="PB", plugins=[]), presets={0: "Clean"}, preset_index=0, analog_controllers={}
+        pedalboard=MockObject(title="PB", plugins=[]), presets={0: "Clean"}, preset_index=0, assignments={}
     )
     instance.link_data(pedalboards=[], current=mock_current, footswitches=[mock_fs])
     instance.draw_main_panel()
@@ -209,7 +209,7 @@ def test_update_footswitch_on_snapshot(lcd, snapshot):
     instance, _ = lcd
     mock_fs = MockObject(id=1, toggled=False, get_display_label=lambda: "Drive", color="Orange", parameter=None)
     mock_current = MockObject(
-        pedalboard=MockObject(title="PB", plugins=[]), presets={0: "Clean"}, preset_index=0, analog_controllers={}
+        pedalboard=MockObject(title="PB", plugins=[]), presets={0: "Clean"}, preset_index=0, assignments={}
     )
     instance.link_data(pedalboards=[], current=mock_current, footswitches=[mock_fs])
     instance.draw_main_panel()
@@ -287,7 +287,7 @@ def test_tap_tempo_snapshot(lcd, snapshot):
     instance, _ = lcd
     mock_fs = MockObject(id=2, toggled=True, get_display_label=lambda: "120", parameter=None)
     mock_current = MockObject(
-        pedalboard=MockObject(title="BPM Test", plugins=[]), presets={0: "Clean"}, preset_index=0, analog_controllers={}
+        pedalboard=MockObject(title="BPM Test", plugins=[]), presets={0: "Clean"}, preset_index=0, assignments={}
     )
     instance.link_data(pedalboards=[], current=mock_current, footswitches=[mock_fs])
     instance.draw_main_panel()
@@ -300,7 +300,7 @@ def test_tap_tempo_disable_clears_label(lcd, snapshot):
     labels = ["120"]
     mock_fs = MockObject(id=2, toggled=True, get_display_label=lambda: labels[0], parameter=None)
     mock_current = MockObject(
-        pedalboard=MockObject(title="BPM Test", plugins=[]), presets={0: "Clean"}, preset_index=0, analog_controllers={}
+        pedalboard=MockObject(title="BPM Test", plugins=[]), presets={0: "Clean"}, preset_index=0, assignments={}
     )
     instance.link_data(pedalboards=[], current=mock_current, footswitches=[mock_fs])
     instance.draw_main_panel()
@@ -322,7 +322,7 @@ def test_update_footswitch_clears_label_when_empty(lcd):
 
     mock_fs = MockObject(id=2, toggled=True, get_display_label=get_label, parameter=None)
     mock_current = MockObject(
-        pedalboard=MockObject(title="BPM Test", plugins=[]), presets={0: "Clean"}, preset_index=0, analog_controllers={}
+        pedalboard=MockObject(title="BPM Test", plugins=[]), presets={0: "Clean"}, preset_index=0, assignments={}
     )
     instance.link_data(pedalboards=[], current=mock_current, footswitches=[mock_fs])
     instance.draw_main_panel()

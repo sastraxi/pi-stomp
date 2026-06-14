@@ -4,12 +4,13 @@ Pins behavior that differs from the v3 (modhandler) twin so a future shared
 controller-manager extraction can't silently flatten the asymmetry:
 
   - v1 reorders the plugin chain so footswitch-controlled plugins sit last.
-  - v1 populates analog_controllers from an AnalogMidiControl's cfg dict,
-    stamping CATEGORY + TYPE + ID.
+  - v1 analog controls have no explicit slot id, so they are bound to their
+    parameter but do not appear in current.assignments (no display slot).
 """
 
 import common.token as Token
 from pistomp.analogmidicontrol import AnalogMidiControl
+from pistomp.controller import AssignmentSource, ControlKind
 from pistomp.footswitch import Footswitch
 
 
@@ -38,15 +39,10 @@ def test_v1_bind_footswitch_and_analog(v1_system, make_plugin):
     assert fs.parameter is fuzz.parameters[":bypass"]
     assert fuzz.has_footswitch is True
 
-    # Analog control surfaced in the LCD assignment dict with category + type.
-    analog_entries = [
-        cfg for cfg in handler.current.analog_controllers.values()
-        if cfg.get(Token.TYPE) == Token.KNOB
-    ]
-    assert len(analog_entries) == 1
-    entry = analog_entries[0]
-    assert entry[Token.CATEGORY] == "Filter"
-    assert Token.ID in entry
+    # Analog control is bound to its parameter even without a display slot.
+    assert knob.parameter is tone.parameters[":bypass"]
+    # v1 analog controls have no slot_id, so they don't appear in assignments.
+    assert not any(a.kind == ControlKind.KNOB for a in handler.current.assignments.values())
 
 
 def test_v1_bind_reorders_footswitch_plugins_to_end(v1_system, make_plugin):

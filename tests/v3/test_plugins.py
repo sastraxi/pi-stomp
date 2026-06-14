@@ -9,11 +9,11 @@ from unittest.mock import MagicMock
 import pytest
 
 import pistomp.switchstate as switchstate
+from pistomp.controller import AssignmentSource
 from pistomp.encoder_controller import EncoderController as Encoder
 from pistomp.footswitch import Footswitch
 from common.parameter import Parameter
 from modalapi.plugin import Plugin
-import common.token as Token
 from tests.types import SystemFixture
 
 
@@ -65,7 +65,7 @@ def test_v3_bind_encoder_midi_to_plugin(v3_system: SystemFixture, make_plugin):
     handler.current.pedalboard.plugins = [plugin]
     handler.bind_current_pedalboard()
 
-    assert any("wah" in k for k in handler.current.analog_controllers)
+    assert enc.id in handler.current.assignments
 
 
 def test_v3_bind_volume_encoder_populates_analog_controllers(v3_system: SystemFixture):
@@ -78,7 +78,7 @@ def test_v3_bind_volume_encoder_populates_analog_controllers(v3_system: SystemFi
 
     handler.bind_current_pedalboard()
 
-    assert Token.VOLUME in handler.current.analog_controllers
+    assert any(a.source == AssignmentSource.VOLUME for a in handler.current.assignments.values())
 
 
 def test_v3_bind_does_not_reorder_footswitch_plugins(v3_system: SystemFixture, make_plugin):

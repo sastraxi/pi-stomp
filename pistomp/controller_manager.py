@@ -22,7 +22,7 @@ import common.token as Token
 from common.parameter import Parameter, TTL_PROPERTIES, TTL_INTEGER
 from modalapi.external_midi import EXTERNAL_INSTANCE_ID
 from pistomp.analogmidicontrol import AnalogMidiControl
-from pistomp.controller import AnalogDisplayInfo
+from pistomp.controller import AssignmentSource, ControlAssignment
 from pistomp.current import Current
 from pistomp.footswitch import Footswitch
 
@@ -54,7 +54,7 @@ class ControllerManager:
             if controller.type != Token.VOLUME:
                 controller.parameter = None
 
-        current.analog_controllers = {}
+        current.assignments = {}
 
         if current.pedalboard:
             footswitch_plugins = self._bind_plugin_parameters(current)
@@ -94,18 +94,34 @@ class ControllerManager:
                     footswitch_plugins.append(plugin)
                     controller.set_category(plugin.category)
                 else:
-                    key = "%s:%s" % (plugin.instance_id, param.name)
-                    display_info = controller.get_display_info()
-                    display_info["category"] = plugin.category
-                    current.analog_controllers[key] = display_info
+                    slot_id = controller.slot_id
+                    kind = controller.kind
+                    if slot_id is not None and kind is not None:
+                        assignment = ControlAssignment(
+                            slot_id=slot_id,
+                            kind=kind,
+                            label=param.name,
+                            category=plugin.category,
+                            source=AssignmentSource.MIDI_LEARNED,
+                            midi_cc=controller.midi_CC,
+                        )
+                        current.assignments[slot_id] = assignment
         return footswitch_plugins
 
     def _bind_volume_encoders(self, current) -> None:
         """Surface VOLUME-type encoders in the assignment display (v3 only in
         practice — v1 has no VOLUME-typed encoder)."""
         for e in self._hw.encoders:
-            if e.type == Token.VOLUME:
-                current.analog_controllers[Token.VOLUME] = e.get_display_info()
+            if e.type == Token.VOLUME and e.slot_id is not None and e.kind is not None:
+                assignment = ControlAssignment(
+                    slot_id=e.slot_id,
+                    kind=e.kind,
+                    label="volume",
+                    category=None,
+                    source=AssignmentSource.VOLUME,
+                    midi_cc=e.midi_CC,
+                )
+                current.assignments[e.slot_id] = assignment
 
     @staticmethod
     def _move_footswitch_plugins_to_end(current, footswitch_plugins) -> None:
@@ -142,11 +158,16 @@ class ControllerManager:
             if isinstance(controller, Footswitch):
                 continue  # footswitches don't appear in the analog/encoder display
 
-            key = f"{controller.midi_channel}:{controller.midi_CC}"
-            entry: AnalogDisplayInfo = {
-                **controller.get_display_info(),
-                "port_name": port_name,
-                "midi_cc": controller.midi_CC,
-                "category": "External",
-            }
-            current.analog_controllers[key] = entry
+            slot_id = controller.slot_id
+            kind = controller.kind
+            if slot_id is not None and kind is not None:
+                assignment = ControlAssignment(
+                    slot_id=slot_id,
+                    kind=kind,
+                    label=f"{port_name} CC{controller.midi_CC}",
+                    category="External",
+                    source=AssignmentSource.EXTERNAL,
+                    port_name=port_name,
+                    midi_cc=controller.midi_CC,
+                )
+                current.assignments[slot_id] = assignment

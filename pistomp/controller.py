@@ -15,10 +15,11 @@
 
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import dataclass
 from enum import Enum
 import logging
-from typing import TYPE_CHECKING, TypedDict
+from typing import TYPE_CHECKING
 from common.parameter import Parameter
 
 if TYPE_CHECKING:
@@ -44,17 +45,29 @@ class RoutingInfo:
         return cls(destination=RoutingDestination.EXTERNAL, port_name=port_name)
 
 
-class AnalogDisplayInfo(TypedDict, total=False):
-    type: str | None  # Token.KNOB, Token.EXPRESSION, Token.VOLUME
-    id: int | None  # Position on screen (0-based from left); None if unpositioned
+class ControlKind(Enum):
+    KNOB = "knob"
+    EXPRESSION = "expression"
+
+
+class AssignmentSource(Enum):
+    UNMAPPED = "unmapped"
+    MIDI_LEARNED = "midi_learned"
+    RECENT = "recent"
+    SELECTED = "selected"
+    EXTERNAL = "external"
+    VOLUME = "volume"
+
+
+@dataclasses.dataclass(frozen=True)
+class ControlAssignment:
+    slot_id: int
+    kind: ControlKind
+    label: str | None
     category: str | None
-    port_name: str | None  # External port name if routed externally
-    midi_cc: int | None  # MIDI CC for external routing display
-
-
-# Per-pedalboard analog/encoder assignment display, keyed by "instance:param"
-# (plugin-bound), "channel:cc" (external), or Token.VOLUME.
-AnalogControllers = dict[str, AnalogDisplayInfo]
+    source: AssignmentSource
+    port_name: str | None = None
+    midi_cc: int | None = None
 
 
 class Controller:
@@ -70,6 +83,17 @@ class Controller:
         self.midi_max: int = 127
         self.midi_value: int = 0
         self._sink: InputSink | None = None
+
+    @property
+    def slot_id(self) -> int | None:
+        """Display slot index for this controller. None if the controller has
+        no display slot (e.g. footswitches)."""
+        return None
+
+    @property
+    def kind(self) -> ControlKind | None:
+        """Visual kind for the assignment display. None if not displayable."""
+        return None
 
     @property
     def sink(self) -> InputSink:
@@ -88,8 +112,3 @@ class Controller:
     def bind_to_parameter(self, parameter: Parameter) -> None:
         self.parameter = parameter
         self.set_value(parameter.value)
-
-    def get_display_info(self) -> AnalogDisplayInfo:
-        """Own-presentation only; routing-derived fields are added by the
-        registry owner (ControllerManager._bind_external_controllers)."""
-        return {}

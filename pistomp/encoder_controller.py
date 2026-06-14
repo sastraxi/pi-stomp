@@ -22,6 +22,7 @@ from typing import List, Optional
 
 import common.util as util
 import pistomp.controller as controller
+from pistomp.controller import AssignmentSource, ControlAssignment, ControlKind
 import pistomp.analogswitch as analogswitch
 import pistomp.gpioswitch as gpioswitch
 import pistomp.switchstate as switchstate
@@ -228,13 +229,25 @@ class EncoderController(controller.Controller):
             return 0.0
         return self.current_step / (self.num_steps - 1)
 
-    def get_display_info(self) -> controller.AnalogDisplayInfo:
-        info: controller.AnalogDisplayInfo = {"category": None}
-        if self.type is not None:
-            info["type"] = self.type
-        if self.id is not None:
-            info["id"] = self.id
-        return info
+    @property
+    def slot_id(self) -> int | None:
+        return self.id
+
+    @property
+    def kind(self) -> ControlKind:
+        return ControlKind.KNOB
+
+    def get_assignment(self) -> ControlAssignment:
+        if self.id is None:
+            raise ValueError("EncoderController.get_assignment() called before id was set")
+        return ControlAssignment(
+            slot_id=self.id,
+            kind=ControlKind.KNOB,
+            label=None,
+            category=None,
+            source=AssignmentSource.UNMAPPED,
+            midi_cc=self.midi_CC,
+        )
 
     # ── Dispatch ─────────────────────────────────────────────────────────
 

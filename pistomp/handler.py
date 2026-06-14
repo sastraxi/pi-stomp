@@ -19,6 +19,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from pistomp.analogmidicontrol import AnalogMidiControl
+from pistomp.controller import AssignmentSource, ControlAssignment
 from pistomp.current import Current
 from pistomp.encoder_controller import EncoderController
 from pistomp.footswitch import Footswitch
@@ -210,10 +211,16 @@ class Handler(InputSink):
             controller.set_category(plugin.category)
             return True
         elif isinstance(controller, (AnalogMidiControl, EncoderController)):
-            key = "%s:%s" % (plugin.instance_id, param.name)
-            display_info = controller.get_display_info()
-            display_info["category"] = plugin.category
-            self.current.analog_controllers[key] = display_info
+            slot_id = controller.slot_id
+            if slot_id is not None and self.current is not None:
+                self.current.assignments[slot_id] = ControlAssignment(
+                    slot_id=slot_id,
+                    kind=controller.kind,
+                    label=param.name,
+                    category=plugin.category,
+                    source=AssignmentSource.MIDI_LEARNED,
+                    midi_cc=controller.midi_CC,
+                )
         return False
 
     def _redraw_after_binding(self, controller, is_footswitch):

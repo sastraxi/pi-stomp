@@ -431,7 +431,7 @@ class Modhandler(Handler):
                 logging.info(f"Deactivating blend mode '{old_name}' (switching to '{new_snapshot_name}')")
                 active.deactivate()
                 self.active_blend_mode = None
-                self.lcd.draw_analog_assignments(self.current.analog_controllers)
+                self.lcd.render_assignments(self.current.assignments)
             else:
                 logging.debug(f"Staying on blend mode '{old_name}'")
 
@@ -445,7 +445,7 @@ class Modhandler(Handler):
                 # to ensure we have the latest stop data (user may have just saved a snapshot)
                 new_active.check_for_snapshot_changes()
                 new_active.activate()
-                self.lcd.draw_analog_assignments(self.current.analog_controllers)
+                self.lcd.render_assignments(self.current.assignments)
             except Exception as e:
                 logging.error(f"Failed to activate blend mode '{new_snapshot_name}': {e}")
                 self.active_blend_mode = None
@@ -749,7 +749,7 @@ class Modhandler(Handler):
             # Footswitch: redraw just that one switch, not the whole board.
             self.lcd.update_footswitch(controller)
         else:
-            self.lcd.draw_analog_assignments(self.current.analog_controllers)
+            self.lcd.render_assignments(self.current.assignments)
 
     def pedalboard_change(self, pedalboard=None):
         logging.info("Pedalboard change")
