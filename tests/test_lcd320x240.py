@@ -43,19 +43,35 @@ def setup_main_ui(instance):
     plugins = [
         MockObject(
             instance_id="distortion",
+            display_name="distortion",
             is_bypassed=lambda: False,
             category="Distortion",
             has_footswitch=True,
             controllers=[],
         ),
         MockObject(
-            instance_id="delay", is_bypassed=lambda: False, category="Delay", has_footswitch=True, controllers=[]
+            instance_id="delay",
+            display_name="delay",
+            is_bypassed=lambda: False,
+            category="Delay",
+            has_footswitch=True,
+            controllers=[],
         ),
         MockObject(
-            instance_id="reverb", is_bypassed=lambda: True, category="Reverb", has_footswitch=True, controllers=[]
+            instance_id="reverb",
+            display_name="reverb",
+            is_bypassed=lambda: True,
+            category="Reverb",
+            has_footswitch=True,
+            controllers=[],
         ),
         MockObject(
-            instance_id="chorus", is_bypassed=lambda: False, category="Modulator", has_footswitch=False, controllers=[]
+            instance_id="chorus",
+            display_name="chorus",
+            is_bypassed=lambda: False,
+            category="Modulator",
+            has_footswitch=False,
+            controllers=[],
         ),
     ]
     mock_pedalboard = MockObject(title="Rock Rig", plugins=plugins)

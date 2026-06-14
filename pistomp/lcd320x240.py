@@ -343,8 +343,7 @@ class Lcd(abstract_lcd.Lcd):
         self.w_plugins = []
 
         for plugin in self.current.pedalboard.plugins:
-            label = plugin.instance_id[:self.plugin_label_length]
-            label = label.replace("_", "")
+            label = plugin.display_name[:self.plugin_label_length]
             label = self.shorten_name(label, self.plugin_width)
             p = TextWidget(box=Box.xywh(x, y, self.plugin_width, self.plugin_height), text=label, outline_radius=5,
                            parent=self.main_panel, action=self.plugin_event, object=plugin)

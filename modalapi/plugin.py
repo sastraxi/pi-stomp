@@ -16,6 +16,8 @@
 from __future__ import annotations
 
 import json
+import re
+from functools import cached_property
 
 from common.parameter import Parameter
 from pistomp.footswitch import Footswitch
@@ -35,12 +37,19 @@ class Plugin:
         category: str | None = None,
     ) -> None:
         self.instance_id: str = instance_id.lstrip("/")
+        self.name: str = (info or {}).get("name") or self.instance_id
         self.parameters: dict[str, Parameter] = parameters
         self.bypass_indicator_xy: tuple[Point, Point] = ((0, 0), (0, 0))
         self.lcd_xyz: LcdPosition | None = None
         self.controllers: list[Footswitch] = []
         self.has_footswitch: bool = False
         self.category: str | None = category
+
+    @cached_property
+    def display_name(self) -> str:
+        id_base = re.sub(r'_?\d+$', '', self.instance_id).lower()
+        raw = self.name if len(self.name) < len(self.instance_id) or id_base in ('mono', 'stereo') else self.instance_id
+        return raw.replace("_", "")
 
     def is_bypassed(self) -> bool:
         param = self.parameters.get(":bypass")
