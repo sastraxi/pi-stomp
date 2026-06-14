@@ -22,7 +22,7 @@ from typing import List, Optional
 
 import common.util as util
 import pistomp.controller as controller
-from pistomp.controller import AssignmentSource, ControlAssignment, ControlKind
+from pistomp.controller import ControlKind
 import pistomp.analogswitch as analogswitch
 import pistomp.gpioswitch as gpioswitch
 import pistomp.switchstate as switchstate
@@ -236,18 +236,6 @@ class EncoderController(controller.Controller):
     @property
     def kind(self) -> ControlKind:
         return ControlKind.KNOB
-
-    def get_assignment(self) -> ControlAssignment:
-        if self.id is None:
-            raise ValueError("EncoderController.get_assignment() called before id was set")
-        return ControlAssignment(
-            slot_id=self.id,
-            kind=ControlKind.KNOB,
-            label=None,
-            category=None,
-            source=AssignmentSource.UNMAPPED,
-            midi_cc=self.midi_CC,
-        )
 
     # ── Dispatch ─────────────────────────────────────────────────────────
 

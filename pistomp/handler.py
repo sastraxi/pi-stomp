@@ -105,15 +105,15 @@ class Handler(InputSink):
         behavior exactly, but as the sole arbiter on the handler side."""
         if kind == SwitchEventKind.LONGPRESS:
             if fs.relay_list:
-                # Relay footswitch: longpress toggles the relay immediately and
-                # never enters chord resolution.
+                # Relay takes full ownership of longpress: toggles bypass immediately.
+                # Any longpress: group config on this footswitch is silently ignored
+                # (hardware.py warns at init if both are set).
                 new_toggled = not fs.toggled
                 fs.toggled = new_toggled
                 fs.toggle_relays(new_toggled)
                 fs.set_led(new_toggled)
                 self.update_lcd_fs(bypass_change=True)
             else:
-                # TODO: consider case where relay and longpress are specified
                 self.chord_helper.observe(fs, timestamp)
             return True
 

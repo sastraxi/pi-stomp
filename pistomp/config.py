@@ -86,7 +86,7 @@ schema = {
                 "type" : ["array", "string"],
                 "items" : {
                   "type" : "string",
-                  "enum" : ["next_snapshot", "previous_snapshot", "toggle_bypass", "set_mod_tap_tempo", "toggle_tap_tempo_enable"]
+                  "enum" : ["next_snapshot", "previous_snapshot", "toggle_bypass", "toggle_tap_tempo_enable", "toggle_tuner_enable"]
                 }
               },
               "midi_CC": {
@@ -179,7 +179,8 @@ schema = {
                 "enum": ["KNOB", "VOLUME"]
               },
               "longpress": {
-                "type": "string"
+                "type": "string",
+                "enum": ["next_snapshot", "previous_snapshot", "toggle_bypass", "toggle_tap_tempo_enable", "toggle_tuner_enable"]
               }
             },
             "required": [

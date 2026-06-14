@@ -29,6 +29,8 @@ hardware:
   #                               Use when the external device is on a different channel than the hardware default
   # longpress: <callback_name>    The name of a handler method to call when switch is long-pressed (optional)
   #                               longpress can be a list enclosed with []'s
+  #                               To use tap tempo: pair longpress: toggle_tap_tempo_enable with tap_tempo: set_mod_tap_tempo
+  #                               on the same footswitch — longpress enters/exits the mode, short press stamps the beat.
   #
   footswitches:
   - id: 0
@@ -80,7 +82,9 @@ hardware:
   #                               Falls back to the virtual port only if the device is unavailable; must be the device name (e.g. 'Source Audio C4 Synth')
   # midi_channel: <integer>       Override MIDI channel for this encoder (0-15, optional)
   #                               Use when the external device is on a different channel than the hardware default
-  # longpress: <callback_name>    The name of a handler method to call when switch is long-pressed (optional)
+  # longpress: <callback_name>    Callback on long-press of the encoder button (optional); see footswitch longpress above
+  #                               for valid values — note: tap_tempo stamping is footswitch-only, so toggle_tap_tempo_enable
+  #                               enables the mode but there is no way to stamp from an encoder button alone.
   #
   encoders:
     - id: 1

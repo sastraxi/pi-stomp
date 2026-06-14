@@ -19,7 +19,7 @@ import common.util as util
 import common.token as Token
 import pistomp.analogcontrol as analogcontrol
 import pistomp.controller as controller
-from pistomp.controller import AssignmentSource, ControlAssignment, ControlKind
+from pistomp.controller import ControlKind
 from pistomp.input.event import AnalogEvent
 
 
@@ -86,14 +86,3 @@ class AnalogMidiControl(analogcontrol.AnalogControl, controller.Controller):
     def kind(self) -> ControlKind:
         return ControlKind.EXPRESSION if self.type == Token.EXPRESSION else ControlKind.KNOB
 
-    def get_assignment(self) -> ControlAssignment:
-        if self.id is None:
-            raise ValueError(f"AnalogMidiControl.get_assignment() called before id was set")
-        return ControlAssignment(
-            slot_id=self.id,
-            kind=self.kind,
-            label=None,
-            category=None,
-            source=AssignmentSource.UNMAPPED,
-            midi_cc=self.midi_CC,
-        )

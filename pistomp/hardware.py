@@ -516,7 +516,12 @@ class Hardware(ABC):
 
                 # Longpress and longpress groups
                 if Token.LONGPRESS in f:  # Can be a list or a single (string)
-                    fs.set_longpress_groups(Util.DICT_GET(f, Token.LONGPRESS))
+                    if fs.relay_list:
+                        logging.warning(
+                            f"Footswitch {fs.id}: longpress: ignored because bypass: relay takes priority"
+                        )
+                    else:
+                        fs.set_longpress_groups(Util.DICT_GET(f, Token.LONGPRESS))
 
             idx += 1
 

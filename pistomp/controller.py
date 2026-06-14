@@ -51,10 +51,7 @@ class ControlKind(Enum):
 
 
 class AssignmentSource(Enum):
-    UNMAPPED = "unmapped"
     MIDI_LEARNED = "midi_learned"
-    RECENT = "recent"
-    SELECTED = "selected"
     EXTERNAL = "external"
     VOLUME = "volume"
 
