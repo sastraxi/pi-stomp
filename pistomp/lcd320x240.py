@@ -787,21 +787,22 @@ class Lcd(abstract_lcd.Lcd):
         text_per_control = self._slot_width - 16
         x = slot_id * self._slot_width
 
-        if assignment is None:
-            name = "none"
-            is_expression = slot_id == 0
-            color = Category.get_category_color(None)
-            text_color = color
-        elif assignment.source == AssignmentSource.VOLUME:
-            name = "volume"
-            is_expression = False
-            color = self.default_plugin_color
-            text_color = color
-        else:
-            name = self.shorten_name(assignment.label, text_per_control) if assignment.label else "none"
-            is_expression = assignment.kind == ControlKind.EXPRESSION
-            text_color = Category.get_category_color(assignment.category)
-            color = self.default_plugin_color
+        match assignment:
+            case None:
+                name = "none"
+                is_expression = slot_id == 0
+                color = Category.get_category_color(None)
+                text_color = color
+            case ControlAssignment(source=AssignmentSource.VOLUME):
+                name = "volume"
+                is_expression = False
+                color = self.default_plugin_color
+                text_color = color
+            case _:
+                name = self.shorten_name(assignment.label, text_per_control) if assignment.label else "none"
+                is_expression = assignment.kind == ControlKind.EXPRESSION
+                text_color = Category.get_category_color(assignment.category)
+                color = self.default_plugin_color
 
         w = Icon(box=Box.xywh(x, 56, 0, 0), text=name, text_color=text_color, parent=self.main_panel, outline=0)
         w.set_foreground(color)
