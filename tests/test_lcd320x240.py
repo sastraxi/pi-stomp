@@ -77,7 +77,7 @@ def setup_main_ui(instance):
             "exp:pedal": {Token.ID: 0, Token.TYPE: Token.EXPRESSION, Token.COLOR: "Red", Token.NAME: "Wah"},
         },
     )
-    mock_footswitches = [MockObject(id=i, toggled=False, get_display_label=lambda: "") for i in range(4)]
+    mock_footswitches = [MockObject(id=i, toggled=False, get_display_label=lambda: "", parameter=None) for i in range(4)]
     instance.link_data(pedalboards=[mock_pedalboard], current=mock_current, footswitches=mock_footswitches)
     instance.draw_main_panel()
 
@@ -310,7 +310,7 @@ def _setup_pedalboard(instance, pb):
         preset_index=0,
         analog_controllers={},
     )
-    mock_footswitches = [MockObject(id=i, toggled=False, get_display_label=lambda: "") for i in range(4)]
+    mock_footswitches = [MockObject(id=i, toggled=False, get_display_label=lambda: "", parameter=None) for i in range(4)]
     instance.link_data(pedalboards=[pb], current=mock_current, footswitches=mock_footswitches)
     instance.draw_main_panel()
 
