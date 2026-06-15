@@ -199,19 +199,6 @@ class Lcd(abstract_lcd.Lcd):
         if self._tuner_panel is not None and self.pstack.current == self._tuner_panel:
             self._tuner_panel.tick()
 
-    def show_tuner_panel(self, panel: TunerPanel) -> None:
-        self._tuner_panel = panel
-        self.pstack.push_panel(panel)
-        # push_panel composes the (still-blank) panel image onto the stack but
-        # doesn't draw the panel's children. Force a full redraw so bg, rules,
-        # header and hint are on screen before tick()'s partial refreshes start.
-        panel.refresh()
-
-    def hide_tuner_panel(self) -> None:
-        if self._tuner_panel is not None:
-            self.pstack.pop_panel(self._tuner_panel)
-        self._tuner_panel: TunerPanel | None = None
-
         # Update control progress bars (analog controls and encoders)
         if self.pstack.current == self.main_panel:
             for icon in self.w_controls:
@@ -245,7 +232,23 @@ class Lcd(abstract_lcd.Lcd):
                     if icon.progress != progress:
                         icon.set_progress(progress)
 
+    def show_tuner_panel(self, panel: TunerPanel) -> None:
+        self._tuner_panel = panel
+        self.pstack.push_panel(panel)
+        # push_panel composes the (still-blank) panel onto the stack but
+        # doesn't draw the panel's children. Force a full redraw so bg, rules,
+        # header and hint are on screen before tick()'s partial refreshes start.
+        panel.refresh()
+
+    def hide_tuner_panel(self) -> None:
+        if self._tuner_panel is not None:
+            self.pstack.pop_panel(self._tuner_panel)
+        self._tuner_panel: TunerPanel | None = None
+
     #
+    # Toolbar
+    #
+
     # Toolbar
     #
     def draw_tools(self, wifi_type=None, eq_type=None, bypass_type=None, system_type=None):
@@ -864,6 +867,19 @@ class Lcd(abstract_lcd.Lcd):
             if isinstance(icon_object, BlendMode):
                 text_color = self.default_plugin_color
                 color = self.default_plugin_color
+                # Initialize the label to the closest blend stop snapshot so it
+                # never briefly shows "none" for an unbound blend input slot.
+                input_ctrl = icon_object.input_controller.controlled_input
+                if input_ctrl:
+                    if isinstance(input_ctrl, EncoderController):
+                        position = input_ctrl.midi_value / 127.0
+                    else:
+                        position = input_ctrl.last_read / 1023.0
+                    stops = icon_object.input_controller.stops
+                    closest_stop = min(stops, key=lambda s: abs(s.position - position))
+                    snapshot_name = self.handler.current.presets.get(closest_stop.snapshot_index, "")
+                    if snapshot_name:
+                        name = snapshot_name
 
             if control_type == Token.KNOB:
                 w = Icon(
