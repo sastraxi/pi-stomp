@@ -213,10 +213,7 @@ class Lcd(abstract_lcd.Lcd):
                 elif isinstance(icon.object, BlendMode):
                     input_ctrl = icon.object.input_controller.controlled_input
                     if input_ctrl:
-                        if isinstance(input_ctrl, EncoderController):
-                            position = input_ctrl.midi_value / 127.0
-                        else:
-                            position = input_ctrl.last_read / 1023.0
+                        position = input_ctrl.get_normalized_value()
                         midi_value = int(position * 127)
 
                         stops = icon.object.input_controller.stops
@@ -819,7 +816,7 @@ class Lcd(abstract_lcd.Lcd):
             # Look up the actual control instance for progress bar tracking
             analog_control = None
             for ac in self.handler.hardware.analog_controls + self.handler.hardware.encoders:
-                if hasattr(ac, "id") and ac.id == i:
+                if hasattr(ac, "id") and ac.id == i and getattr(ac, "type", None) != Token.NAV:
                     analog_control = ac
                     break
 
@@ -864,19 +861,16 @@ class Lcd(abstract_lcd.Lcd):
                         else:
                             text_color = color
 
+            blend_initial_progress = None
             if isinstance(icon_object, BlendMode):
                 text_color = self.default_plugin_color
                 color = self.default_plugin_color
-                # Initialize the label to the closest blend stop snapshot so it
-                # never briefly shows "none" for an unbound blend input slot.
+                # Initialize label and progress bar from the current input position.
                 input_ctrl = icon_object.input_controller.controlled_input
                 if input_ctrl:
-                    if isinstance(input_ctrl, EncoderController):
-                        position = input_ctrl.midi_value / 127.0
-                    else:
-                        position = input_ctrl.last_read / 1023.0
+                    blend_initial_progress = input_ctrl.get_normalized_value()
                     stops = icon_object.input_controller.stops
-                    closest_stop = min(stops, key=lambda s: abs(s.position - position))
+                    closest_stop = min(stops, key=lambda s: abs(s.position - blend_initial_progress))
                     snapshot_name = self.handler.current.presets.get(closest_stop.snapshot_index, "")
                     if snapshot_name:
                         name = snapshot_name
@@ -892,6 +886,8 @@ class Lcd(abstract_lcd.Lcd):
                 )
                 w.set_foreground(color)
                 w.add_knob()
+                if blend_initial_progress is not None:
+                    w.set_progress(blend_initial_progress)
                 self.w_controls.append(w)
             elif control_type == Token.EXPRESSION:
                 w = Icon(
@@ -904,6 +900,8 @@ class Lcd(abstract_lcd.Lcd):
                 )
                 w.set_foreground(color)
                 w.add_pedal()
+                if blend_initial_progress is not None:
+                    w.set_progress(blend_initial_progress)
                 self.w_controls.append(w)
 
             x += width_per_control

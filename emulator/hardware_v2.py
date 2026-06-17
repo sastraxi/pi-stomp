@@ -19,12 +19,12 @@ Matches pi-Stomp Core (Pistompcore): one nav encoder with press, three
 footswitches, one pot, one expression pedal, no relay interaction.
 """
 
+import common.token as Token
 from emulator.hardware_base import EmulatorHardwareBase
 from emulator.controls import MockEncoder
 
 
 class EmulatorHardwareV2(EmulatorHardwareBase):
-
     VERSION_LABEL = "v2"
     lcd_flip = True
 
@@ -37,11 +37,11 @@ class EmulatorHardwareV2(EmulatorHardwareBase):
         self.init_analog_controls()
 
     def init_encoders(self):
-        nav = MockEncoder(callback=self.handler.universal_encoder_select, id=0)
+        nav = MockEncoder(callback=self.handler.universal_encoder_select, id=0, type=Token.NAV)
         nav.press_callback = self.handler.universal_encoder_sw
         self.encoders.append(nav)
         self.nav_encoder = nav
         # tweak_encoders and volume_encoder stay None/[] — v2 has no extras
 
-    def add_encoder(self, id, type, callback, longpress_callback, midi_channel, midi_cc):
+    def add_encoder(self, id, type, callback, longpress_callback, midi_channel, midi_cc):  # pyright: ignore[reportIncompatibleMethodOverride]
         pass  # v2 has no config-driven encoders

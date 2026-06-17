@@ -47,6 +47,8 @@ class InputController:
         for control in (*analog_controls, *encoders):
             if getattr(control, "id", None) != input_id:
                 continue
+            if getattr(control, "type", None) == Token.NAV:
+                raise ValueError(f"Input {input_id} is a NAV encoder and cannot be used for blend mode")
             if getattr(control, "type", None) == Token.VOLUME:
                 raise ValueError(f"Input {input_id} is a VOLUME controller and cannot be used for blend mode")
             if not hasattr(control, "get_normalized_value"):

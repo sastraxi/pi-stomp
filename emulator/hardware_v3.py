@@ -39,7 +39,7 @@ class EmulatorHardwareV3(EmulatorHardwareBase):
         self.init_analog_controls()
 
     def init_encoders(self):
-        nav = MockEncoder(callback=self.handler.universal_encoder_select, id=0)
+        nav = MockEncoder(callback=self.handler.universal_encoder_select, id=0, type=Token.NAV)
         nav.press_callback = self.handler.universal_encoder_sw
         self.encoders.append(nav)
         self.nav_encoder = nav

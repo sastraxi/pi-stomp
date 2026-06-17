@@ -117,6 +117,7 @@ class MockAnalogControl(analogcontrol.AnalogControl):
         self.cfg = cfg or {"type": control_type, "id": id}
         self.value = 64
         self.parameter = None
+        self.value_change_callback = None
 
     def refresh(self):
         pass
@@ -129,6 +130,10 @@ class MockAnalogControl(analogcontrol.AnalogControl):
 
     def set_value(self, value):
         self.value = int(value)
+        self.last_read = int(value)
+
+    def get_normalized_value(self) -> float:
+        return self.last_read / 1023.0
 
     def send_midi(self, value_0_127):
         if self.midiout and self.midi_CC is not None and _rtmidi_available:

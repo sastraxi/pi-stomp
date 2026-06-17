@@ -127,7 +127,7 @@ class Pistomptre(hardware.Hardware):
         return enc
 
     def init_encoders(self):
-        enc = Encoder.Encoder(NAV_PIN_D, NAV_PIN_CLK, callback=self.handler.universal_encoder_select)
+        enc = Encoder.Encoder(NAV_PIN_D, NAV_PIN_CLK, callback=self.handler.universal_encoder_select, type=Token.NAV)
         self.encoders.append(enc)
         # Nav encoder switch is a special case which gets initialized in init_analog_controls
 
