@@ -56,7 +56,7 @@ class EncoderController(controller.Controller):
 
     # Speed amplification: at this per-detent interval, multiplier = 1×.
     REFERENCE_DT_MS = 80.0
-    MAX_MULTIPLIER = 16.0
+    MAX_MULTIPLIER = 4.0
     MIN_MULTIPLIER = 1.0
 
     def __init__(

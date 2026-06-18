@@ -26,6 +26,9 @@ class Encoder:
     Public API: read_rotary() -> int (returns accumulated direction, clears accumulator).
     """
 
+    # Cap on how many detents are drained per poll tick.
+    MAX_DRAIN = 8
+
     def __init__(self, d_pin: int | None, clk_pin: int | None):
         self.d_pin = d_pin
         self.clk_pin = clk_pin
@@ -82,14 +85,16 @@ class Encoder:
                 self.direction += d
 
     def read_rotary(self) -> int:
-        """Return accumulated direction (+1, -1, or 0) and clear the accumulator."""
-        d = 0
+        """Return accumulated direction since the last call, capped to ±MAX_DRAIN.
+        Drains the full accumulator (up to MAX_DRAIN) so that fast spins
+        deliver a batched count in one EncoderEvent rather than ±1 per tick.
+        """
         if self.direction != 0:
             with self._lock:
                 if self.direction > 0:
-                    d = 1
-                elif self.direction < 0:
-                    d = -1
+                    d = min(self.direction, self.MAX_DRAIN)
+                else:
+                    d = max(self.direction, -self.MAX_DRAIN)
                 self.direction -= d
         else:
             d = self._process_gpios()

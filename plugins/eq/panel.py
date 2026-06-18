@@ -757,20 +757,6 @@ _Q_STEP = 0.05
 
 # Speed multipliers mirror EncoderController.refresh — keep behaviour
 # consistent between MIDI-bound use and panel-bound use.
-_FAST_THRESHOLD = 4
-_MEDIUM_THRESHOLD = 2
-_FAST_MULT = 8
-_MEDIUM_MULT = 4
-
-
-def _speed_multiplier(rotations: int) -> int:
-    n = abs(rotations)
-    if n >= _FAST_THRESHOLD:
-        return _FAST_MULT
-    if n >= _MEDIUM_THRESHOLD:
-        return _MEDIUM_MULT
-    return 1
-
 
 def _clip(v: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, v))
@@ -853,7 +839,7 @@ class EqPanel(PluginPanel[EqState]):
             # Chrome selected: consume Tweak1/2 silently, let Tweak3 (volume)
             # fall through to normal handler dispatch.
             return encoder_id != 3
-        delta = rotations * _speed_multiplier(rotations)
+        delta = rotations
         p = self._state.bands[band.name]
         if encoder_id == 1:
             if band.gain_sym is None:
