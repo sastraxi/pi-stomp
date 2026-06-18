@@ -40,7 +40,6 @@ class Lcd(abstract_lcd.Lcd):
 
         if lcd is None:
             from gfxhat import touch, lcd, backlight  # type: ignore[import-untyped]
-
             self._lcd, self._backlight, self._touch = lcd, backlight, touch
 
         # Polling divisor for main loop (monochrome LCD is fast)
@@ -51,9 +50,18 @@ class Lcd(abstract_lcd.Lcd):
         self.num_leds = 6
 
         # Zone dimensions
-        self.zone_height = {0: 12, 1: 8, 2: 2, 3: 13, 4: 2, 5: 13, 6: 2, 7: 12}
+        self.zone_height = {0: 12,
+                            1: 8,
+                            2: 2,
+                            3: 13,
+                            4: 2,
+                            5: 13,
+                            6: 2,
+                            7: 12}
 
-        self.footswitch_xy = {0: (0, 0), 1: (51, 0), 2: (101, 0)}
+        self.footswitch_xy = {0: (0,   0),
+                              1: (51,  0),
+                              2: (101, 0)}
 
         # Menu (System menu, Parameter edit, etc.)
         self.menu_height = self.height - self.zone_height[0] + 1  # TODO figure out why +1
@@ -72,16 +80,14 @@ class Lcd(abstract_lcd.Lcd):
 
         self.zones = 8
         # Surfaces for each zone (monochrome, stored as alpha channel for pixel manipulation)
-        self.surfaces = [
-            Surface((self.width, self.zone_height[0]), pygame.SRCALPHA),  # Pedalboard / Preset Title bar
-            Surface((self.width, self.zone_height[1]), pygame.SRCALPHA),  # Analog Controllers
-            Surface((self.width, self.zone_height[2]), pygame.SRCALPHA),  # Plugin selection
-            Surface((self.width, self.zone_height[3]), pygame.SRCALPHA),  # Plugins Row 1
-            Surface((self.width, self.zone_height[4]), pygame.SRCALPHA),  # Plugin selection
-            Surface((self.width, self.zone_height[5]), pygame.SRCALPHA),  # Plugins Row 2
-            Surface((self.width, self.zone_height[6]), pygame.SRCALPHA),  # Plugin selection
-            Surface((self.width, self.zone_height[7]), pygame.SRCALPHA),
-        ]  # Footswitch Plugins
+        self.surfaces = [Surface((self.width, self.zone_height[0]), pygame.SRCALPHA),  # Pedalboard / Preset Title bar
+                         Surface((self.width, self.zone_height[1]), pygame.SRCALPHA),  # Analog Controllers
+                         Surface((self.width, self.zone_height[2]), pygame.SRCALPHA),  # Plugin selection
+                         Surface((self.width, self.zone_height[3]), pygame.SRCALPHA),  # Plugins Row 1
+                         Surface((self.width, self.zone_height[4]), pygame.SRCALPHA),  # Plugin selection
+                         Surface((self.width, self.zone_height[5]), pygame.SRCALPHA),  # Plugins Row 2
+                         Surface((self.width, self.zone_height[6]), pygame.SRCALPHA),  # Plugin selection
+                         Surface((self.width, self.zone_height[7]), pygame.SRCALPHA)]  # Footswitch Plugins
 
         # Load fonts from the bundled fonts dir (pygame._freetype for consistent rendering)
         fonts_dir = os.path.join(cwd, "fonts")
@@ -140,6 +146,7 @@ class Lcd(abstract_lcd.Lcd):
         if x < 0 or x >= surface.get_width() or y < 0 or y >= surface.get_height():
             return False
         color = surface.get_at((x, y))
+        # Check if pixel is white (lit) - use any of R, G, or B channel
         return color[0] > 127
 
     def erase_zone(self, zone_idx):
@@ -189,9 +196,7 @@ class Lcd(abstract_lcd.Lcd):
         for p in self.plugins:
             surf = self.surfaces[p.lcd_xyz[2]]
             color = (255, 255, 255, 255) if not p.is_bypassed() else (0, 0, 0, 0)
-            pygame.draw.line(
-                surf, color, p.bypass_indicator_xy[0], p.bypass_indicator_xy[1], self.plugin_bypass_thickness
-            )
+            pygame.draw.line(surf, color, p.bypass_indicator_xy[0], p.bypass_indicator_xy[1], self.plugin_bypass_thickness)
         self.refresh_zone(2)
         self.refresh_zone(4)
         self.refresh_zone(6)
@@ -241,21 +246,17 @@ class Lcd(abstract_lcd.Lcd):
         menu_list = list(sorted(menu_items))
         for i in menu_list:
             if idx == 0:
-                self.small_font.render_to(
-                    self.menu_surface, (x, y), "%s" % menu_items[i][Token.NAME], (255, 255, 255, 255)
-                )
-                x = 8  # indent after first element (back button)
+                self.small_font.render_to(self.menu_surface, (x, y), "%s" % menu_items[i][Token.NAME], (255, 255, 255, 255))
+                x = 8   # indent after first element (back button)
             else:
-                self.small_font.render_to(
-                    self.menu_surface, (x, y), "%s %s" % (i, menu_items[i][Token.NAME]), (255, 255, 255, 255)
-                )
+                self.small_font.render_to(self.menu_surface, (x, y), "%s %s" % (i, menu_items[i][Token.NAME]), (255, 255, 255, 255))
             y += 10
             idx += 1
         self.refresh_menu()  # TODO Change name
 
     def menu_highlight(self, index):
         scroll_idx = 0
-        highlight = (index * 10, index * 10 + 8)  # TODO replace 10
+        highlight = ((index * 10, index * 10 + 8))  # TODO replace 10
         num_visible = 3  # TODO
         if index > num_visible:
             scroll_idx = index - num_visible
@@ -293,15 +294,9 @@ class Lcd(abstract_lcd.Lcd):
             x = x + xpitch
             yref = yref - 1
 
-        self.small_font.render_to(
-            self.menu_surface, (0, self.menu_y0 + 4), "%d" % parameter.minimum, (255, 255, 255, 255)
-        )
-        self.small_font.render_to(
-            self.menu_surface,
-            (self.graph_width - (len(str(parameter.maximum)) * 4), self.menu_y0 + 4),
-            "%d" % parameter.maximum,
-            (255, 255, 255, 255),
-        )
+        self.small_font.render_to(self.menu_surface, (0, self.menu_y0 + 4), "%d" % parameter.minimum, (255, 255, 255, 255))
+        self.small_font.render_to(self.menu_surface, (self.graph_width - (len(str(parameter.maximum)) * 4), self.menu_y0 + 4),
+                                   "%d" % parameter.maximum, (255, 255, 255, 255))
 
         self.refresh_menu()
 
@@ -321,6 +316,7 @@ class Lcd(abstract_lcd.Lcd):
         self.title_font.render_to(self.surfaces[0], (0, y), pedalboard, fg)
 
         if preset != None:
+
             # delimiter
             delimiter = "/"
             x = pb_size + 1
@@ -349,15 +345,13 @@ class Lcd(abstract_lcd.Lcd):
         knob = Token.NONE
         for k, v in controllers.items():
             control_type = util.DICT_GET(v, Token.TYPE)
-            if util.DICT_GET(v, Token.CATEGORY) == "External":
-                port = util.DICT_GET(v, "port_name") or ""
-                text = "%s:%s" % (self.shorten_name(port, self.plugin_width), util.DICT_GET(v, "midi_cc"))
+            if util.DICT_GET(v, Token.CATEGORY) == 'External':
+                port = util.DICT_GET(v, 'port_name') or ''
+                text = "%s:%s" % (self.shorten_name(port, self.plugin_width), util.DICT_GET(v, 'midi_cc'))
             else:
                 s = k.split(":")
-                text = "%s:%s" % (
-                    self.shorten_name(s[0], self.plugin_width),
-                    self.shorten_name(s[1], self.plugin_width_medium),
-                )
+                text = "%s:%s" % (self.shorten_name(s[0], self.plugin_width),
+                                  self.shorten_name(s[1], self.plugin_width_medium))
             if control_type == Token.EXPRESSION:
                 exp = text
             elif control_type == Token.KNOB:
@@ -425,18 +419,16 @@ class Lcd(abstract_lcd.Lcd):
     def draw_plugin(self, zone, x, y, text, width, eol, plugin, round_bottom_corners=False):
         text = self.shorten_name(text, width)
         x2 = x + width
-        if eol:
+        if (eol):
             x2 = x2 - 1
 
         plugin.lcd_xyz = (x, y, zone)
         self.draw_box((x, y), (x2, y + self.plugin_height), zone, text, round_bottom_corners)
 
-        bypass_indicator_xy = ((x + 3, y + 9), (x2 - 3, y + 9))
+        bypass_indicator_xy = ((x+3, y+9), (x2-3, y+9))
         plugin.bypass_indicator_xy = bypass_indicator_xy
         color = (0, 0, 0, 255) if plugin.is_bypassed() else (255, 255, 255, 255)
-        pygame.draw.line(
-            self.surfaces[zone], color, bypass_indicator_xy[0], bypass_indicator_xy[1], self.plugin_bypass_thickness
-        )
+        pygame.draw.line(self.surfaces[zone], color, bypass_indicator_xy[0], bypass_indicator_xy[1], self.plugin_bypass_thickness)
 
         if plugin not in self.plugins:
             self.plugins.append(plugin)
@@ -444,40 +436,29 @@ class Lcd(abstract_lcd.Lcd):
         return x2
 
     def draw_bound_plugins(self, plugins, footswitches):
+        bypass_label = "byps"
         fss = footswitches.copy()
         for p in plugins:
             if p.has_footswitch is False:
                 continue
             for c in p.controllers:
                 if isinstance(c, Footswitch):
-                    assert c.parameter
                     fs_id = c.id
                     fss[fs_id] = None
                     if c.parameter.symbol != ":bypass":  # TODO token
                         label = c.parameter.name
                     else:
-                        label = p.instance_id[: self.plugin_label_length]
+                        label = p.instance_id[:self.plugin_label_length]
                         label = label.replace("_", "")
-                    self.draw_plugin(
-                        7,
-                        self.footswitch_xy[fs_id][0],
-                        self.footswitch_xy[fs_id][1],
-                        label,
-                        self.footswitch_width,
-                        False,
-                        p,
-                        True,
-                    )
+                    self.draw_plugin(7, self.footswitch_xy[fs_id][0], self.footswitch_xy[fs_id][1], label,
+                                     self.footswitch_width, False, p, True)
 
         # Draw any footswitches which weren't found to be bound to a plugin
         for fs_id in range(len(fss)):
             if fss[fs_id] is None:
                 continue
             label = "" if fss[fs_id].display_label is None else fss[fs_id].display_label
-            xy2 = (
-                self.footswitch_xy[fs_id][0] + self.footswitch_width,
-                self.footswitch_xy[fs_id][1] + self.plugin_height,
-            )
+            xy2 = (self.footswitch_xy[fs_id][0] + self.footswitch_width, self.footswitch_xy[fs_id][1] + self.plugin_height)
             self.draw_box((self.footswitch_xy[fs_id][0], self.footswitch_xy[fs_id][1]), xy2, 7, label, True)
 
         self.refresh_zone(7)
@@ -504,7 +485,7 @@ class Lcd(abstract_lcd.Lcd):
         for p in plugins:
             if p.has_footswitch:
                 continue
-            label = p.instance_id[: self.plugin_label_length]
+            label = p.instance_id[:self.plugin_label_length]
             label = label.replace("_", "")
             count += 1
             if count > 4:
@@ -522,7 +503,7 @@ class Lcd(abstract_lcd.Lcd):
 
     def shorten_name(self, name, width):
         text = ""
-        for x in name.lower().replace("_", "").replace("/", "").replace(" ", ""):
+        for x in name.lower().replace('_', '').replace('/', '').replace(' ', ''):
             test = text + x
             test_bbox = self.small_font.get_rect(test)
             test_size = test_bbox.width
