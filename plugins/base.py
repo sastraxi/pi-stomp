@@ -87,7 +87,7 @@ class PluginPanel(Panel, InputSink, Generic[TState]):
         self._on_dismiss = on_dismiss
         self._param_queue: dict[str, float] = {}
 
-        Panel.__init__(self, box=Box.xywh(0, 0, _W, _H))
+        Panel.__init__(self, box=Box.xywh(0, 0, _W, _H), no_dim=True)
 
         # Chrome buttons (created now, appended to nav *after* subclass widgets)
         cfg = Config()
