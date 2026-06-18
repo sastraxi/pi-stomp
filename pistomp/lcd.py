@@ -139,5 +139,5 @@ class Lcd(ABC):
 
     @property
     @abstractmethod
-    def plugin_panel(self) -> PluginPanel:
+    def plugin_panel(self) -> PluginPanel | None:
         pass
