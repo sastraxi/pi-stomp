@@ -32,8 +32,6 @@ from __future__ import annotations
 
 import logging
 
-import numpy
-
 _logger = logging.getLogger(__name__)
 
 _PATCHED = False
@@ -42,33 +40,36 @@ _PATCHED = False
 def apply() -> None:
     """Patch ``adafruit_rgb_display.rgb.image_to_data`` in place.
 
-    Idempotent; safe to call more than once. No-op if numpy is unavailable
-    (the upstream slow path is already numpy-dependent, so this should never
-    trigger on pi-stomp, but we guard for safety).
+    Idempotent; safe to call more than once. Uses the
+    ``__patched_by_pistomp__`` sentinel attribute on the target function
+    to detect prior patches, which survives module reloads.
     """
     global _PATCHED
     if _PATCHED:
         return
-    if numpy is None:  # pragma: no cover - upstream requires numpy too
-        _logger.warning("numpy unavailable; skipping adafruit driver patch")
-        return
 
-    import adafruit_rgb_display.rgb as rgb  # pyright: ignore[reportMissingImports] - upstream dependency
+    try:
+        import adafruit_rgb_display.rgb as rgb  # pyright: ignore[reportMissingImports]
+    except ImportError:
+        _logger.warning("adafruit_rgb_display not found; skipping driver patch")
+        return
 
     if getattr(rgb.image_to_data, "__patched_by_pistomp__", False):
         _PATCHED = True
         return
 
-    def image_to_data_fast(image):  # type: ignore[no-untyped-def]
+    import numpy
+
+    def image_to_data_fast(image):
         data = numpy.array(image.convert("RGB")).astype("uint16")
         color = ((data[:, :, 0] & 0xF8) << 8) | ((data[:, :, 1] & 0xFC) << 3) | (data[:, :, 2] >> 3)
         packed = numpy.dstack(((color >> 8) & 0xFF, color & 0xFF)).astype(numpy.uint8)
         return packed.tobytes()
 
-    image_to_data_fast.__patched_by_pistomp__ = True  # type: ignore[attr-defined]
+    image_to_data_fast.__patched_by_pistomp__ = True  # pyright: ignore[reportFunctionMemberAccess]
     rgb.image_to_data = image_to_data_fast
     _PATCHED = True
-    _logger.debug("Patched adafruit_rgb_display.rgb.image_to_data (tobytes variant)")
+    _logger.info("Patched adafruit_rgb_display.rgb.image_to_data (tobytes variant)")
 
 
 if __name__ == "__main__":

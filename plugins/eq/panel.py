@@ -487,11 +487,11 @@ class GraphWidget(Widget):
             if cx1 > cx0:
                 ox, oy = ctx._f().topleft
                 surf = ctx.surface
-                px = pygame.surfarray.pixels3d(surf)  # locks surface
+                px = None
                 try:
+                    px = pygame.surfarray.pixels3d(surf)  # locks surface
                     # Surface slice for the dirty columns: (N, GRAPH_H, 3) view.
                     sub = px[ox + cx0 : ox + cx1, oy : oy + GRAPH_H, :]
-                    n = cx1 - cx0
                     bg = _BG_ARRAY[cx0:cx1, :].astype(np.float32)  # (N, H, 3)
                     result = bg.copy()
 
@@ -499,8 +499,7 @@ class GraphWidget(Widget):
                     ys_f = self._curve_y_float
                     smear_colors = self._smear_colors
                     smear_intensity = self._smear_intensity
-                    has_smear = smear_colors is not None and smear_intensity is not None and ys_f is not None
-                    if has_smear:
+                    if smear_colors is not None and smear_intensity is not None and ys_f is not None:
                         yf = ys_f[cx0:cx1].astype(np.float32) - GRAPH_Y0  # (N,)
                         yz_f = float(_ZERO_DB_Y - GRAPH_Y0)
                         raw_len = np.abs(yz_f - yf)
@@ -693,7 +692,7 @@ class _BandSelectable(Widget):
 
     def __init__(self, panel: "EqPanel", band: Band) -> None:
         super().__init__(box=Box.xywh(0, 0, 1, 1), parent=panel, visible=True)
-        self._panel = panel
+        self._panel: "EqPanel" = panel
         self.band = band
 
     def set_selected(self, selected: bool) -> None:  # type: ignore[override]
@@ -757,6 +756,7 @@ _Q_STEP = 0.05
 
 # Speed multipliers mirror EncoderController.refresh — keep behaviour
 # consistent between MIDI-bound use and panel-bound use.
+
 
 def _clip(v: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, v))

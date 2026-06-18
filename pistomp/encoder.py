@@ -86,8 +86,10 @@ class Encoder:
 
     def read_rotary(self) -> int:
         """Return accumulated direction since the last call, capped to ±MAX_DRAIN.
+
         Drains the full accumulator (up to MAX_DRAIN) so that fast spins
         deliver a batched count in one EncoderEvent rather than ±1 per tick.
+        Returns 0 when no ISR edges have fired since the last call.
         """
         if self.direction != 0:
             with self._lock:
@@ -97,5 +99,5 @@ class Encoder:
                     d = max(self.direction, -self.MAX_DRAIN)
                 self.direction -= d
         else:
-            d = self._process_gpios()
+            d = 0
         return d
