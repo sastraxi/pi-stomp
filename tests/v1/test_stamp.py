@@ -7,7 +7,6 @@ Verifies that ``pistomp-stamp stamp`` is called at the exact right times and
 
 from unittest.mock import patch, MagicMock
 
-import pytest
 import pistomp.switchstate as switchstate
 
 from tests.types import SystemFixtureLegacy
@@ -25,8 +24,7 @@ def _stamp_calls(mock_run):
 def _assert_stamp_called(mock_run, times: int = 1):
     calls = _stamp_calls(mock_run)
     assert len(calls) == times, (
-        f"Expected {times} pistomp-stamp call(s), got {len(calls)}. "
-        f"All subprocess.run calls: {mock_run.call_args_list}"
+        f"Expected {times} pistomp-stamp call(s), got {len(calls)}. All subprocess.run calls: {mock_run.call_args_list}"
     )
 
 
@@ -67,11 +65,13 @@ class TestStampOnPedalboardChange:
             patch("modalapi.mod.req.get") as mock_get,
             patch("modalapi.mod.req.post") as mock_post,
         ):
+
             def fail_response(*args, **kwargs):
                 resp = MagicMock()
                 resp.status_code = 500
                 resp.text = "{}"
                 return resp
+
             mock_get.side_effect = fail_response
             mock_post.side_effect = fail_response
             handler.pedalboard_change()
