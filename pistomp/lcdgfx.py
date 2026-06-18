@@ -84,12 +84,18 @@ class Lcd(abstract_lcd.Lcd):
         ]  # Footswitch Plugins
 
         # Load fonts from the bundled fonts dir (pygame._freetype for consistent rendering)
+        # Use monochrome (antialiased=False) for crisp rendering on 1-bit LCD
         fonts_dir = os.path.join(cwd, "fonts")
         self.splash_font = _make_font(os.path.join(fonts_dir, "DejaVuSans-Bold.ttf"), 18)
+        self.splash_font.antialiased = False
         self.title_font = _make_font(os.path.join(fonts_dir, "DejaVuSans-Bold.ttf"), 11)
+        self.title_font.antialiased = False
         self.label_font = _make_font(os.path.join(fonts_dir, "DejaVuSans-Bold.ttf"), 10)
+        self.label_font.antialiased = False
         self.small_bold_font = _make_font(os.path.join(fonts_dir, "DejaVuSansMono-Bold.ttf"), 8)
+        self.small_bold_font.antialiased = False
         self.small_font = _make_font(os.path.join(fonts_dir, "EtBt6001-JO47.ttf"), 6)
+        self.small_font.antialiased = False
 
         # Splash
         splash_text = Surface((103, 63), pygame.SRCALPHA)
@@ -313,18 +319,18 @@ class Lcd(abstract_lcd.Lcd):
         pb_bbox = self.title_font.get_rect(pedalboard)
         pb_size = pb_bbox.width
         font_height = pb_bbox.height
-        y = -2  # negative pushes text to top of LCD
+        y = 0  # baseline at top of zone
 
         # Pedalboard Name
         if invert_pb:
-            pygame.draw.rect(self.surfaces[0], (255, 255, 255, 255), (0, y, pb_size, font_height - 2))
+            pygame.draw.rect(self.surfaces[0], (255, 255, 255, 255), (1, y, pb_size, font_height - 2))
         fg = (0, 0, 0, 255) if invert_pb else (255, 255, 255, 255)
-        self.title_font.render_to(self.surfaces[0], (0, y), pedalboard, fg)
+        self.title_font.render_to(self.surfaces[0], (1, y), pedalboard, fg)
 
         if preset is not None:
             # delimiter
             delimiter = "/"
-            x = pb_size + 1
+            x = pb_size + 2
             self.title_font.render_to(self.surfaces[0], (x, y), delimiter, (255, 255, 255, 255))
 
             # Preset Name
