@@ -13,29 +13,30 @@
 # You should have received a copy of the GNU General Public License
 # along with pi-stomp.  If not, see <https://www.gnu.org/licenses/>.
 
+import pygame
+
+from uilib.box import Box
 from uilib.config import Config
+from uilib.glyphs import KeycapCornerGlyph
+from uilib.misc import get_text_size
 from uilib.widget import Widget
 
 
 class FootswitchWidget(Widget):
-    """Minimal footswitch indicator: a "keycap" outline hugging a centered label.
+    """Footswitch indicator: a keycap outline (rounded top, open bottom) centered in the slot.
 
-    The keycap is the accent color — top edge with rounded top corners and open
-    sides, no bottom edge. Accent is the configured footswitch color when ON, or
-    DIMMED_BG when OFF. Unbound slots show "A".."D" as a placeholder.
+    Accent color is ON when bound and active, dimmed otherwise.
     """
 
     UNBOUND_BG = (50, 50, 50)
     BOUND_OFF_BG = (90, 90, 90)
     DEFAULT_COLOR = (255, 255, 255)
 
-    KEYCAP_RADIUS = 4  # top-corner radius
-    KEYCAP_PAD_X = 7  # horizontal gap between label and keycap sides
-    KEYCAP_PAD_TOP = 3  # gap between keycap top and label
-    KEYCAP_PAD_BOTTOM = 3  # how far the open legs extend below the label
-    KEYCAP_HEIGHT = 20  # total outline height including the padding
-
-    ERASE_PAD = 1  # px around the keycap to absorb anti-aliasing fringe
+    KEYCAP_RADIUS = 4
+    KEYCAP_PAD_X = 7
+    KEYCAP_PAD_TOP = 3
+    KEYCAP_PAD_BOTTOM = 3
+    KEYCAP_HEIGHT = 20
 
     def __init__(self, box, num, label, color, is_bypassed, **kwargs):
         self._init_attrs(Widget.INH_ATTRS, kwargs)
@@ -45,91 +46,103 @@ class FootswitchWidget(Widget):
         self.label = label
         self.color = color
         self.is_bypassed = is_bypassed
-        self._drawn = None  # last keycap rect, relative to slot origin
-        self._cap_height = self.KEYCAP_HEIGHT - self.KEYCAP_PAD_TOP - self.KEYCAP_PAD_BOTTOM
-        self._font_ascent = self.font.getmetrics()[0]
-
-    def _draw_erase(self, image, draw, box):
-        # Repaint black over the previously drawn keycap so a wider one is fully
-        # cleared before a narrower one is drawn (single-widget refresh skips the
-        # panel-wide erase). The keycap stays centered within its slot, so erasing
-        # just its own footprint never touches a neighbouring switch.
-        if self._drawn is None:
-            return
-        p = self.ERASE_PAD
-        kx0, ky0, kx1, ky1 = self._drawn
-        draw.rectangle(
-            [box.x0 + kx0 - p, box.y0 + ky0 - p, box.x0 + kx1 + p, box.y0 + ky1 + p],
-            fill=(0, 0, 0, 255),
-        )
+        self._corner_cache: dict = {}
 
     def _fit(self, text, max_w):
-        # Largest leading substring whose width fits max_w (hard cut, no ellipsis).
-        if max_w <= 0 or self.font.getbbox(text)[2] <= max_w:
+        """Largest leading substring fitting max_w px."""
+        if not text:
+            return text
+        tw, _ = get_text_size(text, self.font)
+        if tw <= max_w:
             return text
         out = ""
         for ch in text:
-            if self.font.getbbox(out + ch)[2] > max_w:
+            tw, _ = get_text_size(out + ch, self.font)
+            if tw > max_w:
                 break
             out += ch
         return out
 
-    def _draw(self, image, draw, real_box):
-        x0, y0 = real_box.x0, real_box.y0
-        w, h = real_box.width, real_box.height
+    def _draw_erase(self, ctx):
+        pass  # parent.refresh() clears the RGBA surface and re-applies shroud before drawing us
 
+    def _draw(self, ctx):
+        w, h = ctx.width, ctx.height
         is_on = not self.is_bypassed
+
         if is_on:
             accent = self.color if self.color is not None else self.DEFAULT_COLOR
         else:
-            # Bound-but-off is slightly brighter than an unbound slot.
             accent = self.BOUND_OFF_BG if self.color is not None else self.UNBOUND_BG
 
-        assert self.font
         text = self.label if self.label else chr(ord("A") + self.num)
-        # Cap the keycap to the slot: hard-cut the label so the padded keycap
-        # never exceeds the slot width, just like plugin labels.
         text = self._fit(text, w - 2 * self.KEYCAP_PAD_X)
-        bbox = self.font.getbbox(text)
-        tw = bbox[2] - bbox[0]
 
-        # Center the keycap+label block in the slot.
+        tw, _ = get_text_size(text, self.font)
         kw = tw + 2 * self.KEYCAP_PAD_X
-        kh = self._cap_height + self.KEYCAP_PAD_TOP + self.KEYCAP_PAD_BOTTOM
-        kx0 = x0 + (w - kw) // 2
-        ky0 = y0 + (h - kh) // 2
+        kh = self.KEYCAP_HEIGHT
+        kx0 = (w - kw) // 2
+        ky0 = (h - kh) // 2
         kx1 = kx0 + kw - 1
         ky1 = ky0 + kh - 1
 
-        bg = (0, 0, 0, 255) if not is_on else None
-        self._draw_keycap(draw, kx0, ky0, kx1, ky1, accent, bg)
+        fill = None if is_on else (0, 0, 0)
+        self._draw_keycap(ctx, kx0, ky0, kx1, ky1, accent, fill)
 
-        # Remember the keycap footprint (slot-relative) so the next refresh can
-        # erase it even if the new label is narrower.
-        self._drawn = (kx0 - x0, ky0 - y0, kx1 - x0, ky1 - y0)
+        tx = kx0 + self.KEYCAP_PAD_X
+        ty = ky0 + self.KEYCAP_PAD_TOP
+        ctx.draw_text((tx, ty), text, fill=accent, font=self.font)
 
-        tx = kx0 + self.KEYCAP_PAD_X - bbox[0]
-        baseline_y = ky0 + self.KEYCAP_PAD_TOP + self._cap_height
-        ty = baseline_y - self._font_ascent
-        draw.text((tx, ty), text, fill=accent, font=self.font)
+    def _corner_surfs(self, r: int, color) -> tuple:
+        """Cached (tl, tr) SRCALPHA surfaces for rounded corners.
 
-    def _draw_keycap(self, draw, x0, y0, x1, y1, color, fill=None):
-        # Keycap outline: rounded top corners, vertical sides, open bottom.
-        if fill is not None:
-            draw.rectangle([x0, y0, x1, y1], fill=fill)
+        Returns an (r+1)x(r+1) surface with the top-left arc drawn on a
+        transparent background (analytic AA via `KeycapCornerGlyph`),
+        plus a horizontal flip for the top-right. Composites correctly
+        on RGBA — the 1px stroke aligns with the keycap's straight edges.
+        """
+        if isinstance(color, pygame.Color):
+            key = (color.r, color.g, color.b, color.a)
+        elif isinstance(color, (list, tuple)):
+            key = tuple(color) if len(color) == 4 else (color[0], color[1], color[2], 255)
+        else:
+            key = (255, 255, 255, 255)
+        if key not in self._corner_cache:
+            rgb = (key[0], key[1], key[2])
+            tl = KeycapCornerGlyph(r, rgb).render()
+            tr = pygame.transform.flip(tl, True, False)
+            self._corner_cache[key] = (tl, tr)
+        return self._corner_cache[key]
+
+    def _draw_keycap(self, ctx, kx0, ky0, kx1, ky1, color, fill=None):
+        """Keycap outline: rounded top corners, vertical sides, open bottom."""
         r = self.KEYCAP_RADIUS
-        draw.line([(x0 + r, y0), (x1 - r, y0)], fill=color, width=1)  # top
-        draw.line([(x0, y0 + r), (x0, y1)], fill=color, width=1)  # left
-        draw.line([(x1, y0 + r), (x1, y1)], fill=color, width=1)  # right
-        draw.arc([x0, y0, x0 + 2 * r, y0 + 2 * r], 180, 270, fill=color, width=1)
-        draw.arc([x1 - 2 * r, y0, x1, y0 + 2 * r], 270, 360, fill=color, width=1)
+        if fill is not None:
+            ctx.draw_rectangle(Box(kx0, ky0, kx1 + 1, ky1 + 1), fill=fill)
+
+        # Straight edges
+        ctx.draw_line([(kx0 + r, ky0), (kx1 - r, ky0)], fill=color, width=1)  # top
+        ctx.draw_line([(kx0, ky0 + r), (kx0, ky1)], fill=color, width=1)  # left
+        ctx.draw_line([(kx1, ky0 + r), (kx1, ky1)], fill=color, width=1)  # right
+
+        # AA corners: blit cached (r+1)x(r+1) surfaces rendered on transparent background
+        tl, tr = self._corner_surfs(r, color)
+        ox, oy = ctx._f().topleft
+        ctx.surface.blit(tl, (kx0 + ox, ky0 + oy))
+        ctx.surface.blit(tr, (kx1 - r + ox, ky0 + oy))
+
+    def refresh(self, box=None):
+        # Delegate to parent so the ShroudedPanel re-applies its shroud gradient
+        # before drawing children — a widget-only refresh would leave the slot
+        # area transparent (no shroud) where we cleared for the previous keycap.
+        if self.parent is not None:
+            self.parent.refresh()
+        else:
+            super().refresh(box)
 
     def set_selected(self, selected):
         parent = self.parent
         super().set_selected(selected)
-        # ShroudedPanel owns the background; incremental refresh leaves
-        # selection artefacts because _draw_erase is a no-op.  Refresh
-        # the whole panel so the shroud is re-applied cleanly.
         if parent is not None:
             parent.refresh()
 

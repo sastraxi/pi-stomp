@@ -25,10 +25,11 @@ from ui.wifi_menu import WifiMenu
 import pistomp.category as Category
 import pistomp.lcd as abstract_lcd
 import pistomp.switchstate as switchstate
-from PIL import Image, ImageColor
+import pygame
 
 from uilib import *
 from uilib.gridpanel import GridPanel
+from uilib.pygame_init import font as _make_font
 from uilib.lcd_ili9341 import *
 from modalapi.layout import build_layout_compress
 
@@ -97,10 +98,12 @@ class Lcd(abstract_lcd.Lcd):
         }
 
         # TODO get fonts from config.json
-        self.title_font = ImageFont.truetype("DejaVuSans-Bold.ttf", 26)
-        self.splash_font = ImageFont.truetype('DejaVuSans.ttf', 48)
-        self.small_font = ImageFont.truetype("DejaVuSans.ttf", 20)
-        self.tiny_font = ImageFont.truetype("DejaVuSans.ttf", 16)
+        from pathlib import Path
+        _fonts_dir = Path(__file__).resolve().parent.parent / "fonts"
+        self.title_font = _make_font(_fonts_dir / "DejaVuSans-Bold.ttf", 26)
+        self.splash_font = _make_font(_fonts_dir / "DejaVuSans.ttf", 48)
+        self.small_font = _make_font(_fonts_dir / "DejaVuSans.ttf", 20)
+        self.tiny_font = _make_font(_fonts_dir / "DejaVuSans.ttf", 16)
         self.title_split_orig = 190
         self.title_split = self.title_split_orig
         self.display_width = 320
@@ -117,12 +120,10 @@ class Lcd(abstract_lcd.Lcd):
 
         # widgets
         self.w_wifi = None
-        self._wifi_frames: list[Image.Image] = [
-            Image.open(os.path.join(self.imagedir, f'wifi_processing_{i}.png'))
+        self._wifi_frames: list[pygame.Surface] = [
+            load_surface(os.path.join(self.imagedir, f'wifi_processing_{i}.png'))
             for i in range(1, 4)
         ]
-        for frame in self._wifi_frames:
-            frame.load()
         self._wifi_tick = 0
         self._wifi_ticks_per_frame = 2
         self.wifi_menu: Optional[WifiMenu] = None
@@ -135,6 +136,7 @@ class Lcd(abstract_lcd.Lcd):
         self.w_preset = None
         self.w_plugins = []
         self.grid_panel: Optional[GridPanel] = None
+        self._fullscreen_panel = None
         self.w_footswitches = []
         self.w_controls = []
         self.w_splash = None
@@ -147,7 +149,8 @@ class Lcd(abstract_lcd.Lcd):
         self.pstack.push_panel(self.splash_panel, refresh=False)
         self.main_panel = Panel(box=Box.xywh(0, 0, self.display_width, self.display_height))
         self.main_panel_pushed = False
-        self.footswitch_panel = ShroudedPanel(box=Box.xywh(0, 208, self.display_width, self.footswitch_height),
+        self.footswitch_panel = ShroudedPanel(box=Box.xywh(0, self.display_height - self.footswitch_height,
+                                                            self.display_width, self.footswitch_height),
                                               shroud_alpha=224, no_dim=True, accepts_input=False)
         self._fullscreen_panel: Panel | None = None
         self._tuner_panel = None
@@ -224,6 +227,10 @@ class Lcd(abstract_lcd.Lcd):
     def poll_updates(self):
         for d in self.w_parameter_dialogs.values():
             d.tick()
+        if self.w_pedalboard is not None:
+            self.w_pedalboard.tick()
+        if self.w_preset is not None:
+            self.w_preset.tick()
 
         self.pstack.poll_updates()
         if self._fullscreen_panel is not None and self.pstack.current is self._fullscreen_panel:
@@ -337,13 +344,6 @@ class Lcd(abstract_lcd.Lcd):
     def plugin_panel(self) -> PluginPanel | None:
         return self._fullscreen_panel if isinstance(self._fullscreen_panel, PluginPanel) else None
 
-        # Tick text widgets (scrolling animation if needed)
-        if self.pstack.current == self.main_panel:
-            if self.w_preset:
-                self.w_preset.tick()
-            if self.w_pedalboard:
-                self.w_pedalboard.tick()
-
     #
     # Toolbar
     #
@@ -396,7 +396,7 @@ class Lcd(abstract_lcd.Lcd):
         self.main_panel.refresh()
 
     def draw_pedalboard(self, pedalboard_name):
-        text_width = self.title_font.getmask(pedalboard_name).getbbox()[2]
+        text_width = get_text_size(pedalboard_name, self.title_font)[0]
         spacing = 2  # Default sel_width for selectable widgets
         min_box_width = text_width + (spacing * 2)
         self.title_split = min(min_box_width, self.title_split_orig)
@@ -415,7 +415,7 @@ class Lcd(abstract_lcd.Lcd):
             )
             self.main_panel.add_sel_widget(self.w_pedalboard)
 
-        colon_width = self.title_font.getmask(":").getbbox()[2]
+        colon_width = get_text_size(":", self.title_font)[0]
         colon_x = self.title_split + spacing
         if self.w_colon is not None:
             self.w_colon.set_box(box=Box.xywh(colon_x, 20, colon_width, 36), realign=True, refresh=True)
@@ -429,7 +429,7 @@ class Lcd(abstract_lcd.Lcd):
             )
 
     def draw_preset(self, preset_name):
-        colon_width = self.title_font.getmask(":").getbbox()[2]
+        colon_width = get_text_size(":", self.title_font)[0]
         padding = 2  # Must match padding in draw_pedalboard
         x = self.title_split + padding + colon_width + padding
         width = self.display_width - x
@@ -513,6 +513,9 @@ class Lcd(abstract_lcd.Lcd):
             self.grid_panel.destroy()
             self.grid_panel = None
         self.w_plugins = []
+        if self.plugin_panel is not None:
+            self.plugin_panel.destroy()
+            self._fullscreen_panel = None
 
         plugins = self.current.pedalboard.plugins
         plugins_by_id = {p.instance_id.lstrip("/"): p for p in plugins}
@@ -541,6 +544,9 @@ class Lcd(abstract_lcd.Lcd):
             parent=self.main_panel,
         )
         self.main_panel.add_sel_widget(self.grid_panel)
+
+        # Repaint the grid's backing surface with the final tile colors before main_panel blits it
+        self.grid_panel.refresh()
 
         self.main_panel.refresh()
 
@@ -576,6 +582,8 @@ class Lcd(abstract_lcd.Lcd):
         for w in self.w_plugins:
             plugin = w.object
             self.color_plugin(w, plugin)
+        if self.plugin_panel is not None:
+            self.plugin_panel.refresh()
         self.main_panel.refresh()
 
     def refresh_plugin(self, plugin):
@@ -594,8 +602,9 @@ class Lcd(abstract_lcd.Lcd):
         if color is None:
             return self.foreground
         try:
-            return ImageColor.getrgb(color)
-        except ValueError:
+            c = pygame.Color(color)
+            return (c.r, c.g, c.b)
+        except (ValueError, TypeError):
             logging.error("Cannot convert color name: %s" % color)
             return self.foreground
 
@@ -1069,9 +1078,8 @@ class Lcd(abstract_lcd.Lcd):
         text = ""
         for x in name.lower().replace('_', '').replace('/', '').replace(' ', ''):
             test = text + x
-            test_bbox = self.small_font.getbbox(test)
-            test_size = test_bbox[2] - test_bbox[0]
-            if test_size >= width:
+            tw, _ = get_text_size(test, self.small_font)
+            if tw >= width:
                 break
             text = test
         return text

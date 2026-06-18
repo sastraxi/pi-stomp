@@ -13,8 +13,10 @@
 # You should have received a copy of the GNU General Public License
 # along with pi-stomp.  If not, see <https://www.gnu.org/licenses/>.
 
+import pygame
+
+from uilib.glyphs import ExpressionPedalGlyph, KnobGlyph
 from uilib.text import *
-from PIL import Image, ImageDraw
 
 
 #
@@ -24,13 +26,18 @@ from PIL import Image, ImageDraw
 
 
 class Icon(TextWidget):
-    """A simple icon with a text string"""
+    """A simple icon with a text string.
+
+    The icon graphic is a cached `Glyph` (`KnobGlyph` or `ExpressionPedalGlyph`)
+    rendered into an RGBA surface and blitted at the left of the widget. Color
+    is baked into the glyph at `add_knob()`/`add_pedal()` time (the widget's
+    `fgnd_color` at that moment). Text is drawn to the right of the icon.
+    """
 
     def __init__(self, box, text="", text_color=None, height=13, outline_width=2, **kwargs):
         self.height = height
         self.outline_width = outline_width
-        self.lines = []
-        self.ellipses = []
+        self._glyph = None  # set by add_knob/add_pedal
         self.progress = None  # Progress value 0.0-1.0 for progress bar fill
 
         super(Icon, self).__init__(box, text=text, **kwargs)
@@ -38,41 +45,10 @@ class Icon(TextWidget):
         self.text_color = text_color if text_color is not None else self.fgnd_color
 
     def add_knob(self):
-        loc = (self.box.x0, self.box.y0 + 2)  # TODO use box directly, replace height with box height
-        e = {
-            "xy": ((loc[0], loc[1]), (loc[0] + self.height, loc[1] + self.height)),
-            "fill": self.bkgnd_color,
-            "outline": self.fgnd_color,
-            "height": self.outline_width,
-        }
-        self.ellipses.append(e)
-
-        pointer_fudge = 2  # trim the upper right of the pointer
-        l = {
-            "xy": (
-                (loc[0] + self.height - pointer_fudge, loc[1] + pointer_fudge),
-                (loc[0] + int(self.height / 2), loc[1] + int(self.height / 2)),
-            ),
-            "fill": self.fgnd_color,
-            "height": self.outline_width,
-        }
-        self.lines.append(l)
+        self._glyph = KnobGlyph(self.height)
 
     def add_pedal(self):
-        loc = (self.box.x0, self.box.y0 - 1)  # TODO use box directly, replace height with box height
-        l = {
-            "xy": ((loc[0], loc[1] + self.height), (loc[0] + self.height, loc[1] + int(self.height / 3))),
-            "fill": self.fgnd_color,
-            "height": self.outline_width,
-        }
-        self.lines.append(l)
-
-        l = {
-            "xy": ((loc[0], loc[1] + self.height), (loc[0] + self.height, loc[1] + self.height)),
-            "fill": self.fgnd_color,
-            "height": self.outline_width + 2,
-        }
-        self.lines.append(l)
+        self._glyph = ExpressionPedalGlyph(self.height)
 
     def set_progress(self, progress):
         """Set progress value (0.0-1.0) for progress bar fill effect"""
@@ -80,66 +56,64 @@ class Icon(TextWidget):
         if self.visible and self.parent:
             self.refresh()
 
-    def _draw(self, image, draw, real_box):
-        # Draw shapes and text
-        # The loc calculation lines are a copy/paste from TextWidget._draw()
-        #
+    def _draw(self, ctx):
         h_margin, v_margin = self._get_margins()
         extra = self.outline
-        hroom = real_box.width - h_margin - extra
-        vroom = real_box.height - v_margin - extra
+        hroom = ctx.width - h_margin - extra
+        vroom = ctx.height - v_margin - extra
         if hroom < 0 or vroom < 0:
             return
 
         h_margin = 1
-        loc = (real_box.x0 + h_margin, real_box.y0 + v_margin)
+        loc = (h_margin, v_margin)
 
-        # Draw features (icon shapes)
-        for e in self.ellipses:
-            draw.ellipse(xy=e["xy"], fill=e["fill"], outline=e["outline"], width=e["height"])
+        # Blit the cached glyph alpha-mask (knob or expression pedal) at the
+        # left, vertically centered in the widget, tinted to the icon colour.
+        if self._glyph is not None:
+            mask = self._glyph.render()
+            ox, oy = ctx._f().topleft
+            # Vertically center the square glyph in the widget height.
+            gy = loc[1] + (ctx.height - mask.get_height()) // 2
+            # Tint the white mask into the fgnd colour: blit a solid colour
+            # fill onto a copy of the mask using BLEND_RGBA_MULT, then blit
+            # the tinted copy onto the target. A plain MULT against the mask
+            # in-place would corrupt the cached surface.
+            tinted = mask.copy()
+            color_surf = pygame.Surface(mask.get_size(), pygame.SRCALPHA)
+            color_surf.fill(self.fgnd_color)
+            tinted.blit(color_surf, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
+            ctx.surface.blit(tinted, (loc[0] + ox, gy + oy))
 
-        for l in self.lines:
-            draw.line(xy=l["xy"], fill=l["fill"], width=l["height"])
-
-        # Calculate text position and size
-        text_x = loc[0] + self.height + (h_margin * 2)
+        text_x = loc[0] + self.height + h_margin
         text_y = loc[1]
 
-        # If no progress bar, draw text normally
         if self.progress is None or self.progress <= 0:
-            draw.text((text_x, text_y), self.text, fill=self.text_color, font=self.font)
+            ctx.draw_text((text_x, text_y), self.text, fill=self.text_color, font=self.font)
             return
 
-        # Progress bar rendering with text inversion
-        # Use full box width for progress bar (minus icon space)
-        bar_width = real_box.width - self.height - (h_margin * 4)
-        bar_height = real_box.height - (h_margin * 4)
-
-        # Calculate fill width based on progress (use full bar width)
+        # Progress bar: fill behind text, then draw text in two clipped passes
+        # so the filled region gets inverted text and the unfilled region gets normal text.
+        bar_width = ctx.width - self.height - (h_margin * 4)
+        bar_height = ctx.height - (h_margin * 4)
         fill_width = int(bar_width * self.progress)
-
-        icon_size = self.height
         if fill_width > 0:
-            # Draw filled rectangle (progress bar background) using full box height
-            fill_rect = (
-                real_box.x0 + icon_size + h_margin,
-                real_box.y0,
-                real_box.x0 + icon_size + h_margin + fill_width,
-                real_box.y0 + bar_height,
-            )
-            draw.rectangle(fill_rect, fill=self.text_color)
+            fill_box = Box(self.height + h_margin, 0, self.height + h_margin + fill_width, bar_height)
+            ctx.draw_rectangle(fill_box, fill=self.text_color)
 
-            # Draw unfilled portion of text (normal)
-            draw.text((text_x, text_y), self.text, fill=self.text_color, font=self.font)
+            ox, oy = ctx._f().topleft
+            fill_x1_abs = ox + self.height + h_margin + fill_width
+            cur_clip = ctx.surface.get_clip()
 
-            # Draw filled portion of text (inverted) using masking
-            # Create a temporary image for the full text
-            inverted_img = Image.new("RGBA", (fill_width, bar_height), (0, 0, 0, 0))
-            temp_draw = ImageDraw.Draw(inverted_img)
-            temp_draw.text((0, 0), self.text, fill=self.bkgnd_color, font=self.font)
+            # text over unfilled region
+            r = pygame.Rect(fill_x1_abs, cur_clip.y, cur_clip.right - fill_x1_abs, cur_clip.height)
+            ctx.surface.set_clip(cur_clip.clip(r))
+            ctx.draw_text((text_x, text_y), self.text, fill=self.text_color, font=self.font)
 
-            # Paste the inverted text onto the main image
-            image.paste(inverted_img, (text_x, text_y), inverted_img)
+            # text over filled region (inverted)
+            r = pygame.Rect(cur_clip.x, cur_clip.y, fill_x1_abs - cur_clip.x, cur_clip.height)
+            ctx.surface.set_clip(cur_clip.clip(r))
+            ctx.draw_text((text_x, text_y), self.text, fill=self.bkgnd_color, font=self.font)
+
+            ctx.surface.set_clip(cur_clip)
         else:
-            # No fill, just draw normal text
-            draw.text((text_x, text_y), self.text, fill=self.text_color, font=self.font)
+            ctx.draw_text((text_x, text_y), self.text, fill=self.text_color, font=self.font)

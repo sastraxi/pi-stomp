@@ -16,8 +16,10 @@
 import time
 from math import log
 from typing import Optional
+import pygame
 from PIL import Image, ImageDraw, ImageFont
 
+from uilib.pygame_init import font as _make_font
 from uilib.panel import *
 from uilib.misc import *
 from uilib.config import *
@@ -46,12 +48,21 @@ class LetterSelector(Widget):
         self.mode = mode
         cs = self.charsets[mode]
         mw, mh = 0, 0
+        # PIL bbox[3] = asc + max(0, -glyph_min_y). PIL's original code used
+        # `font.getbbox(c)[3]` as the per-char height, which equals this.
+        # pygame's rect.height alone is 3px too short for non-descender glyphs
+        # at 18pt — it would put loc.y 1-2px above where PIL placed it.
+        asc = int(self.font.get_sized_ascender())
         for c in cs:
             dc = CHAR_TO_DISPLAY.get(c, c)
-            bbox = self.font.getbbox(dc)
-            w, h = bbox[2] - bbox[0], bbox[3]
-            mw = max(mw,w)
-            mh = max(mh,h)
+            cw, _ = get_text_size(dc, self.font)
+            mw = max(mw, cw)
+            m = self.font.get_metrics(dc)[0]
+            min_y = m[2]
+            if min_y >= 0x80000000:
+                min_y -= 0x100000000
+            ch = asc + max(0, -min_y)
+            mh = max(mh, ch)
         self.l_w = mw
         self.l_h = mh
         self.l_idx %= len(cs)
@@ -60,8 +71,8 @@ class LetterSelector(Widget):
             self.l_count -= 1
         self.l_half = self.l_count // 2
 
-    def _draw(self, image, draw, real_box):
-        loc = (real_box.x0 + self.l_w // 2, real_box.y0 + self.l_h // 2)
+    def _draw(self, ctx):
+        loc = (self.l_w // 2, self.l_h // 2)
         cs = self.charsets[self.mode]
         for i in range(self.l_idx - self.l_half, self.l_idx + self.l_half):
             ci = i % len(cs)
@@ -75,13 +86,13 @@ class LetterSelector(Widget):
                 a = log(abs(self.l_idx - i) + 1) + 1
                 color = (int(color[0]/a),int(color[1]/a),int(color[2]/a))
             ch = CHAR_TO_DISPLAY.get(cs[ci], cs[ci])
-            draw.text(loc, ch, fill = color, font = self.font, anchor = 'mm')
+            ctx.draw_text(loc, ch, fill=color, font=self.font, anchor='mm')
             loc = (loc[0] + self.l_w, loc[1])
 
-    def _draw_selection(self, image, draw, real_box):
-        l = real_box.x0 + self.l_w * self.l_half
-        b = Box(l, real_box.y0, l + self.l_w, real_box.y1)
-        draw.rounded_rectangle(b.PIL_rect, self.l_w//4, None, self.sel_color, 1)
+    def _draw_selection(self, ctx):
+        l = self.l_w * self.l_half
+        b = Box(l, 0, l + self.l_w, ctx.height)
+        ctx.draw_rectangle(b, None, self.sel_color, 1, radius=self.l_w // 4)
 
 
     def input_event(self, event):
@@ -135,9 +146,10 @@ class TextEditor(RoundedPanel):
         self.set_outline(2, (255,255,255))
         self.outline = 2
         self.curline = widget.text
-        self.font = ImageFont.truetype("DejaVuSans.ttf", 18)
-        bbox = self.font.getbbox(widget.edit_message)
-        msg_w, msg_h = bbox[2] - bbox[0], bbox[3]
+        from pathlib import Path
+        _fonts = Path(__file__).resolve().parent.parent / "fonts"
+        self.font = _make_font(_fonts / "DejaVuSans.ttf", 18)
+        msg_w, msg_h = get_text_size(widget.edit_message, self.font)
         msg_box = Box.xywh(10, 10, msg_w, msg_h)
         self.msg = TextWidget(box = msg_box, text = widget.edit_message, font = self.font, parent = self)
         edit_box = Box.xywh(10,30,280,20)
@@ -176,10 +188,11 @@ class TextEditor(RoundedPanel):
 # XXX TODO: Add alignment features
 class TextWidget(Widget):
     """A simple widget with a text string"""
-    def __init__(self, box, text='', prompt=None, font = None, edit_message = None, h_margin = None, v_margin = None,
+    SPLIT_SEP = ''  # if present in text exactly once, renders as left + right halves
+
+    def __init__(self, box, text='', font = None, edit_message = None, h_margin = None, v_margin = None,
                  text_halign = None, **kwargs):
         self.text = text
-        self.prompt = prompt
         if font == None:
             font = Config().get_font('default')
         self.font = font
@@ -187,15 +200,8 @@ class TextWidget(Widget):
         self.h_margin = h_margin
         self.v_margin = v_margin
         self.text_halign = text_halign
-        self.font_metrics = font.getmetrics()
+        self.font_metrics = None  # legacy field, pygame.freetype encodes size in get_rect
         self.text_size_valid = False
-        # TODO Kindof a hack
-        self.prompt_offset = 0
-        if self.prompt is not None:
-            w, h = get_text_size(self.prompt, self.font, self.font_metrics)
-            box.x0 += w
-            box.x1 += w
-            self.prompt_offset = w
         super(TextWidget,self).__init__(box, **kwargs)
 
     def _get_text_size(self):
@@ -227,10 +233,11 @@ class TextWidget(Widget):
             return
         h_margin, v_margin = self._get_margins()
         tw, th = self._get_text_size()
-        # For height, always use at least a full line height so empty-text
-        # widgets don't collapse to near-zero.
-        ascent, descent = self.font_metrics
-        th = max(th, ascent + descent)
+        # Always use at least a full line height so short / empty text doesn't
+        # collapse the widget. pygame's get_text_size('', font) returns
+        # (0, asc+desc) — reuse it instead of PIL-style font.getmetrics().
+        _, line_h = get_text_size('', self.font)
+        th = max(th, line_h)
         # Add outline to account for PIL rectangles being "inset"
         extra = self.outline
         trace(self, "margins=", h_margin, v_margin, "text_size=", tw, th)
@@ -253,43 +260,27 @@ class TextWidget(Widget):
 
     def set_font(self, font):
         self.font = font
-        self.font_metrics = font.getmetrics()
+        self.font_metrics = None
         self.text_size_valid = False
         self.refresh()
 
-    SPLIT_SEP = '\u001F'  # if present in text exactly once, render as left + right halves
-
-    def _draw(self, image, draw, real_box):
-        # Draw text
-        #
-        # XXX TODO: Handle cropping etc... (using continuation characters ?)
-        # Should we use a local image & support scroll ? basically make this a
-        # ContainerWidget subclass ? For now assume it fits ...
-        #
+    def _draw(self, ctx):
         h_margin, v_margin = self._get_margins()
         extra = self.outline
-        hroom = real_box.width - h_margin - extra
-        vroom = real_box.height - v_margin - extra
+        hroom = ctx.width - h_margin - extra
+        vroom = ctx.height - v_margin - extra
         if hroom < 0 or vroom < 0:
             return
 
         if self.SPLIT_SEP in self.text:
             parts = self.text.split(self.SPLIT_SEP)
-            if len(parts) != 2:
-                raise ValueError("TextWidget split text must contain exactly one separator")
-            left, right = parts
-            lw, lh = get_text_size(left, self.font, self.font_metrics)
-            rw, rh = get_text_size(right, self.font, self.font_metrics)
-            th = max(lh, rh)
-            if th > vroom:
-                th = vroom
-            y = real_box.y0 + v_margin
-            # Extra padding for split rows so the right half doesn't hug the edge.
-            split_pad = 3
-            draw.text((real_box.x0 + h_margin + split_pad, y), left, fill=self.fgnd_color, font=self.font)
-            draw.text((real_box.x0 + real_box.width - h_margin - extra - split_pad - rw, y),
-                      right, fill=self.fgnd_color, font=self.font)
-            return
+            if len(parts) == 2:
+                left, right = parts
+                lw, _ = get_text_size(left, self.font)
+                rw, _ = get_text_size(right, self.font)
+                ctx.draw_text((h_margin, v_margin), left, fill=self.fgnd_color, font=self.font)
+                ctx.draw_text((ctx.width - h_margin - rw, v_margin), right, fill=self.fgnd_color, font=self.font)
+                return
 
         tw, th = self._get_text_size()
         if tw > hroom:
@@ -302,11 +293,8 @@ class TextWidget(Widget):
             hoffset = hroom - tw
         else:
             hoffset = int((hroom - tw) / 2)
-        loc = (real_box.x0 + h_margin + hoffset, real_box.y0 + v_margin)
-        if self.prompt is not None:
-            #draw.text((loc[0] - self.prompt_offset, loc[1]), self.prompt, fill=self.fgnd_color, font=self.font)
-            draw.text((0, loc[1]), self.prompt, fill=self.fgnd_color, font=self.font)
-        draw.text(loc, self.text, fill=self.fgnd_color, font=self.font)
+        loc = (h_margin + hoffset, v_margin)
+        ctx.draw_text(loc, self.text, fill=self.fgnd_color, font=self.font)
 
     def tick(self):
         """Override in subclasses for animation."""
@@ -346,8 +334,8 @@ class ScrollingText(TextWidget):
         self.cached_text_width: int = 0
 
     def _render_text_to_cache(self) -> None:
-        """Pre-render full text to a PIL Image for efficient scrolling."""
-        if self.text is None or len(self.text) == 0:
+        """Pre-render full text to a pygame Surface for efficient scrolling."""
+        if not self.text:
             self.cached_text_image = None
             self.cached_text_width = 0
             return
@@ -355,9 +343,19 @@ class ScrollingText(TextWidget):
         tw, th = self._get_text_size()
         self.cached_text_width = tw
 
-        self.cached_text_image = Image.new('RGB', (tw, th), self.bkgnd_color)
-        draw = ImageDraw.Draw(self.cached_text_image)
-        draw.text((0, 0), self.text, fill=self.fgnd_color, font=self.font)
+        surf = pygame.Surface((max(1, tw), max(1, th)), pygame.SRCALPHA)
+        surf.fill((0, 0, 0, 0))
+        color = self.fgnd_color
+        if isinstance(color, (list, tuple)) and len(color) == 3:
+            color = tuple(color) + (255,)
+        asc = int(self.font.get_sized_ascender())
+        prev = self.font.origin
+        self.font.origin = True
+        try:
+            self.font.render_to(surf, (0, asc), self.text, fgcolor=color)
+        finally:
+            self.font.origin = prev
+        self.cached_text_image = surf
 
     def _should_scroll(self) -> bool:
         if self.cached_text_image is None:
@@ -422,11 +420,11 @@ class ScrollingText(TextWidget):
         super().set_text(text)
         self._clear_cache_and_restart()
 
-    def set_font(self, font: ImageFont.FreeTypeFont) -> None:
+    def set_font(self, font) -> None:
         super().set_font(font)
         self._clear_cache_and_restart()
 
-    def _draw(self, image: Image.Image, draw: ImageDraw.ImageDraw, real_box) -> None:
+    def _draw(self, ctx) -> None:
         if self.cached_text_image is None:
             self._render_text_to_cache()
         if self.cached_text_image is None:
@@ -435,11 +433,14 @@ class ScrollingText(TextWidget):
         h_margin, v_margin = self._get_margins()
         tw, th = self._get_text_size()
         extra = self.outline
-        hroom = real_box.width - h_margin - extra
-        vroom = real_box.height - v_margin - extra
+        hroom = ctx.width - h_margin - extra
+        vroom = ctx.height - v_margin - extra
 
         if hroom <= 0 or vroom <= 0:
             return
+
+        th = min(th, vroom)
+        ox, oy = ctx._f().topleft
 
         if not self._should_scroll():
             if self.text_halign == TextHAlign.LEFT:
@@ -448,13 +449,9 @@ class ScrollingText(TextWidget):
                 hoffset = hroom - tw
             else:
                 hoffset = int((hroom - tw) / 2)
-            x_pos = real_box.x0 + h_margin + hoffset
-            y_pos = real_box.y0 + v_margin
-            crop_box = (0, 0, tw, th)
-            image.paste(self.cached_text_image.crop(crop_box), (x_pos, y_pos))
+            src_rect = pygame.Rect(0, 0, min(tw, hroom), th)
+            ctx.surface.blit(self.cached_text_image, (h_margin + hoffset + ox, v_margin + oy), src_rect)
         else:
-            x_pos = real_box.x0 + h_margin
-            y_pos = real_box.y0 + v_margin
             crop_width = min(hroom, self.cached_text_width - self.scroll_offset)
-            crop_box = (self.scroll_offset, 0, self.scroll_offset + crop_width, th)
-            image.paste(self.cached_text_image.crop(crop_box), (x_pos, y_pos))
+            src_rect = pygame.Rect(self.scroll_offset, 0, crop_width, th)
+            ctx.surface.blit(self.cached_text_image, (h_margin + ox, v_margin + oy), src_rect)
