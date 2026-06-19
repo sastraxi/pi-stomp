@@ -433,15 +433,11 @@ class Modhandler(Handler):
     @property
     def lcd_poll_divisor(self) -> int:
         # Tick the LCD on every 10 ms main-loop pass (~100 fps) while a
-        # fullscreen panel (tuner or plugin) is mounted OR while the nav
-        # queue has pending steps to drain (so the selector visibly scans
-        # across intermediate states instead of jumping). Otherwise fall
-        # back to the SPI-clock-derived divisor computed by the LCD itself.
-        if self._lcd is not None:
-            if self._lcd.has_active_fullscreen_panel():
-                return 1
-            if self._lcd.has_pending_nav_steps():
-                return 1
+        # fullscreen panel (tuner or plugin) is mounted, so its coalesced
+        # redraws flush promptly. Otherwise fall back to the SPI-clock-derived
+        # divisor computed by the LCD itself.
+        if self._lcd is not None and self._lcd.has_active_fullscreen_panel():
+            return 1
         return self._lcd.poll_divisor if self._lcd is not None else 8
 
     def universal_encoder_select(self, direction):
@@ -664,10 +660,11 @@ class Modhandler(Handler):
     def set_lcd_speed(self, speed_mhz):
         self.settings.set_setting('lcd.spi_speed_mhz', speed_mhz)
         self.lcd.show_lcd_speed_message(speed_mhz)
-        # Exit cleanly - systemd will restart with new LCD speed
+        import subprocess
         import time
+        time.sleep(1.5)
+        subprocess.Popen(["sudo", "systemctl", "restart", "mod-ala-pi-stomp"])
         import sys
-        time.sleep(1.5)  # Show message briefly
         sys.exit(0)
 
     #

@@ -28,18 +28,15 @@ Push/pop semantics live on the LCD, next to the only thing that needs them: a pa
 
 Encoders are split to keep this clean: `Encoder` is the pure quadrature decoder, `EncoderController` is the `Controller` that owns it plus the quantizer and the absorbed push-button. The nav encoder's button is not a standalone switch — it lives inside its controller and dispatches a `SwitchEvent` like any other. Footswitch chords (longpress groups) are the one piece of genuinely cross-controller, timing-deferred state, so they live in `footswitch_chords.py` as a handler-owned helper rather than a sink: `observe()` records a press, `tick()` resolves the 400ms window once per poll and names the callbacks that fired.
 
-## Nav-encoder traversal pacing (`nav_queue.py`)
+## LCD push: the adaptive size gate
 
-Nav detents advance the LCD panel-stack selector one position each. PR #42 correctly split compose from flush and batched detents into one event — collapsing a fast spin into a single jump. `NavQueue` restores the visible scanning feel without re-introducing inline SPI pushes into the 10ms path.
+The SPI write to the LCD is **synchronous and blocking** (`lcd_ili9341.update` → `disp.image`), and its cost is proportional to the dirty-rect area: a selection highlight (~78×29px) is ~1.5ms — well inside the 10ms tick — while the EQ curve (up to 320×178px) is ~16.7ms at 24MHz, which on its own overruns the tick. Because the write blocks, *deferring* a too-large transfer to a later slot can't make it cheaper; it only moves when you pay it.
 
-It's pure pacing policy (no pygame): the LCD enqueues signed detent counts on `enc_step`, drains capped steps per flush. Three levers:
+So `PanelStack.propagate_dirty` always composes the change to its in-memory surface (cheap), then asks the LCD how long the push would take — `lcd.transfer_ms(clip)` — and gates on `PanelStack.INLINE_BUDGET_MS` (8ms, headroom under the tick):
 
-1. **Queue, don't loop** — `enc_step` enqueues; the selector advances on each flush, spreading detents across frames.
-2. **Flush every tick while pending** — `lcd_poll_divisor` drops to 1 when the queue is non-empty, so the main loop flushes at 100fps during a turn. Springs back when drained.
-3. **Coalesce under backlog** — normally one detent per flush (visible scan). When pending exceeds `max_jump` (per-version, SPI-derived), drain pops up to `max_jump` per flush to bound latency.
+- **`transfer_ms ≤ budget`** → push inline, right now. Each change is its own frame. Nav selection clips are small, so a fast spin scans visibly; param dialogs render their progress immediately.
+- **`transfer_ms > budget`** → coalesce into `_pending_lcd_clip` (union) and let the next `poll_updates` flush slot push it once. Intermediate states are skipped to the latest — the EQ curve "jumps to the end" instead of grinding through every interstitial.
 
-Reversals create new tail runs — a mid-spin flip plays back as a direction change, not a net. Runs are never dropped; the queue drains FIFO, so the final run (the user's stopping direction) always lands exactly. The queue clears on `push_panel`/`pop_panel` so stale steps don't land on a new panel. `enc_step_widget` (param scrubbing) stays inline — it's a point-event with committed values, not traversal.
+Each LCD driver answers `transfer_ms` from its own SPI clock (`LcdIli9341` from `baudrate`, the emulator's `LcdPygame` from `spi_hz`); the `LcdBase` default is 0 (stub LCDs are free → always inline). **A faster SPI clock means cheaper transfers, so more interstitial frames clear the budget and get drawn** — exactly the "draw more when we can afford it" goal.
 
-### `skip_frames`
-
-`PanelStack.skip_frames` controls whether `propagate_dirty` pushes to the LCD immediately or defers to the next flush slot. The EQ plugin panel sets `skip_frames=True` (its dirty rects are near-full-screen and too large for the 10ms budget at 24MHz). Everything else pushes inline — each small clip (selection highlight, menu cursor) is its own frame, giving the snappy pre-#42 feel.
+The nav encoder is capped at one detent per tick (`max_drain=1` in `pistomptre.init_encoders`); tweak encoders keep the default 8. So `enc_step` applies one selector step per detent and the small-clip gate paces the scan naturally — no separate queue or divisor override. Fullscreen plugin panels still drop `lcd_poll_divisor` to 1 so their coalesced redraws flush promptly.

@@ -33,6 +33,7 @@ class LcdIli9341(LcdBase):
         import adafruit_rgb_display.ili9341 as ili9341
         rst = reset_pin if not self.has_system_splash else None
         self.disp = ili9341.ILI9341(spi, cs=cs_pin, dc=dc_pin, rst=rst, baudrate=baudrate)
+        self.baudrate = baudrate
 
         self.lock = threading.Lock()
 
@@ -62,6 +63,10 @@ class LcdIli9341(LcdBase):
 
     def default_format(self):
         return "RGB"
+
+    def transfer_ms(self, box=None):
+        w, h = (self.width, self.height) if box is None else (box.width, box.height)
+        return w * h * 16 / self.baudrate * 1000  # 16 bpp (RGB565) on the wire
 
     def clear(self):
         self.lock.acquire()

@@ -279,10 +279,11 @@ def type_in_editor():
 
 @pytest.fixture
 def nav_lcd(v3_system):
-    """nav_lcd(d) — step the LCD nav selector by ``d`` detents and flush.
+    """nav_lcd(d) — step the LCD nav selector by ``d`` detents, then poll.
 
-    Mirrors the main loop: enc_step enqueues, poll_updates drains and
-    (when skip_frames is False) pushes each step to the LCD inline.
+    Mirrors the main loop's step-then-poll: enc_step advances the selector
+    (small clips push inline), poll_updates ticks dialogs and flushes any
+    coalesced large clips.
     """
     lcd = v3_system.handler._lcd
 
@@ -295,10 +296,11 @@ def nav_lcd(v3_system):
 
 @pytest.fixture
 def nav_handler(v3_system):
-    """nav_handler(d) — step the handler nav selector by ``d`` detents and flush.
+    """nav_handler(d) — step the handler nav selector by ``d`` detents, then poll.
 
-    Mirrors the main loop: universal_encoder_select enqueues via the LCD,
-    poll_lcd_updates drains and flushes.
+    Mirrors the main loop's step-then-poll: universal_encoder_select advances
+    the selector via the LCD, poll_lcd_updates ticks dialogs and flushes any
+    coalesced large clips (e.g. the EQ curve).
     """
     handler = v3_system.handler
 

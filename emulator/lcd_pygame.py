@@ -63,6 +63,10 @@ class LcdPygame(LcdBase):
     def default_format(self):
         return "RGB"
 
+    def transfer_ms(self, box=None):
+        w, h = (self.width, self.height) if box is None else (box.width, box.height)
+        return w * h * self._BPP / self.spi_hz * 1000
+
     def update(self, surface: pygame.Surface, box=None):
         img_w, img_h = surface.get_size()
 
@@ -83,7 +87,7 @@ class LcdPygame(LcdBase):
         # the worker only ever touches this detached snapshot.
         pg_surf = surface.copy()
         w, h = pg_surf.get_size()
-        transfer_s = (w * h * self._BPP) / self.spi_hz
+        transfer_s = w * h * self._BPP / self.spi_hz
         self._queue.put((pg_surf, dest, transfer_s, time.perf_counter()))
 
     def blit_scaled(self, dest_surface, dest_rect):
