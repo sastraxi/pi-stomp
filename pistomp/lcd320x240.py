@@ -34,6 +34,7 @@ from uilib.lcd_ili9341 import *
 from modalapi.layout import build_layout_compress
 
 from pistomp.input.event import ControllerEvent
+from pistomp.input.nav_queue import NavQueue
 from pistomp.footswitch import Footswitch  # TODO would like to avoid this module knowing such details
 from pistomp.analogmidicontrol import AnalogMidiControl, as_midi_value
 from pistomp.encoder_controller import EncoderController
@@ -65,6 +66,11 @@ class Lcd(abstract_lcd.Lcd):
         # 56MHz: 34ms/frame → poll every 30ms (divisor=3)
         frame_time_ms = (56.0 / spi_speed_mhz) * 33.6
         self.poll_divisor = max(1, round(frame_time_ms / 10.0))
+        # Nav-queue coalescing cap: when backlog exceeds this many detents,
+        # drain coalesces up to this many per flush to bound latency. Derived
+        # from the SPI clock alongside poll_divisor.
+        self.max_jump = max(2, round(frame_time_ms / 10.0))
+        self._nav_queue = NavQueue(self.max_jump)
 
         # TODO would be good to decouple the actual LCD hardware.  This file should work for any 320x240 display
         if display is None:
@@ -145,7 +151,8 @@ class Lcd(abstract_lcd.Lcd):
         self.w_parameter_dialogs = {}
 
         # panels
-        self.pstack = PanelStack(display, image_format='RGB', use_dimming=True)
+        self.pstack = PanelStack(display, image_format='RGB', use_dimming=True,
+                                 on_stack_change=self._nav_queue.clear)
         self.splash_panel = Panel(box=Box.xywh(0, 0, self.display_width, self.display_height))
         self.pstack.push_panel(self.splash_panel, refresh=False)
         self.main_panel = Panel(box=Box.xywh(0, 0, self.display_width, self.display_height))
@@ -178,9 +185,23 @@ class Lcd(abstract_lcd.Lcd):
     def enc_step(self, d):
         if d == 0:
             return
-        event = InputEvent.RIGHT if d > 0 else InputEvent.LEFT
-        for _ in range(abs(d)):
-            self.pstack.input_event(event)
+        self._nav_queue.enqueue(d)
+
+    def has_pending_nav_steps(self) -> bool:
+        return self._nav_queue.has_pending
+
+    def _drain_nav(self) -> None:
+        """Apply queued nav steps for this flush.
+
+        Each step calls pstack.input_event, which advances the selector.
+        When skip_frames is False (main panel, menus), propagate_dirty
+        pushes each step to the LCD immediately — so each detent is its
+        own visible frame, restoring the pre-#42 scanning feel.
+        """
+        for sign, k in self._nav_queue.drain():
+            event = InputEvent.RIGHT if sign > 0 else InputEvent.LEFT
+            for _ in range(k):
+                self.pstack.input_event(event)
 
     def enc_sw(self, v):
         if v == switchstate.Value.RELEASED:
@@ -226,6 +247,8 @@ class Lcd(abstract_lcd.Lcd):
         return False
 
     def poll_updates(self):
+        if self._nav_queue.has_pending:
+            self._drain_nav()
         for d in self.w_parameter_dialogs.values():
             d.tick()
         if self.w_pedalboard is not None:
@@ -330,6 +353,7 @@ class Lcd(abstract_lcd.Lcd):
 
     def show_plugin_panel(self, panel: Panel) -> None:
         self._fullscreen_panel = panel
+        self.pstack.skip_frames = True
         self.pstack.push_panel(panel)
         panel.refresh()
 
@@ -337,6 +361,7 @@ class Lcd(abstract_lcd.Lcd):
         if self._fullscreen_panel is not None:
             self.pstack.pop_panel(self._fullscreen_panel)
         self._fullscreen_panel = None
+        self.pstack.skip_frames = False
 
     def has_active_fullscreen_panel(self) -> bool:
         return self._fullscreen_panel is not None

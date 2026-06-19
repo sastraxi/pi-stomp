@@ -13,7 +13,7 @@
 # You should have received a copy of the GNU General Public License
 # along with pi-stomp.  If not, see <https://www.gnu.org/licenses/>.
 
-from typing import Optional, Tuple
+from typing import Callable, Optional, Tuple
 from typing_extensions import override
 from abc import ABC
 
@@ -274,7 +274,8 @@ class LcdBase(ABC):
 
 
 class PanelStack(ContainerWidget):
-    def __init__(self, lcd, box: Optional[Box] = None, image_format: Optional[str] = None, use_dimming: bool = True):
+    def __init__(self, lcd, box: Optional[Box] = None, image_format: Optional[str] = None,
+                 use_dimming: bool = True, on_stack_change: Optional[Callable[[], None]] = None):
         # XXX This implementation currently assumes box is at (0,0) in the LCD
         #     and the offset remains 0,0 (don't try to scroll)
         if box is None:
@@ -290,6 +291,12 @@ class PanelStack(ContainerWidget):
         self.current = None
         self.lcd = lcd
         self.visible = True
+        self._on_stack_change = on_stack_change
+        # When True, propagate_dirty defers the LCD push to the next flush
+        # (PR #42 behavior, needed for panels with large dirty rects like the
+        # EQ plugin panel). When False, propagate_dirty pushes inline —
+        # restoring the snappy pre-#42 feel for small-clip panels.
+        self.skip_frames = False
         if use_dimming:
             size = (int(box.width), int(box.height))
             self.dimmer: Optional[pygame.Surface] = pygame.Surface(size, pygame.SRCALPHA)
@@ -339,8 +346,11 @@ class PanelStack(ContainerWidget):
     def propagate_dirty(self, local_clip: Box):
         """Recompose the dirty clip region from all stacked panels.
 
-        Composes the panels into the root surface immediately (cheap
-        memory-to-memory blits) but defers the LCD push.
+        When skip_frames is False, pushes to the LCD immediately (pre-#42
+        behavior — snappy for small clips like selection highlights).
+        When True, defers the push to the next flush slot (PR #42 behavior
+        — needed for panels whose dirty rects are too large for the 10ms
+        budget, like the EQ plugin panel).
         """
         assert self.surface is not None
         clip = local_clip
@@ -361,14 +371,17 @@ class PanelStack(ContainerWidget):
                 ctx = PaintContext(self.surface, inter)
                 p.do_draw(ctx, p.box)
 
-        trace(self, "deferring lcd update for surface", self.surface, "box=", clip)
-
         if self.capture_callback:
             self.capture_callback(self.surface)
 
-        # Union this clip into the pending LCD push instead of pushing now.
-        # None means a full-screen redraw is pending (from push/pop) — don't
-        # shrink it back to a partial clip.
+        if not self.skip_frames:
+            # Push now — small clips are cheap and this gives the snappy
+            # pre-#42 feel where each selection step is its own frame.
+            self.lcd.update(self.surface, clip)
+            return
+
+        # Defer: union this clip into the pending LCD push.
+        # None means a full-screen redraw is pending (from push/pop).
         if self._pending_lcd_clip is not None:
             self._pending_lcd_clip = self._pending_lcd_clip.union(clip)
         self.lcd_needs_update = True
@@ -397,6 +410,8 @@ class PanelStack(ContainerWidget):
             # Stack changed structurally; force full-screen redraw on next flush.
             self._pending_lcd_clip = None
             self.lcd_needs_update = True
+        if self._on_stack_change is not None:
+            self._on_stack_change()
 
     def pop_panel(self, panel):
         if panel is None:
@@ -416,6 +431,8 @@ class PanelStack(ContainerWidget):
         self.lcd_needs_update = True
         if panel.auto_destroy:
             panel.destroy()
+        if self._on_stack_change is not None:
+            self._on_stack_change()
 
     def find_panel_type(self, type):
         for p in self.stack:

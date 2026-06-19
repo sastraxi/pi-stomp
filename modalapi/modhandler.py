@@ -433,10 +433,15 @@ class Modhandler(Handler):
     @property
     def lcd_poll_divisor(self) -> int:
         # Tick the LCD on every 10 ms main-loop pass (~100 fps) while a
-        # fullscreen panel (tuner or plugin) is mounted. Otherwise fall back
-        # to the SPI-clock-derived divisor computed by the LCD itself.
-        if self._lcd is not None and self._lcd.has_active_fullscreen_panel():
-            return 1
+        # fullscreen panel (tuner or plugin) is mounted OR while the nav
+        # queue has pending steps to drain (so the selector visibly scans
+        # across intermediate states instead of jumping). Otherwise fall
+        # back to the SPI-clock-derived divisor computed by the LCD itself.
+        if self._lcd is not None:
+            if self._lcd.has_active_fullscreen_panel():
+                return 1
+            if self._lcd.has_pending_nav_steps():
+                return 1
         return self._lcd.poll_divisor if self._lcd is not None else 8
 
     def universal_encoder_select(self, direction):
@@ -975,12 +980,6 @@ class Modhandler(Handler):
 
         if not self._is_pedalboard_loading:
             self.ws_bridge.send_parameter(param.instance_id, param.symbol, param.value)
-
-    def parameter_midi_change(self, param, direction):
-        if param:
-            d = self.lcd.draw_parameter_dialog(param)
-            if d:
-                self.lcd.enc_step_widget(d, direction)
 
     #
     # System Menu
