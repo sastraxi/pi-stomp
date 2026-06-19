@@ -36,7 +36,7 @@ BITS_PER_PIXEL = 16.64
 PIPELINE_MS_PER_PX = 1.66e-4
 
 # Fixed per-call cost: address-window commands + Python/driver call overhead.
-FIXED_MS = 0.69
+FIXED_MS = 0.64
 
 
 def transfer_ms(pixels: int, spi_hz: float) -> float:
