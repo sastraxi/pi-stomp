@@ -17,6 +17,7 @@ import pygame
 from PIL import Image
 
 from uilib.panel import LcdBase, Box
+from uilib.spi_timing import transfer_ms as spi_transfer_ms
 from functools import cached_property
 import logging
 import threading
@@ -66,7 +67,7 @@ class LcdIli9341(LcdBase):
 
     def transfer_ms(self, box=None):
         w, h = (self.width, self.height) if box is None else (box.width, box.height)
-        return w * h * 16 / self.baudrate * 1000  # 16 bpp (RGB565) on the wire
+        return spi_transfer_ms(w * h, self.baudrate)
 
     def clear(self):
         self.lock.acquire()

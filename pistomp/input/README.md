@@ -30,7 +30,7 @@ Encoders are split to keep this clean: `Encoder` is the pure quadrature decoder,
 
 ## LCD push: the adaptive size gate
 
-The SPI write to the LCD is **synchronous and blocking** (`lcd_ili9341.update` → `disp.image`), and its cost is proportional to the dirty-rect area: a selection highlight (~78×29px) is ~1.5ms — well inside the 10ms tick — while the EQ curve (up to 320×178px) is ~16.7ms at 24MHz, which on its own overruns the tick. Because the write blocks, *deferring* a too-large transfer to a later slot can't make it cheaper; it only moves when you pay it.
+The push to the LCD is **synchronous and blocking** (`lcd_ili9341.update` → `disp.image`), and its cost scales with the dirty-rect area: a selection highlight (~78×29px) is ~2ms — well inside the 10ms tick — while the EQ curve (up to 320×178px) is tens of ms at 24MHz, which on its own overruns the tick. Because the write blocks, *deferring* a too-large transfer to a later slot can't make it cheaper; it only moves when you pay it.
 
 So `PanelStack.propagate_dirty` always composes the change to its in-memory surface (cheap), then asks the LCD how long the push would take — `lcd.transfer_ms(clip)` — and gates on `PanelStack.INLINE_BUDGET_MS` (8ms, headroom under the tick):
 
