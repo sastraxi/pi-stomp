@@ -61,6 +61,7 @@ class NamCaptureEngine:
         self._thread: threading.Thread | None = None
         self._abort = threading.Event()
         self._lock = threading.Lock()
+        self._session: CaptureSession | None = None
 
     # ── public API ────────────────────────────────────────────────────────────
 
@@ -96,6 +97,26 @@ class NamCaptureEngine:
 
         self._thread = threading.Thread(target=self._run, args=(name,), daemon=True, name="nam-capture")
         self._thread.start()
+
+    def level_diff_db(self) -> float | None:
+        """Return avg_in_dBFS − avg_out_dBFS since last call, or None if no data.
+
+        Returns None when the output average for the window is below the play
+        gate threshold — transitions from silence produce meaningless spikes.
+        """
+        import math
+        from pistomp.nam.capture_session import _SILENCE_PLAY_THRESHOLD
+        with self._lock:
+            session = self._session
+        if session is None:
+            return None
+        snap = session.level_snapshot()
+        if snap is None:
+            return None
+        avg_in, avg_out = snap
+        if avg_out < _SILENCE_PLAY_THRESHOLD or avg_in <= 0:
+            return None
+        return 20.0 * math.log10(avg_in) - 20.0 * math.log10(avg_out)
 
     def stop(self) -> None:
         """Abort a running capture and wait for the thread to exit."""
@@ -143,6 +164,8 @@ class NamCaptureEngine:
                 n += 1
 
             session = CaptureSession(samples, self._send_port, self._return_port)
+            with self._lock:
+                self._session = session
             session.start()
 
             import time
@@ -199,6 +222,8 @@ class NamCaptureEngine:
                 self._state = CaptureState.FAILED
 
         finally:
+            with self._lock:
+                self._session = None
             if saved is not None:
                 try:
                     routing.restore(saved)

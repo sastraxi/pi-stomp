@@ -20,6 +20,8 @@ The name field opens a TextEditor when pressed.
 
 from __future__ import annotations
 
+import math
+import time
 from pathlib import Path
 from typing import Callable
 
@@ -79,6 +81,7 @@ class NamCapturePanel(FullscreenPanel):
         self._engine = self._create_engine(output_dir, reamp_wav)
         self._last_state = CaptureState.IDLE
         self._last_countdown: str = ""
+        self._last_level_update: float = 0.0
 
         # Pre-read duration from WAV header (fast — no sample loading).
         try:
@@ -107,6 +110,9 @@ class NamCapturePanel(FullscreenPanel):
 
         # Countdown clock — large, centred
         self._countdown_lbl = Label(0, 100, font, parent=self)
+
+        # Level difference label — shown during capture
+        self._level_lbl = Label(0, 128, font, parent=self)
 
         # Status and info labels
         self._status_lbl = Label(8, 148, font, parent=self)
@@ -167,6 +173,16 @@ class NamCapturePanel(FullscreenPanel):
                 self._countdown_lbl.set_text(countdown, (255, 200, 0), x=_W // 2 - 20)
                 self._last_countdown = countdown
 
+            now = time.monotonic()
+            if now - self._last_level_update >= 0.5:
+                self._last_level_update = now
+                diff = self._engine.level_diff_db()
+                if diff is not None:
+                    sign = "+" if diff >= 0 else ""
+                    self._level_lbl.set_text(f"Δ {sign}{diff:.1f} dB", (160, 160, 200), x=_W // 2 - 30)
+                else:
+                    self._level_lbl.set_text("", (0, 0, 0))
+
     # ── private ───────────────────────────────────────────────────────────────
 
     def _on_start(self) -> None:
@@ -191,22 +207,27 @@ class NamCapturePanel(FullscreenPanel):
 
         if state == CaptureState.IDLE:
             self._set_countdown(_fmt_time(self._duration), (100, 100, 100))
+            self._level_lbl.set_text("", (0, 0, 0))
             self._info_lbl.set_text("", (0, 0, 0))
         elif state == CaptureState.CAPTURING:
             self._set_countdown(_fmt_time(self._duration), (255, 200, 0))
             self._last_countdown = _fmt_time(self._duration)
+            self._level_lbl.set_text("", (0, 0, 0))
             self._info_lbl.set_text("", (0, 0, 0))
         elif state == CaptureState.DONE:
             self._set_countdown("0:00", (0, 200, 0))
+            self._level_lbl.set_text("", (0, 0, 0))
             path = self._engine.output_path
             if path is not None:
                 self._info_lbl.set_text(path.name, (140, 200, 140))
         elif state == CaptureState.FAILED:
             self._set_countdown("--:--", (220, 40, 40))
+            self._level_lbl.set_text("", (0, 0, 0))
             err = self._engine.error or "Unknown error"
             self._info_lbl.set_text(err[:40], (220, 80, 80))
         else:  # ABORTED
             self._set_countdown(_fmt_time(self._duration), (100, 100, 100))
+            self._level_lbl.set_text("", (0, 0, 0))
             self._info_lbl.set_text("", (0, 0, 0))
 
     def _set_countdown(self, text: str, color: tuple[int, int, int]) -> None:

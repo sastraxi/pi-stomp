@@ -48,6 +48,9 @@ class _FakeEngine:
     def stop(self) -> None:
         self.stopped = True
 
+    def level_diff_db(self) -> float | None:
+        return None
+
     def set_state(self, state: CaptureState, progress: float = 0.0) -> None:
         self._state = state
         self._progress = progress
