@@ -568,6 +568,12 @@ class Modhandler(Handler):
                     p for p in self.current.pedalboard.plugins if p.instance_id != msg.instance
                 ]
                 if len(self.current.pedalboard.plugins) < before:
+                    # Also purge any connections that referenced the removed plugin
+                    iid = msg.instance
+                    self.current.pedalboard.connections = [
+                        c for c in self.current.pedalboard.connections
+                        if c.src.id != iid and c.dst.id != iid
+                    ]
                     logging.info(f"WebSocket: Plugin {msg.instance} removed")
                     self.bind_current_pedalboard()
                     self.lcd.draw_main_panel()

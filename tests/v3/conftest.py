@@ -26,27 +26,26 @@ def v3_system(fake_lcd, tmp_path) -> Generator[SystemFixture, None, None]:
 
 
 # ---------------------------------------------------------------------------
-# Parallel Beths fixture — 5×4 + FinalEQ complex pedalboard
+# Parallel Beths fixture — 3-lane + MixEQ complex pedalboard
 # ---------------------------------------------------------------------------
 #
 # Mirrors pedalboard_fixtures.parallel_beths() topology using real Plugin/
 # Parameter objects so the full modhandler + LCD code path is exercised.
 #
-# Lane topology (5 rows × 4 columns, all lanes feed FinalEQ at column 5):
+# Lane topology (3 lanes of depth 3/2/1, all lanes feed MixEQ):
 #
-#   capture_1 ──┬── Comp1  → Amp1  → Delay1 → Rev1   ──┐
-#               ├── OD1    → Amp2  → Cho1   → Cab2   ──┤
-#               ├── Dist1  → Amp3  → Cab3   → Phase1 ──┤→ FinalEQ → playback
-#               ├── Fuzz1  → Amp4  → Cho2   → Rev4   ──┤
-#               └── Gate1  → BAmp1 → BCab1  → Comp5  ──┘
+#   capture_1 ──┬── Comp → Amp → Delay ──┐
+#               ├── OD → Chorus          ──┤→ MixEQ → playback
+#               └── Gate                 ──┘
+#
+# Canvas positions:  col0=x100, col1=x300, col2=x500, MixEQ=x700
+#                    lane A=y0, lane B=y50, lane C=y100
 #
 _PARALLEL_BETHS_LANES: list[list[tuple[str, str, bool]]] = [
     # (instance_id, category, bypassed)
-    [("Comp1",  "Dynamics",   False), ("Amp1",  "Amplifier", False), ("Delay1", "Delay",     False), ("Rev1",   "Reverb",    False)],
-    [("OD1",    "Distortion", False), ("Amp2",  "Amplifier", False), ("Cho1",   "Modulator", True),  ("Cab2",   "Utility",   False)],
-    [("Dist1",  "Distortion", False), ("Amp3",  "Amplifier", False), ("Cab3",   "Utility",   False), ("Phase1", "Modulator", True)],
-    [("Fuzz1",  "Distortion", True),  ("Amp4",  "Amplifier", False), ("Cho2",   "Modulator", False), ("Rev4",   "Reverb",    False)],
-    [("Gate1",  "Dynamics",   False), ("BAmp1", "Amplifier", False), ("BCab1",  "Utility",   False), ("Comp5",  "Dynamics",  False)],
+    [("Comp",   "Dynamics",   False), ("Amp",    "Amplifier", False), ("Delay",  "Delay",    False)],
+    [("OD",     "Distortion", False), ("Chorus", "Modulator", True)],
+    [("Gate",   "Dynamics",   False)],
 ]
 
 
@@ -54,8 +53,8 @@ def _build_parallel_beths(make_plugin):
     """Build (plugins, connections) for the parallel_beths topology using real Plugin objects."""
     from modalapi.connections import Connection, Endpoint, EndpointKind
 
-    def _ep(kind, id_, port_idx=0):
-        return Endpoint(kind=kind, id=id_, port_symbol="", port_idx=port_idx)
+    def _ep(kind, id_, port_symbol="", port_idx=0):
+        return Endpoint(kind=kind, id=id_, port_symbol=port_symbol, port_idx=port_idx)
 
     lane_plugins = []
     canvas_y = 0.0
@@ -71,27 +70,39 @@ def _build_parallel_beths(make_plugin):
         lane_plugins.append(row)
         canvas_y += 50.0
 
-    final_eq = make_plugin("FinalEQ", category="EQ", bypassed=False)
-    final_eq.canvas_x = 900.0
-    final_eq.canvas_y = 100.0
+    mix_eq = make_plugin("MixEQ", category="EQ", bypassed=False)
+    mix_eq.canvas_x = 700.0
+    mix_eq.canvas_y = 50.0
 
-    all_plugins = [p for lane in lane_plugins for p in lane] + [final_eq]
+    all_plugins = sorted(
+        [p for lane in lane_plugins for p in lane] + [mix_eq],
+        key=lambda p: (p.canvas_x, p.canvas_y, p.instance_id),
+    )
 
     conns = []
     for lane in lane_plugins:
         ids = [p.instance_id for p in lane]
         conns.append(Connection(
-            src=_ep(EndpointKind.SOURCE, "capture_1"),
-            dst=_ep(EndpointKind.PLUGIN, ids[0]),
+            src=_ep(EndpointKind.SOURCE, "capture_1", port_symbol="out"),
+            dst=_ep(EndpointKind.PLUGIN, ids[0], port_symbol="in"),
         ))
         for a, b in zip(ids, ids[1:]):
-            conns.append(Connection(src=_ep(EndpointKind.PLUGIN, a), dst=_ep(EndpointKind.PLUGIN, b)))
+            conns.append(Connection(
+                src=_ep(EndpointKind.PLUGIN, a, port_symbol="out"),
+                dst=_ep(EndpointKind.PLUGIN, b, port_symbol="in"),
+            ))
         conns.append(Connection(
-            src=_ep(EndpointKind.PLUGIN, ids[-1]),
-            dst=_ep(EndpointKind.PLUGIN, "FinalEQ"),
+            src=_ep(EndpointKind.PLUGIN, ids[-1], port_symbol="out"),
+            dst=_ep(EndpointKind.PLUGIN, "MixEQ", port_symbol="in"),
         ))
-    conns.append(Connection(src=_ep(EndpointKind.PLUGIN, "FinalEQ"), dst=_ep(EndpointKind.SINK, "playback_1")))
-    conns.append(Connection(src=_ep(EndpointKind.PLUGIN, "FinalEQ"), dst=_ep(EndpointKind.SINK, "playback_2")))
+    conns.append(Connection(
+        src=_ep(EndpointKind.PLUGIN, "MixEQ", port_symbol="out"),
+        dst=_ep(EndpointKind.SINK, "playback_1", port_symbol="in"),
+    ))
+    conns.append(Connection(
+        src=_ep(EndpointKind.PLUGIN, "MixEQ", port_symbol="out"),
+        dst=_ep(EndpointKind.SINK, "playback_2", port_symbol="in"),
+    ))
 
     return all_plugins, conns
 

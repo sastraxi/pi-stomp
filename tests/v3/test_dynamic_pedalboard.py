@@ -3,9 +3,14 @@
 These events arrive over WebSocket while a pedalboard is already loaded. pi-stomp
 updates its in-memory model and redraws the LCD without triggering a full LILV reload.
 
-The snapshot tests and the epic use the 5×4 + FinalEQ parallel_beths topology
-(21 plugins, 5 parallel lanes, realistic wire routing) so the layout algorithm,
-column-compression DP, and dummy-node insertion are all exercised at real scale.
+The snapshot tests and the epic use the parallel_beths topology:
+
+    capture_1 ──┬── Comp → Amp → Delay ──┐
+                ├── OD → Chorus           ──┤→ MixEQ → playback_{1,2}
+                └── Gate                  ──┘
+
+7 plugins, 3 lanes of depth 3/2/1 + MixEQ merger.  The varying depths exercise
+dummy-node insertion and the column-compression DP at a legible scale.
 """
 
 import json
@@ -206,13 +211,13 @@ def test_v3_dynamic_add_creates_plugin_in_model(parallel_beths_system: SystemFix
     )
     before = len(handler.current.pedalboard.plugins)
 
-    ws_bridge.inject(f"add /graph/ExtraChorus {_EXTRA_CHORUS_URI} 1000.0 50.0 0 1 1")
+    ws_bridge.inject(f"add /graph/ExtraChorus {_EXTRA_CHORUS_URI} 900.0 50.0 0 1 1")
     handler.poll_ws_messages()
 
     assert len(handler.current.pedalboard.plugins) == before + 1
     added = next(p for p in handler.current.pedalboard.plugins if p.instance_id == "ExtraChorus")
     assert added.uri == _EXTRA_CHORUS_URI
-    assert added.canvas_x == 1000.0
+    assert added.canvas_x == 900.0
     assert not added.is_bypassed()
 
 
@@ -224,7 +229,7 @@ def test_v3_dynamic_add_bypassed_plugin(parallel_beths_system: SystemFixture):
         {_EXTRA_CHORUS_URI: _EXTRA_CHORUS_INFO}
     )
 
-    ws_bridge.inject(f"add /graph/ExtraChorus {_EXTRA_CHORUS_URI} 1000.0 50.0 1 1 1")
+    ws_bridge.inject(f"add /graph/ExtraChorus {_EXTRA_CHORUS_URI} 900.0 50.0 1 1 1")
     handler.poll_ws_messages()
 
     added = next(p for p in handler.current.pedalboard.plugins if p.instance_id == "ExtraChorus")
@@ -239,7 +244,7 @@ def test_v3_dynamic_add_preserves_canvas_x_sort_order(parallel_beths_system: Sys
         {_EXTRA_CHORUS_URI: _EXTRA_CHORUS_INFO}
     )
 
-    # ExtraChorus at x=200: should land between column-0 (x=100) and column-1 (x=300) plugins
+    # x=200: should land between col0 (x=100) and col1 (x=300)
     ws_bridge.inject(f"add /graph/ExtraChorus {_EXTRA_CHORUS_URI} 200.0 25.0 0 1 1")
     handler.poll_ws_messages()
 
@@ -253,13 +258,13 @@ def test_v3_dynamic_add_known_plugin_updates_bypass_only(parallel_beths_system: 
     ws_bridge = parallel_beths_system.ws_bridge
     before = len(handler.current.pedalboard.plugins)
 
-    # Fuzz1 is in the model as bypassed=True from the fixture
-    ws_bridge.inject(f"add /graph/Fuzz1 http://anything 700.0 150.0 0 1 1")
+    # Chorus is in the model as bypassed=True from the fixture
+    ws_bridge.inject(f"add /graph/Chorus http://anything 300.0 50.0 0 1 1")
     handler.poll_ws_messages()
 
     assert len(handler.current.pedalboard.plugins) == before
-    fuzz1 = next(p for p in handler.current.pedalboard.plugins if p.instance_id == "Fuzz1")
-    assert not fuzz1.is_bypassed()  # bypass cleared by the add message
+    chorus = next(p for p in handler.current.pedalboard.plugins if p.instance_id == "Chorus")
+    assert not chorus.is_bypassed()  # bypass cleared by the add message
 
 
 def test_v3_dynamic_add_no_metadata_silently_skips(parallel_beths_system: SystemFixture):
@@ -285,7 +290,7 @@ def test_v3_dynamic_add_blend_guard_skips(parallel_beths_system: SystemFixture):
 
     handler.blend_modes = {"Blend": MagicMock()}
     try:
-        ws_bridge.inject(f"add /graph/ExtraChorus {_EXTRA_CHORUS_URI} 1000.0 50.0 0 1 1")
+        ws_bridge.inject(f"add /graph/ExtraChorus {_EXTRA_CHORUS_URI} 900.0 50.0 0 1 1")
         handler.poll_ws_messages()
         assert len(handler.current.pedalboard.plugins) == before
     finally:
@@ -300,7 +305,7 @@ def test_v3_dynamic_add_control_port_defaults_populated(parallel_beths_system: S
         {_EXTRA_CHORUS_URI: _EXTRA_CHORUS_INFO}
     )
 
-    ws_bridge.inject(f"add /graph/ExtraChorus {_EXTRA_CHORUS_URI} 1000.0 50.0 0 1 1")
+    ws_bridge.inject(f"add /graph/ExtraChorus {_EXTRA_CHORUS_URI} 900.0 50.0 0 1 1")
     handler.poll_ws_messages()
 
     added = next(p for p in handler.current.pedalboard.plugins if p.instance_id == "ExtraChorus")
@@ -317,7 +322,7 @@ def test_v3_dynamic_add_param_set_echo_updates_value(parallel_beths_system: Syst
         {_EXTRA_CHORUS_URI: _EXTRA_CHORUS_INFO}
     )
 
-    ws_bridge.inject(f"add /graph/ExtraChorus {_EXTRA_CHORUS_URI} 1000.0 50.0 0 1 1")
+    ws_bridge.inject(f"add /graph/ExtraChorus {_EXTRA_CHORUS_URI} 900.0 50.0 0 1 1")
     ws_bridge.inject("param_set /graph/ExtraChorus rate 3.5")
     handler.poll_ws_messages()
 
@@ -336,11 +341,11 @@ def test_v3_dynamic_remove_removes_plugin_from_model(parallel_beths_system: Syst
     ws_bridge = parallel_beths_system.ws_bridge
     before = len(handler.current.pedalboard.plugins)
 
-    ws_bridge.inject("remove /graph/Phase1")
+    ws_bridge.inject("remove /graph/Chorus")
     handler.poll_ws_messages()
 
     ids = [p.instance_id for p in handler.current.pedalboard.plugins]
-    assert "Phase1" not in ids
+    assert "Chorus" not in ids
     assert len(handler.current.pedalboard.plugins) == before - 1
 
 
@@ -374,15 +379,15 @@ def test_v3_dynamic_remove_clears_footswitch_binding(parallel_beths_system: Syst
     hw = parallel_beths_system.hw
     ws_bridge = parallel_beths_system.ws_bridge
 
-    # Bind footswitch 0 to Comp1's :bypass param, then remove Comp1
+    # Bind footswitch 0 to Comp's :bypass param, then remove Comp
     fs = hw.footswitches[0]
     binding_key = next(k for k, v in hw.controllers.items() if v is fs)
-    comp1 = next(p for p in handler.current.pedalboard.plugins if p.instance_id == "Comp1")
-    comp1.parameters[":bypass"].binding = binding_key
+    comp = next(p for p in handler.current.pedalboard.plugins if p.instance_id == "Comp")
+    comp.parameters[":bypass"].binding = binding_key
     handler.bind_current_pedalboard()
-    assert fs.parameter is comp1.parameters[":bypass"]
+    assert fs.parameter is comp.parameters[":bypass"]
 
-    ws_bridge.inject("remove /graph/Comp1")
+    ws_bridge.inject("remove /graph/Comp")
     handler.poll_ws_messages()
 
     assert fs.parameter is None
@@ -399,13 +404,14 @@ def test_v3_dynamic_connect_adds_connection(parallel_beths_system: SystemFixture
     ws_bridge = parallel_beths_system.ws_bridge
     before = len(handler.current.pedalboard.connections)
 
-    ws_bridge.inject("connect /graph/Rev1/out /graph/Delay1/in")
+    # Cross-lane wire: Delay (lane A col2) back to Gate (lane C col0) — unusual but valid
+    ws_bridge.inject("connect /graph/Gate/out /graph/Amp/in")
     handler.poll_ws_messages()
 
     assert len(handler.current.pedalboard.connections) == before + 1
     last = handler.current.pedalboard.connections[-1]
-    assert last.src.id == "Rev1"
-    assert last.dst.id == "Delay1"
+    assert last.src.id == "Gate"
+    assert last.dst.id == "Amp"
 
 
 def test_v3_dynamic_connect_deduplication(parallel_beths_system: SystemFixture):
@@ -413,13 +419,13 @@ def test_v3_dynamic_connect_deduplication(parallel_beths_system: SystemFixture):
     handler = parallel_beths_system.handler
     ws_bridge = parallel_beths_system.ws_bridge
 
-    ws_bridge.inject("connect /graph/Rev1/out /graph/Delay1/in")
-    ws_bridge.inject("connect /graph/Rev1/out /graph/Delay1/in")
+    ws_bridge.inject("connect /graph/Gate/out /graph/Amp/in")
+    ws_bridge.inject("connect /graph/Gate/out /graph/Amp/in")
     handler.poll_ws_messages()
 
     matching = [
         c for c in handler.current.pedalboard.connections
-        if c.src.id == "Rev1" and c.dst.id == "Delay1"
+        if c.src.id == "Gate" and c.dst.id == "Amp"
     ]
     assert len(matching) == 1
 
@@ -429,17 +435,16 @@ def test_v3_dynamic_disconnect_removes_connection(parallel_beths_system: SystemF
     handler = parallel_beths_system.handler
     ws_bridge = parallel_beths_system.ws_bridge
 
-    # Comp1 → Amp1 is a lane-1 connection from the fixture
-    before_conns = list(handler.current.pedalboard.connections)
-    before = len(before_conns)
+    # Comp → Amp is lane A's first connection
+    before = len(handler.current.pedalboard.connections)
 
-    ws_bridge.inject("disconnect /graph/Comp1/out /graph/Amp1/in")
+    ws_bridge.inject("disconnect /graph/Comp/out /graph/Amp/in")
     handler.poll_ws_messages()
 
     after = len(handler.current.pedalboard.connections)
     remaining_ids = [(c.src.id, c.dst.id) for c in handler.current.pedalboard.connections]
     assert after == before - 1
-    assert ("Comp1", "Amp1") not in remaining_ids
+    assert ("Comp", "Amp") not in remaining_ids
 
 
 def test_v3_dynamic_disconnect_unknown_is_noop(parallel_beths_system: SystemFixture):
@@ -448,24 +453,24 @@ def test_v3_dynamic_disconnect_unknown_is_noop(parallel_beths_system: SystemFixt
     ws_bridge = parallel_beths_system.ws_bridge
     before = len(handler.current.pedalboard.connections)
 
-    ws_bridge.inject("disconnect /graph/Comp1/out_R /graph/Rev4/in_R")
+    ws_bridge.inject("disconnect /graph/Comp/out_R /graph/Gate/in_R")
     handler.poll_ws_messages()
 
     assert len(handler.current.pedalboard.connections) == before
 
 
 # ---------------------------------------------------------------------------
-# Snapshot tests — layout and LCD reflect model changes on complex board
+# Snapshot tests — layout and LCD reflect model changes
 # ---------------------------------------------------------------------------
 
 
 def test_v3_parallel_beths_initial_layout(parallel_beths_system: SystemFixture, snapshot):
-    """Baseline snapshot of the full 5×4 + FinalEQ layout at board load time."""
+    """Baseline snapshot of the 3-lane + MixEQ layout at board load time."""
     snapshot("loaded")
 
 
 def test_v3_parallel_beths_add_plugin_lcd(parallel_beths_system: SystemFixture, snapshot):
-    """Adding ExtraChorus: grid grows a new tile; existing tiles reflow if needed."""
+    """Adding ExtraChorus beyond MixEQ: grid grows a new rightmost column."""
     handler = parallel_beths_system.handler
     ws_bridge = parallel_beths_system.ws_bridge
     parallel_beths_system.mock_get.side_effect = _effect_get_side_effect(
@@ -473,40 +478,40 @@ def test_v3_parallel_beths_add_plugin_lcd(parallel_beths_system: SystemFixture, 
     )
 
     snapshot("before")
-    ws_bridge.inject(f"add /graph/ExtraChorus {_EXTRA_CHORUS_URI} 1000.0 50.0 0 1 1")
+    ws_bridge.inject(f"add /graph/ExtraChorus {_EXTRA_CHORUS_URI} 900.0 50.0 0 1 1")
     handler.poll_ws_messages()
     snapshot("after")
 
 
 def test_v3_parallel_beths_remove_plugin_lcd(parallel_beths_system: SystemFixture, snapshot):
-    """Removing Phase1 (a bypassed plugin in lane 3 col 4): grid shrinks, dummy nodes rebalanced."""
+    """Removing Chorus (lane B col1, bypassed): lane B shortens to depth 1."""
     handler = parallel_beths_system.handler
     ws_bridge = parallel_beths_system.ws_bridge
 
     snapshot("before")
-    ws_bridge.inject("remove /graph/Phase1")
+    ws_bridge.inject("remove /graph/Chorus")
     handler.poll_ws_messages()
     snapshot("after")
 
 
 def test_v3_parallel_beths_connect_lcd(parallel_beths_system: SystemFixture, snapshot):
-    """Cross-lane connection Rev1→Delay1: new wire appears across the grid."""
+    """Cross-lane connection Gate→Amp: new wire appears in the grid."""
     handler = parallel_beths_system.handler
     ws_bridge = parallel_beths_system.ws_bridge
 
     snapshot("before")
-    ws_bridge.inject("connect /graph/Rev1/out /graph/Delay1/in")
+    ws_bridge.inject("connect /graph/Gate/out /graph/Amp/in")
     handler.poll_ws_messages()
     snapshot("after")
 
 
 def test_v3_parallel_beths_disconnect_lcd(parallel_beths_system: SystemFixture, snapshot):
-    """Disconnecting Comp1→Amp1 (lane 1 first wire): Comp1 becomes isolated."""
+    """Disconnecting Comp→Amp (lane A first wire): Comp becomes isolated."""
     handler = parallel_beths_system.handler
     ws_bridge = parallel_beths_system.ws_bridge
 
     snapshot("before")
-    ws_bridge.inject("disconnect /graph/Comp1/out /graph/Amp1/in")
+    ws_bridge.inject("disconnect /graph/Comp/out /graph/Amp/in")
     handler.poll_ws_messages()
     snapshot("after")
 
@@ -519,13 +524,18 @@ def test_v3_parallel_beths_disconnect_lcd(parallel_beths_system: SystemFixture, 
 def test_v3_parallel_beths_dynamic_epic(
     parallel_beths_system: SystemFixture, snapshot, nav_handler
 ):
-    """Epic: load a 5×4 complex board, apply a sequence of WS-driven changes, then
-    navigate the encoder selection through the modified grid until it lands on the
-    newly-added plugin.
+    """Load a 3-lane board, apply a sequence of WS-driven changes, then navigate
+    the encoder selection across the modified grid until it lands on ExtraChorus.
 
-    Snapshots are taken after every significant state change and at each nav step
-    while traversing toward the target tile, so any regression in layout, wire
-    routing, or selection rendering is pinned.
+    Layout after all changes (Phase 1–6):
+
+        col0(x=100): Comp(isolated), OD, Gate
+        col1(x=300): Amp
+        col2(x=500): Delay
+        col3(x=700): MixEQ
+        col4(x=900): ExtraChorus, ExtraVerb
+
+    Snapshots pin each topology state and the navigation progress.
     """
     handler = parallel_beths_system.handler
     ws_bridge = parallel_beths_system.ws_bridge
@@ -533,82 +543,60 @@ def test_v3_parallel_beths_dynamic_epic(
         {_EXTRA_CHORUS_URI: _EXTRA_CHORUS_INFO, _EXTRA_VERB_URI: _EXTRA_VERB_INFO}
     )
 
-    # ── Phase 1: baseline ──────────────────────────────────────────────────
-    # 21 plugins: 5 lanes × 4 columns + FinalEQ.
+    # ── Phase 1: baseline ─────────────────────────────────────────────────────
     snapshot("01_loaded")
 
-    # ── Phase 2: add ExtraChorus after FinalEQ (canvas x=1000 > FinalEQ x=900) ──
-    # This inserts a new tile at the far right of the grid and triggers a full
-    # layout rebuild, adding a 6th column with one plugin.
-    ws_bridge.inject(f"add /graph/ExtraChorus {_EXTRA_CHORUS_URI} 1000.0 50.0 0 1 1")
+    # ── Phase 2: add ExtraChorus after MixEQ ─────────────────────────────────
+    ws_bridge.inject(f"add /graph/ExtraChorus {_EXTRA_CHORUS_URI} 900.0 50.0 0 1 1")
     handler.poll_ws_messages()
     assert any(p.instance_id == "ExtraChorus" for p in handler.current.pedalboard.plugins)
     snapshot("02_extrachorus_added")
 
-    # ── Phase 3: wire ExtraChorus into the signal path ─────────────────────
-    # FinalEQ → ExtraChorus → playback (via reconnect; not the original playback arcs).
-    ws_bridge.inject("connect /graph/FinalEQ/out /graph/ExtraChorus/in")
+    # ── Phase 3: wire ExtraChorus into the signal path ────────────────────────
+    ws_bridge.inject("connect /graph/MixEQ/out /graph/ExtraChorus/in")
     handler.poll_ws_messages()
     snapshot("03_extrachorus_wired")
 
-    # ── Phase 4: add ExtraVerb in parallel with ExtraChorus ────────────────
-    # x=1000, y=150 (same column as ExtraChorus, different row).
-    ws_bridge.inject(f"add /graph/ExtraVerb {_EXTRA_VERB_URI} 1000.0 150.0 0 1 1")
+    # ── Phase 4: add ExtraVerb alongside ExtraChorus (same column, different row) ──
+    ws_bridge.inject(f"add /graph/ExtraVerb {_EXTRA_VERB_URI} 900.0 150.0 0 1 1")
     handler.poll_ws_messages()
-    ws_bridge.inject("connect /graph/FinalEQ/out_L /graph/ExtraVerb/in")
+    ws_bridge.inject("connect /graph/MixEQ/out_L /graph/ExtraVerb/in")
     handler.poll_ws_messages()
     snapshot("04_extraverb_added_and_wired")
 
-    # ── Phase 5: remove the bypassed Phase1 from lane 3 ────────────────────
-    # Phase1 is bypassed in the fixture; removing it shortens lane 3 by one stage.
-    ws_bridge.inject("remove /graph/Phase1")
+    # ── Phase 5: remove the bypassed Chorus from lane B ──────────────────────
+    ws_bridge.inject("remove /graph/Chorus")
     handler.poll_ws_messages()
-    assert not any(p.instance_id == "Phase1" for p in handler.current.pedalboard.plugins)
-    snapshot("05_phase1_removed")
+    assert not any(p.instance_id == "Chorus" for p in handler.current.pedalboard.plugins)
+    snapshot("05_chorus_removed")
 
-    # ── Phase 6: break lane 1's first connection ────────────────────────────
-    # Comp1 becomes an isolated input node; the layout will push it left into
-    # its own column stub or keep it in col 0 with dummy routing to Amp1.
-    ws_bridge.inject("disconnect /graph/Comp1/out /graph/Amp1/in")
+    # ── Phase 6: break lane A's first connection ──────────────────────────────
+    # Comp becomes isolated; the layout keeps it in col0 without downstream routing.
+    ws_bridge.inject("disconnect /graph/Comp/out /graph/Amp/in")
     handler.poll_ws_messages()
-    snapshot("06_comp1_disconnected")
+    snapshot("06_comp_disconnected")
 
-    # ── Phase 7: navigate to ExtraChorus ───────────────────────────────────
-    # draw_main_panel() resets selection to the wrench. The selector chain is:
-    #   wrench → pedalboard title → preset title → [grid tiles in layout order…]
-    # Grid tile order follows the layout: column-major, left-to-right, row-major
-    # within each column. ExtraChorus/ExtraVerb are the last column (x=1000),
-    # so they are the final tiles before focus exits the grid.
-    #
-    # We take a snapshot at the wrench starting position, at the first plugin tile
-    # (3 nav steps in), then after every 5 tiles to show progress, finishing with
-    # the selection on ExtraChorus.
+    # ── Phase 7: navigate encoder to ExtraChorus ─────────────────────────────
+    # draw_main_panel() resets selection to the wrench.  Selector chain:
+    #   wrench → pedalboard title → preset title → [grid tiles in layout order]
+    # Grid order is column-major L→R, rows within each column.
 
-    snapshot("07_nav_start_wrench")  # initial: wrench selected
+    snapshot("07_nav_start_wrench")
 
-    # Enter the plugin grid: 3 steps past toolbar selectors
+    # 3 steps from wrench to first plugin tile
     nav_handler(1)
     nav_handler(1)
     nav_handler(1)
-    snapshot("08_nav_first_tile")   # first tile in column 0
+    snapshot("08_nav_first_tile")
 
+    # Advance through col0 (Comp, OD, Gate) + col1 (Amp) + col2 (Delay) = 5 more tiles
     nav_handler(5)
-    snapshot("09_nav_mid_col0_col1")
+    snapshot("09_nav_mid_grid")
 
-    nav_handler(5)
-    snapshot("10_nav_mid_col1_col2")
+    # Advance to ExtraChorus in col4 (MixEQ at position 6, ExtraChorus at position 7)
+    nav_handler(2)
+    snapshot("10_nav_extrachorus")
 
-    nav_handler(5)
-    snapshot("11_nav_mid_col2_col3")
-
-    nav_handler(5)
-    snapshot("12_nav_entering_finalEQ_col")
-
-    # Advance to the ExtraChorus/ExtraVerb column (x=1000, rightmost)
-    nav_handler(5)
-    snapshot("13_nav_extrachorus_col")
-
-    # Verify ExtraChorus tile exists in the grid widget list
     extra_chorus_tile = next(
         (w for w in handler.lcd.w_plugins if w.object.instance_id == "ExtraChorus"), None
     )
