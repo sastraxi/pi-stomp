@@ -1,4 +1,0 @@
-# NAM Capture marker pedalboard.
-# When pi-Stomp loads this board, it mounts NamCapturePanel instead of the
-# normal plugin grid. All other config keys are optional; hardware defaults apply.
-nam_capture: true
