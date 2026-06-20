@@ -143,8 +143,11 @@ class Modhandler(Handler):
         self._tuner_source_factory: TunerSourceFactory | None = None
         self._tuner_muted: bool = False
 
-        # Full-screen panel state (tuner or generic plugin panel)
-        self._fullscreen_panel: TunerPanel | None = None
+        # NAM capture state
+        self._nam_engine = None  # NamCaptureEngine | None
+
+        # Full-screen panel state (tuner, NAM capture, or generic plugin panel)
+        self._fullscreen_panel = None  # Panel | None
 
         # Callback function map.  Key is the user specified name, value is function from this handler
         # Used for calling handler callbacks pointed to by names which may be user set in the config file
@@ -172,6 +175,9 @@ class Modhandler(Handler):
             del self.wifi_manager
 
     def cleanup(self):
+        if self._nam_engine is not None:
+            self._nam_engine.stop()
+            self._nam_engine = None
         if self._tuner_engine is not None:
             if self._tuner_muted:
                 self.audiocard.set_output_muted(False)
@@ -777,6 +783,12 @@ class Modhandler(Handler):
         return read_pedalboard_bundle(self.last_json_monitor.path)
 
     def set_current_pedalboard(self, pedalboard):
+        # Stop any running NAM capture and restore FX-loop routing.
+        if self._nam_engine is not None:
+            self._nam_engine.stop()
+            self._nam_engine = None
+            self._fullscreen_panel = None
+
         # Cleanup all previous blend modes if active
         for blend_mode in self.blend_modes.values():
             blend_mode.cleanup()
@@ -818,7 +830,10 @@ class Modhandler(Handler):
         self.bind_volume_encoder()
         self.load_current_presets()
         self.lcd.link_data(self.pedalboard_list, self.current, self.hardware.footswitches)
-        self.lcd.draw_main_panel()
+        if cfg and cfg.get("nam_capture"):
+            self._mount_nam_capture_panel()
+        else:
+            self.lcd.draw_main_panel()
         self.lcd.update_wifi(self.wifi_status)
 
         # Send external MIDI messages for this pedalboard
@@ -1392,3 +1407,28 @@ class Modhandler(Handler):
             return
         self.lcd.hide_plugin_panel()
         self._fullscreen_panel = None
+
+    # ── NAM capture ───────────────────────────────────────────────────────────
+
+    def _mount_nam_capture_panel(self) -> None:
+        from pistomp.nam.engine import NamCaptureEngine
+        from pistomp.nam.panel import NamCapturePanel
+
+        output_dir = os.path.join(
+            os.environ.get("MOD_USER_FILES_DIR", "/home/pistomp/data/user-files"),
+            "Audio Recordings",
+        )
+        engine = NamCaptureEngine(output_dir)
+        self._nam_engine = engine
+        panel = NamCapturePanel(engine=engine, on_dismiss=self._dismiss_nam_capture)
+        self._fullscreen_panel = panel
+        self.lcd.show_plugin_panel(panel)
+
+    def _dismiss_nam_capture(self) -> None:
+        if self._nam_engine is not None:
+            self._nam_engine.stop()
+            self._nam_engine = None
+        if self._fullscreen_panel is not None:
+            self.lcd.hide_plugin_panel()
+            self._fullscreen_panel = None
+        self.lcd.draw_main_panel()

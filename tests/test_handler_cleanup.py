@@ -41,6 +41,7 @@ class TestModhandlerCleanup:
         h = object.__new__(Modhandler)
         h.wifi_manager = None
         h._tuner_engine = None
+        h._nam_engine = None
         h._lcd = None
         h._hardware = None
         h.external_midi = MagicMock()

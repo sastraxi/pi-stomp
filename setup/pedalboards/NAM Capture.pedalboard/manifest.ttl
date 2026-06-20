@@ -1,0 +1,10 @@
+@prefix lv2:      <http://lv2plug.in/ns/lv2core#> .
+@prefix modpedal: <http://moddevices.com/ns/modpedal#> .
+@prefix rdfs:     <http://www.w3.org/2000/01/rdf-schema#> .
+
+<http://pistomp.local/pedalboards/NAMCapture>
+    a lv2:Plugin ,
+        modpedal:Pedalboard ;
+    lv2:binary <ignoreme.so> ;
+    rdfs:label "NAM Capture" ;
+    rdfs:seeAlso <pedalboard.ttl> .
