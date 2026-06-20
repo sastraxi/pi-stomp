@@ -24,7 +24,8 @@ import numpy.typing as npt
 _SAMPLE_RATE = 48000
 _SILENCE_SETTLE_FRAMES = _SAMPLE_RATE * 2  # 2 s settling before detection kicks in
 _SILENCE_ABORT_FRAMES = _SAMPLE_RATE * 2  # 2 s of continuous silence → abort signal
-_SILENCE_THRESHOLD = 1e-4  # ≈ −80 dBFS
+_SILENCE_THRESHOLD = 1e-2  # ≈ −40 dBFS — high enough to clear floating-input noise
+_CLIP_THRESHOLD = 0.99     # float32 full-scale; any frame peak above this is clipping
 
 
 class CaptureSession:
@@ -53,6 +54,7 @@ class CaptureSession:
         self._client = None
         self._done = threading.Event()
         self._silence_abort = threading.Event()
+        self._clip_abort = threading.Event()
 
     # ── lifecycle ─────────────────────────────────────────────────────────────
 
@@ -100,9 +102,11 @@ class CaptureSession:
             self._pos = new_pos
             self._frames_elapsed += frames
 
-            # ── silence detection (peak without allocating a temp array) ──────
+            # ── level checks (peak without allocating a temp array) ───────────
+            peak = max(float(np.max(in_buf)), float(-np.min(in_buf)))
+            if peak >= _CLIP_THRESHOLD and not self._clip_abort.is_set():
+                self._clip_abort.set()
             if self._frames_elapsed > _SILENCE_SETTLE_FRAMES and not self._silence_abort.is_set():
-                peak = max(float(np.max(in_buf)), float(-np.min(in_buf)))
                 if peak < _SILENCE_THRESHOLD:
                     self._silence_run += frames
                     if self._silence_run >= _SILENCE_ABORT_FRAMES:
@@ -136,6 +140,10 @@ class CaptureSession:
     @property
     def silence_detected(self) -> bool:
         return self._silence_abort.is_set()
+
+    @property
+    def clip_detected(self) -> bool:
+        return self._clip_abort.is_set()
 
     # ── output ────────────────────────────────────────────────────────────────
 

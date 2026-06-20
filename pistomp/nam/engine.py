@@ -137,6 +137,10 @@ class NamCaptureEngine:
             safe = (name.strip() or "capture").replace("/", "_").replace("\\", "_")
             self._output_dir.mkdir(parents=True, exist_ok=True)
             out_wav = self._output_dir / f"{safe}.wav"
+            n = 2
+            while out_wav.exists():
+                out_wav = self._output_dir / f"{safe}-{n}.wav"
+                n += 1
 
             session = CaptureSession(samples, self._send_port, self._return_port)
             session.start()
@@ -147,10 +151,22 @@ class NamCaptureEngine:
             while not session.wait(timeout=0.1):
                 if self._abort.is_set():
                     session.stop()
+                    session.write_wav(out_wav)
                     session = None
                     routing.restore(saved)
                     saved = None
-                    self._set_state(CaptureState.ABORTED)
+                    with self._lock:
+                        self._output_path = out_wav
+                        self._state = CaptureState.ABORTED
+                    return
+                if session.clip_detected:
+                    session.stop()
+                    session = None
+                    routing.restore(saved)
+                    saved = None
+                    with self._lock:
+                        self._error = "Input clipped — reduce amp output level"
+                        self._state = CaptureState.FAILED
                     return
                 if session.silence_detected:
                     session.stop()

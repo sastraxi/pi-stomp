@@ -139,7 +139,6 @@ class Modhandler(Handler):
         self._is_pedalboard_loading = False
 
         # Tuner state
-        self._tuner_engine: TunerEngine | None = None
         self._tuner_source_factory: TunerSourceFactory | None = None
         self._tuner_muted: bool = False
 
@@ -172,16 +171,12 @@ class Modhandler(Handler):
             del self.wifi_manager
 
     def cleanup(self):
-        if self._fullscreen_panel is not None:
-            from pistomp.nam.panel import NamCapturePanel
-            if isinstance(self._fullscreen_panel, NamCapturePanel):
-                self._lcd.hide_plugin_panel()
-        if self._tuner_engine is not None:
-            if self._tuner_muted:
-                self.audiocard.set_output_muted(False)
-            self._tuner_engine.stop()
-            self._tuner_engine = None
-            self._fullscreen_panel = None
+        if self._tuner_muted:
+            self.audiocard.set_output_muted(False)
+            self._tuner_muted = False
+        if self._fullscreen_panel is not None and self._lcd is not None:
+            self._lcd.hide_fullscreen_panel()
+        self._fullscreen_panel = None
         if self._lcd is not None:
             self._lcd.cleanup()
         if self._hardware is not None:
@@ -781,12 +776,9 @@ class Modhandler(Handler):
         return read_pedalboard_bundle(self.last_json_monitor.path)
 
     def set_current_pedalboard(self, pedalboard):
-        # If a NAM capture panel is mounted, popping it triggers auto_destroy → engine.stop().
-        if self._fullscreen_panel is not None:
-            from pistomp.nam.panel import NamCapturePanel
-            if isinstance(self._fullscreen_panel, NamCapturePanel):
-                self._lcd.hide_plugin_panel()
-                self._fullscreen_panel = None
+        if self._fullscreen_panel is not None and not self._fullscreen_panel.should_persist_on_board_change():
+            self._lcd.hide_fullscreen_panel()
+            self._fullscreen_panel = None
 
         # Cleanup all previous blend modes if active
         for blend_mode in self.blend_modes.values():
@@ -829,10 +821,7 @@ class Modhandler(Handler):
         self.bind_volume_encoder()
         self.load_current_presets()
         self.lcd.link_data(self.pedalboard_list, self.current, self.hardware.footswitches)
-        if cfg and cfg.get("nam_capture"):
-            self._mount_nam_capture_panel()
-        else:
-            self.lcd.draw_main_panel()
+        self.lcd.draw_main_panel()
         self.lcd.update_wifi(self.wifi_status)
 
         # Send external MIDI messages for this pedalboard
@@ -1328,29 +1317,30 @@ class Modhandler(Handler):
 
     @property
     def _tuner_panel(self) -> TunerPanel | None:
-        """Backwards-compatible alias."""
         return self._fullscreen_panel if isinstance(self._fullscreen_panel, TunerPanel) else None
 
+    @property
+    def _tuner_engine(self) -> TunerEngine | None:
+        p = self._tuner_panel
+        return p._engine if p is not None else None
+
     def toggle_tuner_enable(self, *argv) -> None:
-        if self._tuner_engine is None:
+        if self._tuner_panel is None:
             muted = bool(self.settings.get_setting(Token.TUNER_MUTE))
             input_port = int(self.settings.get_setting(Token.TUNER_INPUT) or 1)
-            engine = TunerEngine(self._tuner_factory(f"system:capture_{input_port}"))
-            engine.start()
-            self._tuner_engine = engine
             if muted:
                 self.audiocard.set_output_muted(True)
                 self._tuner_muted = True
             panel = TunerPanel(
-                engine,
+                self._tuner_factory,
+                input_port,
                 on_dismiss=self.toggle_tuner_enable,
                 on_mute_toggle=self._toggle_tuner_mute,
                 on_input_toggle=self._toggle_tuner_input,
                 muted=muted,
-                input_port=input_port,
             )
             self._fullscreen_panel = panel
-            self.lcd.show_plugin_panel(panel)
+            self.lcd.show_fullscreen_panel(panel)
         else:
             self._dismiss_tuner()
 
@@ -1358,10 +1348,7 @@ class Modhandler(Handler):
         if self._tuner_muted:
             self.audiocard.set_output_muted(False)
             self._tuner_muted = False
-        self.lcd.hide_plugin_panel()
-        if self._tuner_engine is not None:
-            self._tuner_engine.stop()
-            self._tuner_engine = None
+        self.lcd.hide_fullscreen_panel()
         self._fullscreen_panel = None
 
     def _toggle_tuner_mute(self) -> None:
@@ -1375,36 +1362,29 @@ class Modhandler(Handler):
     def _toggle_tuner_input(self) -> None:
         current_port = int(self.settings.get_setting(Token.TUNER_INPUT) or 1)
         new_port = 2 if current_port == 1 else 1
-        old_engine = self._tuner_engine
-        engine = TunerEngine(self._tuner_factory(f"system:capture_{new_port}"))
-        engine.start()
         self.settings.set_setting(Token.TUNER_INPUT, new_port)
-        if old_engine is not None:
-            old_engine.stop()
-        self._tuner_engine = engine
         if self._tuner_panel is not None:
-            self._tuner_panel.set_engine(engine)
-            self._tuner_panel.set_input_port(new_port)
+            self._tuner_panel.switch_input_port(new_port)
 
     # ── generic plugin panels ──────────────────────────────────────────────
 
-    def show_plugin_panel(self, plugin, panel_cls) -> None:
+    def show_fullscreen_panel(self, plugin, panel_cls) -> None:
         """Open a full-screen panel for *plugin* using the registered class."""
         if self._fullscreen_panel is not None:
             return  # already open
         panel = panel_cls(
             plugin=plugin,
             handler=self,
-            on_dismiss=self.hide_plugin_panel,
+            on_dismiss=self.hide_fullscreen_panel,
         )
         self._fullscreen_panel = panel
-        self.lcd.show_plugin_panel(panel)
+        self.lcd.show_fullscreen_panel(panel)
 
-    def hide_plugin_panel(self) -> None:
+    def hide_fullscreen_panel(self) -> None:
         """Dismiss the current plugin panel and clean up."""
         if self._fullscreen_panel is None:
             return
-        self.lcd.hide_plugin_panel()
+        self.lcd.hide_fullscreen_panel()
         self._fullscreen_panel = None
 
     # ── NAM capture ───────────────────────────────────────────────────────────
@@ -1413,15 +1393,15 @@ class Modhandler(Handler):
         from pistomp.nam.panel import NamCapturePanel
 
         output_dir = os.path.join(
-            os.environ.get("MOD_USER_FILES_DIR", "/home/pistomp/data/user-files"),
+            os.environ.get("MOD_USER_FILES_DIR", os.path.expanduser("~/data/user-files")),
             "Audio Recordings",
         )
         panel = NamCapturePanel(output_dir=output_dir, on_dismiss=self._dismiss_nam_capture)
         self._fullscreen_panel = panel
-        self.lcd.show_plugin_panel(panel)
+        self.lcd.show_fullscreen_panel(panel)
 
     def _dismiss_nam_capture(self) -> None:
-        # hide_plugin_panel → pop_panel → auto_destroy → panel.destroy() → engine.stop()
-        self.lcd.hide_plugin_panel()
+        # hide_fullscreen_panel → pop_panel → auto_destroy → panel.destroy() → engine.stop()
+        self.lcd.hide_fullscreen_panel()
         self._fullscreen_panel = None
         self.lcd.draw_main_panel()

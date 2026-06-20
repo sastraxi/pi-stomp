@@ -26,11 +26,9 @@ from typing import Callable
 from uilib.box import Box
 from uilib.config import Config
 from uilib.label import Label
-from uilib.panel import Panel
 from uilib.text import Button
 
-from pistomp.input.event import ControllerEvent
-from pistomp.input.sink import InputSink
+from pistomp.fullscreen_panel import FullscreenPanel
 from pistomp.nam.engine import CaptureState, NamCaptureEngine
 from pistomp.nam.wavio import wav_duration
 
@@ -67,7 +65,7 @@ def _fmt_time(seconds: float) -> str:
     return f"{s // 60}:{s % 60:02d}"
 
 
-class NamCapturePanel(Panel, InputSink):
+class NamCapturePanel(FullscreenPanel):
     """Full-screen panel for NAM capture.  Owns the engine lifecycle."""
 
     def __init__(
@@ -76,7 +74,7 @@ class NamCapturePanel(Panel, InputSink):
         on_dismiss: Callable[[], None],
         reamp_wav: Path = _REAMP_WAV,
     ) -> None:
-        super().__init__(box=Box.xywh(0, 0, _W, _H), auto_destroy=True, no_dim=True)
+        super().__init__()
         self._on_dismiss = on_dismiss
         self._engine = self._create_engine(output_dir, reamp_wav)
         self._last_state = CaptureState.IDLE
@@ -153,11 +151,6 @@ class NamCapturePanel(Panel, InputSink):
     def destroy(self) -> None:
         self._engine.stop()
         super().destroy()
-
-    # ── InputSink ────────────────────────────────────────────────────────────
-
-    def handle(self, event: ControllerEvent) -> bool:
-        return False
 
     # ── poll ─────────────────────────────────────────────────────────────────
 

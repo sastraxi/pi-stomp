@@ -3,11 +3,9 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
-import pytest
-
-from pistomp.nam.engine import CaptureState, NamCaptureEngine
+from pistomp.nam.engine import CaptureState
 from pistomp.nam.panel import NamCapturePanel
 
 
@@ -71,28 +69,28 @@ def _make_panel(engine: _FakeEngine, on_dismiss=None) -> NamCapturePanel:
 class TestNamPanelSnapshot:
     def test_idle_state(self, v3_system, snapshot):
         panel = _make_panel(_FakeEngine(CaptureState.IDLE))
-        v3_system.handler.lcd.show_plugin_panel(panel)
+        v3_system.handler.lcd.show_fullscreen_panel(panel)
         panel.tick()
         v3_system.handler.poll_lcd_updates()
         snapshot("idle")
 
     def test_capturing_state(self, v3_system, snapshot):
         panel = _make_panel(_FakeEngine(CaptureState.CAPTURING, progress=0.45))
-        v3_system.handler.lcd.show_plugin_panel(panel)
+        v3_system.handler.lcd.show_fullscreen_panel(panel)
         panel.tick()
         v3_system.handler.poll_lcd_updates()
         snapshot("capturing")
 
     def test_done_state(self, v3_system, snapshot):
         panel = _make_panel(_FakeEngine(CaptureState.DONE, progress=1.0))
-        v3_system.handler.lcd.show_plugin_panel(panel)
+        v3_system.handler.lcd.show_fullscreen_panel(panel)
         panel.tick()
         v3_system.handler.poll_lcd_updates()
         snapshot("done")
 
     def test_failed_state(self, v3_system, snapshot):
         panel = _make_panel(_FakeEngine(CaptureState.FAILED))
-        v3_system.handler.lcd.show_plugin_panel(panel)
+        v3_system.handler.lcd.show_fullscreen_panel(panel)
         panel.tick()
         v3_system.handler.poll_lcd_updates()
         snapshot("failed")
@@ -139,8 +137,8 @@ class TestNamPanelLifecycle:
     def test_destroy_stops_engine(self, v3_system):
         engine = _FakeEngine(CaptureState.CAPTURING)
         panel = _make_panel(engine)
-        v3_system.handler.lcd.show_plugin_panel(panel)
-        v3_system.handler.lcd.hide_plugin_panel()  # pop_panel → auto_destroy → destroy()
+        v3_system.handler.lcd.show_fullscreen_panel(panel)
+        v3_system.handler.lcd.hide_fullscreen_panel()  # pop_panel → auto_destroy → destroy()
         assert engine.stopped
 
 
@@ -157,7 +155,7 @@ class TestNamHandlerIntegration:
         fake_engine = _FakeEngine(CaptureState.CAPTURING)
         panel = _make_panel(fake_engine)
         handler._fullscreen_panel = panel
-        handler.lcd.show_plugin_panel(panel)
+        handler.lcd.show_fullscreen_panel(panel)
 
         pb = handler.current.pedalboard
         handler.set_current_pedalboard(pb)
