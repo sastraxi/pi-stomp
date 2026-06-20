@@ -19,6 +19,12 @@ import numpy as np
 import numpy.typing as npt
 
 
+def wav_duration(path: Path | str) -> float:
+    """Return the duration in seconds of *path* without loading samples."""
+    with wave.open(str(path), "rb") as wf:
+        return wf.getnframes() / wf.getframerate()
+
+
 def load_wav_float32(path: Path | str) -> npt.NDArray[np.float32]:
     """Load a 24-bit / 48 kHz / mono WAV file and return float32 samples."""
     with wave.open(str(path), "rb") as wf:
@@ -38,4 +44,4 @@ def load_wav_float32(path: Path | str) -> npt.NDArray[np.float32]:
     padded = np.zeros((n, 4), dtype=np.uint8)
     padded[:, 1:] = buf  # 24-bit bytes at positions 1,2,3; position 0 = 0x00
     int32 = padded.view(np.dtype("<i4")).reshape(-1)
-    return (int32.astype(np.float32)) / (2**31)
+    return (int32.astype(np.float32)) / np.float32(2**31)

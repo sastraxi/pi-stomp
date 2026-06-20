@@ -1,14 +1,12 @@
 from __future__ import annotations
 
 import logging
-import subprocess
 import threading
-import time
 from enum import Enum, auto
 from pathlib import Path
 
 from pistomp.nam import routing
-from pistomp.nam.player import JackPlayer
+from pistomp.nam.capture_session import CaptureSession
 from pistomp.nam.wavio import load_wav_float32
 
 _REAMP_WAV = Path(__file__).resolve().parents[2] / "setup" / "nam" / "v3_0_0.wav"
@@ -29,19 +27,19 @@ class NamCaptureEngine:
     Lifecycle::
 
         engine = NamCaptureEngine(output_dir)
-        engine.start("my-amp")          # kick off background thread
+        engine.start("my-amp")          # kicks off background thread
         while engine.state == CaptureState.CAPTURING:
             p = engine.progress()       # 0.0 → 1.0
             ...
         # engine.state in (DONE, FAILED, ABORTED)
         path = engine.output_path       # Path to the recorded WAV (if DONE)
 
-    The routing (save/clear/restore) is wrapped in try/finally so the user's
-    audio routing is always restored on normal completion, abort, or exception.
+    Routing (save/clear/restore) is wrapped in try/finally so the user's
+    audio routing is always restored on completion, abort, or exception.
 
-    Recording: shell out to jack_capture (custom-packaged in pistomp-arch).
-    Playback:  embedded JackPlayer (Python jack outport client) that pre-loads
-               the entire reamp WAV into a numpy float32 array.
+    A single CaptureSession JACK client handles both playback (FX send) and
+    recording (FX return) in the same RT callback — frame-accurate alignment
+    and equal length, no subprocess race.
     """
 
     def __init__(
@@ -86,7 +84,7 @@ class NamCaptureEngine:
             return self._progress
 
     def start(self, name: str) -> None:
-        """Begin a capture. No-op if already capturing."""
+        """Begin a capture.  No-op if already capturing."""
         with self._lock:
             if self._state == CaptureState.CAPTURING:
                 return
@@ -110,8 +108,7 @@ class NamCaptureEngine:
 
     def _run(self, name: str) -> None:
         saved: routing.Saved | None = None
-        recorder: subprocess.Popen | None = None
-        player: JackPlayer | None = None
+        session: CaptureSession | None = None
 
         try:
             if not self._reamp_wav.exists():
@@ -128,7 +125,6 @@ class NamCaptureEngine:
                 self._set_state(CaptureState.ABORTED)
                 return
 
-            # Snapshot then clear existing FX-loop connections.
             saved = routing.snapshot(self._send_port, self._return_port)
             routing.clear(self._send_port, self._return_port)
 
@@ -138,54 +134,40 @@ class NamCaptureEngine:
                 self._set_state(CaptureState.ABORTED)
                 return
 
-            # Prepare output path.  jack_capture adds .wav; we strip it from the stem.
             safe = (name.strip() or "capture").replace("/", "_").replace("\\", "_")
             self._output_dir.mkdir(parents=True, exist_ok=True)
             out_wav = self._output_dir / f"{safe}.wav"
-            out_stem = str(out_wav.with_suffix(""))
 
-            # Start recorder before player so no samples are missed.
-            recorder = subprocess.Popen(
-                [
-                    "jack_capture",
-                    "--port",
-                    self._return_port,
-                    "--bitdepth",
-                    "24",
-                    "--channels",
-                    "1",
-                    "--filename",
-                    out_stem,
-                ],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.PIPE,
-            )
+            session = CaptureSession(samples, self._send_port, self._return_port)
+            session.start()
 
-            # Start player and wire it to the FX send port.
-            player = JackPlayer(samples, self._send_port)
-            player.start()
+            import time
 
-            # Poll until playback completes, surfacing progress to the UI.
             t0 = time.monotonic()
-            while not player.wait(timeout=0.1):
+            while not session.wait(timeout=0.1):
                 if self._abort.is_set():
-                    player.stop()
-                    player = None
-                    _stop_recorder(recorder)
-                    recorder = None
+                    session.stop()
+                    session = None
                     routing.restore(saved)
                     saved = None
                     self._set_state(CaptureState.ABORTED)
+                    return
+                if session.silence_detected:
+                    session.stop()
+                    session = None
+                    routing.restore(saved)
+                    saved = None
+                    with self._lock:
+                        self._error = "No audio returned — check FX loop cable"
+                        self._state = CaptureState.FAILED
                     return
                 elapsed = time.monotonic() - t0
                 with self._lock:
                     self._progress = min(elapsed / duration, 0.99)
 
-            player.stop()
-            player = None
-            _stop_recorder(recorder)
-            recorder = None
-
+            session.write_wav(out_wav)
+            session.stop()
+            session = None
             routing.restore(saved)
             saved = None
 
@@ -206,20 +188,9 @@ class NamCaptureEngine:
                     routing.restore(saved)
                 except Exception as exc:
                     logging.error("NAM routing restore failed: %s", exc)
-            if recorder is not None and recorder.poll() is None:
-                _stop_recorder(recorder)
-            if player is not None:
-                player.stop()
+            if session is not None:
+                session.stop()
 
     def _set_state(self, state: CaptureState) -> None:
         with self._lock:
             self._state = state
-
-
-def _stop_recorder(proc: subprocess.Popen) -> None:
-    """Terminate jack_capture and wait for it to flush its output."""
-    try:
-        proc.terminate()
-        proc.wait(timeout=5.0)
-    except Exception as exc:
-        logging.warning("jack_capture teardown: %s", exc)

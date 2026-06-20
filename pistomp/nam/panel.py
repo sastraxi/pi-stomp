@@ -5,26 +5,26 @@ Layout (320×240):
     ┌─────────────────────────────┐
     │       NAM CAPTURE           │ y=8
     │  ─────────────────────────  │
-    │  Name: [my-amp           ]  │ y=50  (editable button)
-    │  ──── ████████░░░░░░░░░░ ── │ y=96  (progress bar)
-    │  Status: Idle / Capturing…  │ y=116
-    │  /Audio Recordings/out.wav  │ y=136
+    │  Name: [my-amp           ]  │ y=50
     │                             │
-    │     [  Start  ] [Abort]     │ y=182
-    │        [ Dismiss ]          │ y=210
+    │         2:34                │ y=100  countdown (large, centred)
+    │      Ready / Failed…        │ y=148  status
+    │   /Audio Recordings/…       │ y=168  path or error
+    │                             │
+    │  [ Start ] [ Abort ] [Dismiss] │ y=210  chrome row (plugin-panel style)
     └─────────────────────────────┘
 
-Buttons navigate with the encoder; pressing the selected button fires its
-action.  The name field opens a TextEditor when pressed.
+Buttons cycle with the encoder; pressing the selected button fires its action.
+The name field opens a TextEditor when pressed.
 """
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Callable
 
 from uilib.box import Box
 from uilib.config import Config
-from uilib.icon import Icon
 from uilib.label import Label
 from uilib.panel import Panel
 from uilib.text import Button
@@ -32,12 +32,18 @@ from uilib.text import Button
 from pistomp.input.event import ControllerEvent
 from pistomp.input.sink import InputSink
 from pistomp.nam.engine import CaptureState, NamCaptureEngine
+from pistomp.nam.wavio import wav_duration
 
 _W = 320
 _H = 240
-_BTN_H = 28
-_BTN_GAP = 4
 
+# Chrome row — identical constants to plugins/base.py
+_BTN_GAP = 2
+_BTN_H = 28
+_BTN_Y = _H - _BTN_H - _BTN_GAP  # 210
+_BTN_W = (_W - 4 * _BTN_GAP) // 3  # 104
+
+_REAMP_WAV = Path(__file__).resolve().parents[2] / "setup" / "nam" / "v3_0_0.wav"
 
 _STATUS_TEXT: dict[CaptureState, str] = {
     CaptureState.IDLE: "Ready",
@@ -56,27 +62,39 @@ _STATUS_COLOR: dict[CaptureState, tuple[int, int, int]] = {
 }
 
 
+def _fmt_time(seconds: float) -> str:
+    s = max(0, int(seconds))
+    return f"{s // 60}:{s % 60:02d}"
+
+
 class NamCapturePanel(Panel, InputSink):
-    """Full-screen panel for NAM capture. Mounted when a board has nam_capture: true."""
+    """Full-screen panel for NAM capture.  Owns the engine lifecycle."""
 
     def __init__(
         self,
-        engine: NamCaptureEngine,
+        output_dir: str | Path,
         on_dismiss: Callable[[], None],
+        reamp_wav: Path = _REAMP_WAV,
     ) -> None:
         super().__init__(box=Box.xywh(0, 0, _W, _H), auto_destroy=True, no_dim=True)
-        self._engine = engine
         self._on_dismiss = on_dismiss
+        self._engine = self._create_engine(output_dir, reamp_wav)
         self._last_state = CaptureState.IDLE
-        self._last_progress: float = -1.0
+        self._last_countdown: str = ""
+
+        # Pre-read duration from WAV header (fast — no sample loading).
+        try:
+            self._duration = wav_duration(reamp_wav)
+        except Exception:
+            self._duration = 0.0
 
         font = Config().get_font("default")
 
         # Title
-        self._title = Label(0, 8, font, parent=self)
-        self._title.set_text("NAM CAPTURE", (255, 200, 0), x=_W // 2 - 50)
+        title = Label(0, 8, font, parent=self)
+        title.set_text("NAM CAPTURE", (255, 200, 0), x=_W // 2 - 50)
 
-        # Capture name field (editable Button)
+        # Capture name field
         name_lbl = Label(8, 53, font, parent=self)
         name_lbl.set_text("Name:", (160, 160, 160))
         self._name_btn = Button(
@@ -89,24 +107,16 @@ class NamCapturePanel(Panel, InputSink):
         )
         self.add_sel_widget(self._name_btn)
 
-        # Progress bar
-        self._progress_bar = Icon(
-            box=Box.xywh(8, 90, _W - 16, 18),
-            text="",
-            parent=self,
-        )
+        # Countdown clock — large, centred
+        self._countdown_lbl = Label(0, 100, font, parent=self)
 
-        # Status label
-        self._status_lbl = Label(8, 116, font, parent=self)
-        self._status_lbl.set_text("Ready", _STATUS_COLOR[CaptureState.IDLE])
+        # Status and info labels
+        self._status_lbl = Label(8, 148, font, parent=self)
+        self._info_lbl = Label(8, 168, font, parent=self)
 
-        # Output path / error hint
-        self._info_lbl = Label(8, 136, font, parent=self)
-
-        # Action buttons
-        half = (_W - _BTN_GAP * 3) // 2
+        # Chrome buttons — same geometry as plugins/base.py
         self._btn_start = Button(
-            box=Box.xywh(_BTN_GAP, 178, half, _BTN_H),
+            box=Box.xywh(_BTN_GAP, _BTN_Y, _BTN_W, _BTN_H),
             text="Start",
             font=font,
             outline_radius=4,
@@ -114,29 +124,35 @@ class NamCapturePanel(Panel, InputSink):
             action=lambda *_: self._on_start(),
         )
         self._btn_abort = Button(
-            box=Box.xywh(_BTN_GAP * 2 + half, 178, half, _BTN_H),
+            box=Box.xywh(_BTN_GAP * 2 + _BTN_W, _BTN_Y, _BTN_W, _BTN_H),
             text="Abort",
             font=font,
             outline_radius=4,
             parent=self,
             action=lambda *_: self._on_abort(),
         )
-        dismiss_w = _W - _BTN_GAP * 2
         self._btn_dismiss = Button(
-            box=Box.xywh(_BTN_GAP, 210, dismiss_w, _BTN_H),
+            box=Box.xywh(_BTN_GAP * 3 + _BTN_W * 2, _BTN_Y, _BTN_W, _BTN_H),
             text="Dismiss",
             font=font,
             outline_radius=4,
             parent=self,
             action=lambda *_: on_dismiss(),
         )
-
         self.add_sel_widget(self._btn_start)
         self.add_sel_widget(self._btn_abort)
         self.add_sel_widget(self._btn_dismiss)
 
-        # Initialise to IDLE visual state
         self._apply_state(CaptureState.IDLE)
+
+    def _create_engine(self, output_dir: str | Path, reamp_wav: Path) -> NamCaptureEngine:
+        return NamCaptureEngine(output_dir, reamp_wav=reamp_wav)
+
+    # ── Panel lifecycle ───────────────────────────────────────────────────────
+
+    def destroy(self) -> None:
+        self._engine.stop()
+        super().destroy()
 
     # ── InputSink ────────────────────────────────────────────────────────────
 
@@ -147,25 +163,29 @@ class NamCapturePanel(Panel, InputSink):
 
     def tick(self) -> None:
         state = self._engine.state
-        progress = self._engine.progress()
-
         if state != self._last_state:
             self._apply_state(state)
             self._last_state = state
 
-        if state == CaptureState.CAPTURING and abs(progress - self._last_progress) > 0.005:
-            self._progress_bar.set_progress(progress)
-            self._last_progress = progress
+        if state == CaptureState.CAPTURING and self._duration > 0:
+            remaining = self._duration * (1.0 - self._engine.progress())
+            countdown = _fmt_time(remaining)
+            if countdown != self._last_countdown:
+                self._countdown_lbl.set_text(countdown, (255, 200, 0), x=_W // 2 - 20)
+                self._last_countdown = countdown
 
     # ── private ───────────────────────────────────────────────────────────────
 
     def _on_start(self) -> None:
-        state = self._engine.state
-        if state not in (CaptureState.IDLE, CaptureState.DONE, CaptureState.FAILED, CaptureState.ABORTED):
+        if self._engine.state not in (
+            CaptureState.IDLE,
+            CaptureState.DONE,
+            CaptureState.FAILED,
+            CaptureState.ABORTED,
+        ):
             return
         name = self._name_btn.text or "capture"
-        self._last_progress = -1.0
-        self._progress_bar.set_progress(0.0)
+        self._last_countdown = ""
         self._engine.start(name)
 
     def _on_abort(self) -> None:
@@ -176,18 +196,26 @@ class NamCapturePanel(Panel, InputSink):
         color = _STATUS_COLOR[state]
         self._status_lbl.set_text(_STATUS_TEXT[state], color)
 
-        if state == CaptureState.CAPTURING:
-            self._progress_bar.set_progress(0.0)
+        if state == CaptureState.IDLE:
+            self._set_countdown(_fmt_time(self._duration), (100, 100, 100))
+            self._info_lbl.set_text("", (0, 0, 0))
+        elif state == CaptureState.CAPTURING:
+            self._set_countdown(_fmt_time(self._duration), (255, 200, 0))
+            self._last_countdown = _fmt_time(self._duration)
             self._info_lbl.set_text("", (0, 0, 0))
         elif state == CaptureState.DONE:
-            self._progress_bar.set_progress(1.0)
+            self._set_countdown("0:00", (0, 200, 0))
             path = self._engine.output_path
             if path is not None:
                 self._info_lbl.set_text(path.name, (140, 200, 140))
         elif state == CaptureState.FAILED:
-            self._progress_bar.set_progress(None)
+            self._set_countdown("--:--", (220, 40, 40))
             err = self._engine.error or "Unknown error"
             self._info_lbl.set_text(err[:40], (220, 80, 80))
-        else:
-            self._progress_bar.set_progress(None)
+        else:  # ABORTED
+            self._set_countdown(_fmt_time(self._duration), (100, 100, 100))
             self._info_lbl.set_text("", (0, 0, 0))
+
+    def _set_countdown(self, text: str, color: tuple[int, int, int]) -> None:
+        self._countdown_lbl.set_text(text, color, x=_W // 2 - 20)
+        self._last_countdown = text

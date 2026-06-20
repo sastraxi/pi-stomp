@@ -55,6 +55,14 @@ class _FakeEngine:
         self._progress = progress
 
 
+def _make_panel(engine: _FakeEngine, on_dismiss=None) -> NamCapturePanel:
+    """Build a NamCapturePanel backed by *engine* without touching the filesystem."""
+    if on_dismiss is None:
+        on_dismiss = lambda: None
+    with patch.object(NamCapturePanel, "_create_engine", return_value=engine):
+        return NamCapturePanel(output_dir="/tmp", on_dismiss=on_dismiss)
+
+
 # ---------------------------------------------------------------------------
 # Snapshot tests
 # ---------------------------------------------------------------------------
@@ -62,32 +70,28 @@ class _FakeEngine:
 
 class TestNamPanelSnapshot:
     def test_idle_state(self, v3_system, snapshot):
-        engine = _FakeEngine(CaptureState.IDLE)
-        panel = NamCapturePanel(engine=engine, on_dismiss=lambda: None)
+        panel = _make_panel(_FakeEngine(CaptureState.IDLE))
         v3_system.handler.lcd.show_plugin_panel(panel)
         panel.tick()
         v3_system.handler.poll_lcd_updates()
         snapshot("idle")
 
     def test_capturing_state(self, v3_system, snapshot):
-        engine = _FakeEngine(CaptureState.CAPTURING, progress=0.45)
-        panel = NamCapturePanel(engine=engine, on_dismiss=lambda: None)
+        panel = _make_panel(_FakeEngine(CaptureState.CAPTURING, progress=0.45))
         v3_system.handler.lcd.show_plugin_panel(panel)
         panel.tick()
         v3_system.handler.poll_lcd_updates()
         snapshot("capturing")
 
     def test_done_state(self, v3_system, snapshot):
-        engine = _FakeEngine(CaptureState.DONE, progress=1.0)
-        panel = NamCapturePanel(engine=engine, on_dismiss=lambda: None)
+        panel = _make_panel(_FakeEngine(CaptureState.DONE, progress=1.0))
         v3_system.handler.lcd.show_plugin_panel(panel)
         panel.tick()
         v3_system.handler.poll_lcd_updates()
         snapshot("done")
 
     def test_failed_state(self, v3_system, snapshot):
-        engine = _FakeEngine(CaptureState.FAILED)
-        panel = NamCapturePanel(engine=engine, on_dismiss=lambda: None)
+        panel = _make_panel(_FakeEngine(CaptureState.FAILED))
         v3_system.handler.lcd.show_plugin_panel(panel)
         panel.tick()
         v3_system.handler.poll_lcd_updates()
@@ -102,67 +106,61 @@ class TestNamPanelSnapshot:
 class TestNamPanelLifecycle:
     def test_start_button_triggers_engine(self, v3_system):
         engine = _FakeEngine(CaptureState.IDLE)
-        panel = NamCapturePanel(engine=engine, on_dismiss=lambda: None)
+        panel = _make_panel(engine)
         panel._btn_start.action()
         assert engine.started == ["capture"]
 
     def test_abort_button_stops_engine_when_capturing(self, v3_system):
         engine = _FakeEngine(CaptureState.CAPTURING)
-        panel = NamCapturePanel(engine=engine, on_dismiss=lambda: None)
+        panel = _make_panel(engine)
         panel._btn_abort.action()
         assert engine.stopped
 
     def test_abort_noop_when_idle(self, v3_system):
         engine = _FakeEngine(CaptureState.IDLE)
-        panel = NamCapturePanel(engine=engine, on_dismiss=lambda: None)
+        panel = _make_panel(engine)
         panel._btn_abort.action()
         assert not engine.stopped
 
     def test_dismiss_button_calls_on_dismiss(self, v3_system):
         dismissed = []
-        engine = _FakeEngine(CaptureState.IDLE)
-        panel = NamCapturePanel(engine=engine, on_dismiss=lambda: dismissed.append(True))
+        panel = _make_panel(_FakeEngine(CaptureState.IDLE), on_dismiss=lambda: dismissed.append(True))
         panel._btn_dismiss.action()
         assert dismissed == [True]
 
-    def test_tick_updates_progress_label(self, v3_system):
-        engine = _FakeEngine(CaptureState.CAPTURING, progress=0.0)
-        panel = NamCapturePanel(engine=engine, on_dismiss=lambda: None)
-        # Progress changes from 0 → 0.5 between ticks
-        engine.set_state(CaptureState.CAPTURING, progress=0.5)
+    def test_tick_updates_countdown(self, v3_system):
+        engine = _FakeEngine(CaptureState.CAPTURING, progress=0.5)
+        panel = _make_panel(engine)
+        panel._duration = 60.0
         panel.tick()
-        assert abs(panel._progress_bar.progress - 0.5) < 0.01
+        # At 50% progress, ~30 s remain → "0:30"
+        assert panel._last_countdown == "0:30"
+
+    def test_destroy_stops_engine(self, v3_system):
+        engine = _FakeEngine(CaptureState.CAPTURING)
+        panel = _make_panel(engine)
+        v3_system.handler.lcd.show_plugin_panel(panel)
+        v3_system.handler.lcd.hide_plugin_panel()  # pop_panel → auto_destroy → destroy()
+        assert engine.stopped
 
 
 class TestNamHandlerIntegration:
     def test_nam_board_mounts_panel(self, v3_system):
         handler = v3_system.handler
-        # Simulate selecting the NAM Capture pedalboard by calling the private mount.
-        with (
-            patch("pistomp.nam.engine.NamCaptureEngine.__init__", return_value=None),
-            patch.object(
-                NamCaptureEngine,
-                "state",
-                new_callable=lambda: property(lambda self: CaptureState.IDLE),
-            ),
-            patch.object(NamCaptureEngine, "progress", return_value=0.0),
-            patch.object(NamCaptureEngine, "error", new_callable=lambda: property(lambda self: None)),
-            patch.object(NamCaptureEngine, "output_path", new_callable=lambda: property(lambda self: None)),
-        ):
+        fake_engine = _FakeEngine(CaptureState.IDLE)
+        with patch.object(NamCapturePanel, "_create_engine", return_value=fake_engine):
             handler._mount_nam_capture_panel()
-
-        assert handler._nam_engine is not None
         assert isinstance(handler._fullscreen_panel, NamCapturePanel)
 
     def test_switching_board_stops_engine(self, v3_system):
         handler = v3_system.handler
         fake_engine = _FakeEngine(CaptureState.CAPTURING)
-        handler._nam_engine = fake_engine
+        panel = _make_panel(fake_engine)
+        handler._fullscreen_panel = panel
+        handler.lcd.show_plugin_panel(panel)
 
-        # Trigger the cleanup logic at the top of set_current_pedalboard by
-        # reloading the current pedalboard (same board is fine for this test).
         pb = handler.current.pedalboard
         handler.set_current_pedalboard(pb)
 
         assert fake_engine.stopped
-        assert handler._nam_engine is None
+        assert handler._fullscreen_panel is None
