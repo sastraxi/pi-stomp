@@ -222,6 +222,81 @@ def split_merge() -> MockPedalboard:
 
 
 
+def parallel_beths() -> MockPedalboard:
+    """21-plugin parallel rig: 5 independent lanes × 4 processing stages + shared FinalEQ.
+
+    Each lane feeds a common FinalEQ before the outputs.  The DAG produces a
+    5-row × 5-column grid (4 lane columns + 1 merge column) which exercises the
+    column-compression DP, barycentric sweep, and dummy-node insertion on the
+    shorter lanes that need vertical bridge segments in the merge gutter.
+
+    Layout:
+    capture_1 ──┬── Comp1  → Amp1  → Delay1 → Rev1  ──┐
+                ├── OD1    → Amp2  → Cho1   → Cab2  ──┤
+                ├── Dist1  → Amp3  → Cab3   → Phase1 ──┤→ FinalEQ → playback_{1,2}
+                ├── Fuzz1  → Amp4  → Cho2   → Rev4  ──┤
+                └── Gate1  → BAmp1 → BCab1  → Comp5 ──┘
+    """
+    # 5 lanes × 4 plugins each
+    _LANES: list[list[tuple[str, str, bool, bool]]] = [
+        # Lane 1 – Clean
+        [
+            ("Comp1",   "Dynamics",   True,  False),
+            ("Amp1",    "Amplifier",  True,  False),
+            ("Delay1",  "Delay",      True,  False),
+            ("Rev1",    "Reverb",     True,  False),
+        ],
+        # Lane 2 – Crunch
+        [
+            ("OD1",     "Distortion", True,  False),
+            ("Amp2",    "Amplifier",  True,  False),
+            ("Cho1",    "Modulator",  True,  True),
+            ("Cab2",    "Utility",    False, False),
+        ],
+        # Lane 3 – Lead
+        [
+            ("Dist1",   "Distortion", True,  False),
+            ("Amp3",    "Amplifier",  True,  False),
+            ("Cab3",    "Utility",    False, False),
+            ("Phase1",  "Modulator",  True,  True),
+        ],
+        # Lane 4 – Doom/Fuzz
+        [
+            ("Fuzz1",   "Distortion", True,  True),
+            ("Amp4",    "Amplifier",  True,  False),
+            ("Cho2",    "Modulator",  True,  False),
+            ("Rev4",    "Reverb",     True,  False),
+        ],
+        # Lane 5 – Bass
+        [
+            ("Gate1",   "Dynamics",   False, False),
+            ("BAmp1",   "Amplifier",  True,  False),
+            ("BCab1",   "Utility",    False, False),
+            ("Comp5",   "Dynamics",   False, False),
+        ],
+    ]
+
+    lane_plugins: list[list[MockPlugin]] = [
+        [MockPlugin(iid, cat, fs, byp) for iid, cat, fs, byp in lane]
+        for lane in _LANES
+    ]
+    final_eq = MockPlugin("FinalEQ", "EQ", False, False)
+    all_plugins: list[MockPlugin] = [p for lane in lane_plugins for p in lane] + [final_eq]
+    assert len(all_plugins) == 21, f"expected 21, got {len(all_plugins)}"
+
+    conns: list[Connection] = []
+    for lane in lane_plugins:
+        ids = [p.instance_id for p in lane]
+        conns.append(Connection(src=_source_ep(1), dst=_plugin_ep(ids[0])))
+        for a, b in zip(ids, ids[1:]):
+            conns.append(Connection(src=_plugin_ep(a), dst=_plugin_ep(b)))
+        conns.append(Connection(src=_plugin_ep(ids[-1]), dst=_plugin_ep("FinalEQ")))
+    conns.append(Connection(src=_plugin_ep("FinalEQ"), dst=_sink_ep(1)))
+    conns.append(Connection(src=_plugin_ep("FinalEQ"), dst=_sink_ep(2)))
+
+    return MockPedalboard(title="Parallel Beths", plugins=all_plugins, connections=conns)
+
+
 REGISTRY: dict[str, Callable[[], MockPedalboard]] = {
     "blank": blank,
     "linear": linear_chain,
@@ -229,4 +304,5 @@ REGISTRY: dict[str, Callable[[], MockPedalboard]] = {
     "tall_parallel": tall_parallel,
     "stereo_chain": stereo_chain,
     "split_merge": split_merge,
+    "parallel_beths": parallel_beths,
 }
