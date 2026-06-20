@@ -574,6 +574,12 @@ class Modhandler(Handler):
                         c for c in self.current.pedalboard.connections
                         if c.src.id != iid and c.dst.id != iid
                     ]
+                    # Strip the removed instance from blend diff maps so the
+                    # parameter_setter stops sending WS messages for it.
+                    # XXX: blend mode also listens to ws?
+                    for blend in self.blend_modes.values():
+                        for diff_map in blend.segment_diff_maps:
+                            diff_map.pop(iid, None)
                     logging.info(f"WebSocket: Plugin {msg.instance} removed")
                     self.bind_current_pedalboard()
                     self.lcd.draw_main_panel()
@@ -615,11 +621,6 @@ class Modhandler(Handler):
     def _handle_dynamic_plugin_add(self, msg: AddPluginMessage) -> None:
         """Handle an `add` WS message for a plugin not yet in the pedalboard model."""
         assert self.current is not None
-        if self.blend_modes:
-            logging.warning(
-                f"Dynamic plugin add ({msg.instance}) skipped: blend mode configured on this pedalboard"
-            )
-            return
         info = self.current.pedalboard.get_plugin_data(msg.uri)
         plugin = self.current.pedalboard._build_plugin(msg.instance, msg.uri, msg.x, msg.y, info)
         if plugin is None:

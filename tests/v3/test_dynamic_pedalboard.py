@@ -6,8 +6,8 @@ updates its in-memory model and redraws the LCD without triggering a full LILV r
 The snapshot tests and the epic use the parallel_beths topology:
 
     capture_1 ──┬── Comp → Amp → Delay ──┐
-                ├── OD → Chorus           ──┤→ MixEQ → playback_{1,2}
-                └── Gate                  ──┘
+                ├── OD → Chorus        ──┤→ MixEQ → playback_{1,2}
+                └── Gate               ──┘
 
 7 plugins, 3 lanes of depth 3/2/1 + MixEQ merger.  The varying depths exercise
 dummy-node insertion and the column-compression DP at a legible scale.
@@ -19,7 +19,6 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from modalapi.connections import Connection, Endpoint, EndpointKind
 from modalapi.pedalboard import Pedalboard
 from tests.types import SystemFixture
 
@@ -35,9 +34,9 @@ _EXTRA_CHORUS_INFO = {
     "ports": {
         "control": {
             "input": [
-                {"symbol": "rate",  "shortName": "Rate",  "ranges": {"minimum": 0.0, "maximum": 5.0, "default": 1.0}},
+                {"symbol": "rate", "shortName": "Rate", "ranges": {"minimum": 0.0, "maximum": 5.0, "default": 1.0}},
                 {"symbol": "depth", "shortName": "Depth", "ranges": {"minimum": 0.0, "maximum": 1.0, "default": 0.5}},
-                {"symbol": "mix",   "shortName": "Mix",   "ranges": {"minimum": 0.0, "maximum": 1.0, "default": 0.7}},
+                {"symbol": "mix", "shortName": "Mix", "ranges": {"minimum": 0.0, "maximum": 1.0, "default": 0.7}},
             ]
         }
     },
@@ -51,7 +50,7 @@ _EXTRA_VERB_INFO = {
         "control": {
             "input": [
                 {"symbol": "decay", "shortName": "Decay", "ranges": {"minimum": 0.1, "maximum": 10.0, "default": 2.0}},
-                {"symbol": "mix",   "shortName": "Mix",   "ranges": {"minimum": 0.0, "maximum":  1.0, "default": 0.4}},
+                {"symbol": "mix", "shortName": "Mix", "ranges": {"minimum": 0.0, "maximum": 1.0, "default": 0.4}},
             ]
         }
     },
@@ -206,9 +205,7 @@ def test_v3_dynamic_add_creates_plugin_in_model(parallel_beths_system: SystemFix
     """inject `add` for unknown instance → REST fetch → plugin appears in pedalboard model."""
     handler = parallel_beths_system.handler
     ws_bridge = parallel_beths_system.ws_bridge
-    parallel_beths_system.mock_get.side_effect = _effect_get_side_effect(
-        {_EXTRA_CHORUS_URI: _EXTRA_CHORUS_INFO}
-    )
+    parallel_beths_system.mock_get.side_effect = _effect_get_side_effect({_EXTRA_CHORUS_URI: _EXTRA_CHORUS_INFO})
     before = len(handler.current.pedalboard.plugins)
 
     ws_bridge.inject(f"add /graph/ExtraChorus {_EXTRA_CHORUS_URI} 900.0 50.0 0 1 1")
@@ -225,9 +222,7 @@ def test_v3_dynamic_add_bypassed_plugin(parallel_beths_system: SystemFixture):
     """bypass field=1 in add message → plugin starts bypassed."""
     handler = parallel_beths_system.handler
     ws_bridge = parallel_beths_system.ws_bridge
-    parallel_beths_system.mock_get.side_effect = _effect_get_side_effect(
-        {_EXTRA_CHORUS_URI: _EXTRA_CHORUS_INFO}
-    )
+    parallel_beths_system.mock_get.side_effect = _effect_get_side_effect({_EXTRA_CHORUS_URI: _EXTRA_CHORUS_INFO})
 
     ws_bridge.inject(f"add /graph/ExtraChorus {_EXTRA_CHORUS_URI} 900.0 50.0 1 1 1")
     handler.poll_ws_messages()
@@ -240,9 +235,7 @@ def test_v3_dynamic_add_preserves_canvas_x_sort_order(parallel_beths_system: Sys
     """Dynamically added plugin is inserted at the correct canvas-X position in the sorted list."""
     handler = parallel_beths_system.handler
     ws_bridge = parallel_beths_system.ws_bridge
-    parallel_beths_system.mock_get.side_effect = _effect_get_side_effect(
-        {_EXTRA_CHORUS_URI: _EXTRA_CHORUS_INFO}
-    )
+    parallel_beths_system.mock_get.side_effect = _effect_get_side_effect({_EXTRA_CHORUS_URI: _EXTRA_CHORUS_INFO})
 
     # x=200: should land between col0 (x=100) and col1 (x=300)
     ws_bridge.inject(f"add /graph/ExtraChorus {_EXTRA_CHORUS_URI} 200.0 25.0 0 1 1")
@@ -279,31 +272,11 @@ def test_v3_dynamic_add_no_metadata_silently_skips(parallel_beths_system: System
     assert len(handler.current.pedalboard.plugins) == before
 
 
-def test_v3_dynamic_add_blend_guard_skips(parallel_beths_system: SystemFixture):
-    """If blend mode is configured, dynamic adds are skipped."""
-    handler = parallel_beths_system.handler
-    ws_bridge = parallel_beths_system.ws_bridge
-    parallel_beths_system.mock_get.side_effect = _effect_get_side_effect(
-        {_EXTRA_CHORUS_URI: _EXTRA_CHORUS_INFO}
-    )
-    before = len(handler.current.pedalboard.plugins)
-
-    handler.blend_modes = {"Blend": MagicMock()}
-    try:
-        ws_bridge.inject(f"add /graph/ExtraChorus {_EXTRA_CHORUS_URI} 900.0 50.0 0 1 1")
-        handler.poll_ws_messages()
-        assert len(handler.current.pedalboard.plugins) == before
-    finally:
-        handler.blend_modes = {}
-
-
 def test_v3_dynamic_add_control_port_defaults_populated(parallel_beths_system: SystemFixture):
     """Newly added plugin's control parameters are initialized from REST range defaults."""
     handler = parallel_beths_system.handler
     ws_bridge = parallel_beths_system.ws_bridge
-    parallel_beths_system.mock_get.side_effect = _effect_get_side_effect(
-        {_EXTRA_CHORUS_URI: _EXTRA_CHORUS_INFO}
-    )
+    parallel_beths_system.mock_get.side_effect = _effect_get_side_effect({_EXTRA_CHORUS_URI: _EXTRA_CHORUS_INFO})
 
     ws_bridge.inject(f"add /graph/ExtraChorus {_EXTRA_CHORUS_URI} 900.0 50.0 0 1 1")
     handler.poll_ws_messages()
@@ -318,9 +291,7 @@ def test_v3_dynamic_add_param_set_echo_updates_value(parallel_beths_system: Syst
     """After dynamic add, a param_set echo from mod-ui updates the cached parameter value."""
     handler = parallel_beths_system.handler
     ws_bridge = parallel_beths_system.ws_bridge
-    parallel_beths_system.mock_get.side_effect = _effect_get_side_effect(
-        {_EXTRA_CHORUS_URI: _EXTRA_CHORUS_INFO}
-    )
+    parallel_beths_system.mock_get.side_effect = _effect_get_side_effect({_EXTRA_CHORUS_URI: _EXTRA_CHORUS_INFO})
 
     ws_bridge.inject(f"add /graph/ExtraChorus {_EXTRA_CHORUS_URI} 900.0 50.0 0 1 1")
     ws_bridge.inject("param_set /graph/ExtraChorus rate 3.5")
@@ -423,10 +394,7 @@ def test_v3_dynamic_connect_deduplication(parallel_beths_system: SystemFixture):
     ws_bridge.inject("connect /graph/Gate/out /graph/Amp/in")
     handler.poll_ws_messages()
 
-    matching = [
-        c for c in handler.current.pedalboard.connections
-        if c.src.id == "Gate" and c.dst.id == "Amp"
-    ]
+    matching = [c for c in handler.current.pedalboard.connections if c.src.id == "Gate" and c.dst.id == "Amp"]
     assert len(matching) == 1
 
 
@@ -473,9 +441,7 @@ def test_v3_parallel_beths_add_plugin_lcd(parallel_beths_system: SystemFixture, 
     """Adding ExtraChorus beyond MixEQ: grid grows a new rightmost column."""
     handler = parallel_beths_system.handler
     ws_bridge = parallel_beths_system.ws_bridge
-    parallel_beths_system.mock_get.side_effect = _effect_get_side_effect(
-        {_EXTRA_CHORUS_URI: _EXTRA_CHORUS_INFO}
-    )
+    parallel_beths_system.mock_get.side_effect = _effect_get_side_effect({_EXTRA_CHORUS_URI: _EXTRA_CHORUS_INFO})
 
     snapshot("before")
     ws_bridge.inject(f"add /graph/ExtraChorus {_EXTRA_CHORUS_URI} 900.0 50.0 0 1 1")
@@ -521,9 +487,7 @@ def test_v3_parallel_beths_disconnect_lcd(parallel_beths_system: SystemFixture, 
 # ---------------------------------------------------------------------------
 
 
-def test_v3_parallel_beths_dynamic_epic(
-    parallel_beths_system: SystemFixture, snapshot, nav_handler
-):
+def test_v3_parallel_beths_dynamic_epic(parallel_beths_system: SystemFixture, snapshot, nav_handler):
     """Load a 3-lane board, apply a sequence of WS-driven changes, then navigate
     the encoder selection across the modified grid until it lands on ExtraChorus.
 
@@ -597,7 +561,109 @@ def test_v3_parallel_beths_dynamic_epic(
     nav_handler(2)
     snapshot("10_nav_extrachorus")
 
-    extra_chorus_tile = next(
-        (w for w in handler.lcd.w_plugins if w.object.instance_id == "ExtraChorus"), None
-    )
+    extra_chorus_tile = next((w for w in handler.lcd.w_plugins if w.object.instance_id == "ExtraChorus"), None)
     assert extra_chorus_tile is not None, "ExtraChorus tile must be present in the rendered grid"
+
+
+# ---------------------------------------------------------------------------
+# Blend mode + dynamic mutations
+# ---------------------------------------------------------------------------
+
+
+def _fake_diff_maps(*instance_ids: str) -> list[dict]:
+    """Build a minimal segment_diff_maps list with one segment covering all ids."""
+    from blend.types import ParamData
+    from modalapi.parameter import Type as ParameterType
+
+    segment: dict = {
+        iid: {"Tone": ParamData(val_a=0.0, val_b=1.0, param_type=ParameterType.DEFAULT)} for iid in instance_ids
+    }
+    return [segment]
+
+
+def test_v3_blend_dynamic_add_shows_on_lcd_and_leaves_diff_maps_intact(
+    parallel_beths_system: SystemFixture,
+):
+    """Dynamic add with blend active: LCD updates; diff maps are not modified
+    (new plugin absent from snapshot data, so blend ignores it)."""
+    handler = parallel_beths_system.handler
+    ws_bridge = parallel_beths_system.ws_bridge
+    parallel_beths_system.mock_get.side_effect = _effect_get_side_effect({_EXTRA_CHORUS_URI: _EXTRA_CHORUS_INFO})
+
+    blend = MagicMock()
+    blend.segment_diff_maps = _fake_diff_maps("Comp", "Amp")
+    handler.blend_modes = {"Blend": blend}
+    try:
+        before = len(handler.current.pedalboard.plugins)
+        ws_bridge.inject(f"add /graph/ExtraChorus {_EXTRA_CHORUS_URI} 900.0 50.0 0 1 1")
+        handler.poll_ws_messages()
+
+        assert len(handler.current.pedalboard.plugins) == before + 1, "plugin must appear in model"
+        assert any(p.instance_id == "ExtraChorus" for p in handler.current.pedalboard.plugins)
+        # diff maps untouched — ExtraChorus absent from snapshots, blend ignores it
+        assert "Comp" in blend.segment_diff_maps[0]
+        assert "ExtraChorus" not in blend.segment_diff_maps[0]
+    finally:
+        handler.blend_modes = {}
+
+
+def test_v3_blend_dynamic_remove_strips_instance_from_diff_maps(
+    parallel_beths_system: SystemFixture,
+):
+    """Dynamic remove with blend active: removed plugin purged from every segment diff map."""
+    handler = parallel_beths_system.handler
+    ws_bridge = parallel_beths_system.ws_bridge
+
+    blend = MagicMock()
+    blend.segment_diff_maps = _fake_diff_maps("Comp", "Amp", "Gate")
+    handler.blend_modes = {"Blend": blend}
+    try:
+        ws_bridge.inject("remove /graph/Comp")
+        handler.poll_ws_messages()
+
+        assert "Comp" not in blend.segment_diff_maps[0], "removed plugin must be purged from diff map"
+        assert "Amp" in blend.segment_diff_maps[0], "unrelated entries must be preserved"
+        assert "Gate" in blend.segment_diff_maps[0]
+    finally:
+        handler.blend_modes = {}
+
+
+@pytest.mark.skip(
+    reason=(
+        "Known gap: re-adding a plugin after removal does not restore it to the blend diff maps. "
+        "The plugin was stripped from diff_maps on remove; dynamic add intentionally skips diff-map "
+        "insertion (the plugin was never in the stop snapshots). Blend only recovers after the user "
+        "saves a snapshot in MOD-UI, causing check_for_snapshot_changes() to trigger a full re-prepare. "
+        "Remove this skip once we implement re-prepare-on-add when blend is active."
+    )
+)
+def test_v3_blend_readd_after_remove_restores_diff_maps(
+    parallel_beths_system: SystemFixture,
+):
+    """After remove then re-add of the same plugin, blend diff maps should cover it again.
+    Currently fails: we strip on remove but don't re-prepare on add."""
+    handler = parallel_beths_system.handler
+    ws_bridge = parallel_beths_system.ws_bridge
+    parallel_beths_system.mock_get.side_effect = _effect_get_side_effect({_EXTRA_CHORUS_URI: _EXTRA_CHORUS_INFO})
+
+    blend = MagicMock()
+    blend.segment_diff_maps = _fake_diff_maps("ExtraChorus")
+    handler.blend_modes = {"Blend": blend}
+    try:
+        # Remove ExtraChorus first — diff maps stripped
+        ws_bridge.inject(f"add /graph/ExtraChorus {_EXTRA_CHORUS_URI} 900.0 50.0 0 1 1")
+        handler.poll_ws_messages()
+        ws_bridge.inject("remove /graph/ExtraChorus")
+        handler.poll_ws_messages()
+        assert "ExtraChorus" not in blend.segment_diff_maps[0]
+
+        # Re-add the same plugin
+        ws_bridge.inject(f"add /graph/ExtraChorus {_EXTRA_CHORUS_URI} 900.0 50.0 0 1 1")
+        handler.poll_ws_messages()
+
+        # This assertion currently fails: the re-added plugin is not in the diff maps
+        assert "ExtraChorus" in blend.segment_diff_maps[0], (
+            "re-added plugin should be in diff maps (requires re-prepare)"
+        )
+    finally:
+        handler.blend_modes = {}
