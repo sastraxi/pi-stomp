@@ -150,7 +150,7 @@ class Lcd(abstract_lcd.Lcd):
         self.main_panel_pushed = False
         self.footswitch_panel = ShroudedPanel(box=Box.xywh(0, self.display_height - self.footswitch_height,
                                                             self.display_width, self.footswitch_height),
-                                              shroud_alpha=224, no_dim=True, accepts_input=False)
+                                              shroud_alpha=255, gradient_start=0, gradient_pos=0.8, no_dim=True, accepts_input=False)
         self._fullscreen_panel: Panel | None = None
         self._tuner_panel = None
 
@@ -708,7 +708,7 @@ class Lcd(abstract_lcd.Lcd):
                 color = None
                 action = None
             p = FootswitchWidget(Box.xywh(x, 0, slot_w, self.footswitch_height),
-                                 fs.id, label, color, not fs.toggled,
+                                 label, color, not fs.toggled,
                                  small_font=self.tiny_font, taptempo=getattr(fs, 'taptempo', None),
                                  parent=self.footswitch_panel, action=action, object=fs)
             self.w_footswitches.append(p)
