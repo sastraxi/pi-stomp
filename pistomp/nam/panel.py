@@ -31,6 +31,7 @@ from uilib.label import Label
 from uilib.text import Button
 
 from pistomp.fullscreen_panel import FullscreenPanel
+from pistomp.input.event import ControllerEvent, EncoderEvent
 from pistomp.nam.engine import CaptureState, NamCaptureEngine
 from pistomp.nam.wavio import wav_duration
 
@@ -75,13 +76,16 @@ class NamCapturePanel(FullscreenPanel):
         output_dir: str | Path,
         on_dismiss: Callable[[], None],
         reamp_wav: Path = _REAMP_WAV,
+        handler=None,
     ) -> None:
         super().__init__()
         self._on_dismiss = on_dismiss
+        self._handler = handler
         self._engine = self._create_engine(output_dir, reamp_wav)
         self._last_state = CaptureState.IDLE
         self._last_countdown: str = ""
         self._last_level_update: float = 0.0
+        self._prev_diff_none: bool = True
 
         # Pre-read duration from WAV header (fast — no sample loading).
         try:
@@ -149,6 +153,17 @@ class NamCapturePanel(FullscreenPanel):
 
         self._apply_state(CaptureState.IDLE)
 
+    def handle(self, event: ControllerEvent) -> bool:
+        if isinstance(event, EncoderEvent) and self._handler is not None:
+            cid = getattr(event.controller, "id", None)
+            if cid == 3:
+                self._handler.system_menu_input_gain(event.rotations)
+                return True
+            if cid == 2:
+                self._handler.system_menu_headphone_volume(event.rotations)
+                return True
+        return False
+
     def _create_engine(self, output_dir: str | Path, reamp_wav: Path) -> NamCaptureEngine:
         return NamCaptureEngine(output_dir, reamp_wav=reamp_wav)
 
@@ -177,11 +192,16 @@ class NamCapturePanel(FullscreenPanel):
             if now - self._last_level_update >= 0.5:
                 self._last_level_update = now
                 diff = self._engine.level_diff_db()
+                prev_none = self._prev_diff_none
+                self._prev_diff_none = diff is None
                 if diff is not None:
                     sign = "+" if diff >= 0 else ""
                     self._level_lbl.set_text(f"Δ {sign}{diff:.1f} dB", (160, 160, 200), x=_W // 2 - 30)
+                    if prev_none:
+                        # First reading after silence may be skewed — replace it quickly
+                        self._last_level_update = now - 0.4
                 else:
-                    self._level_lbl.set_text("", (0, 0, 0))
+                    self._level_lbl.set_text("---", (80, 80, 80), x=_W // 2 - 10)
 
     # ── private ───────────────────────────────────────────────────────────────
 
@@ -205,29 +225,32 @@ class NamCapturePanel(FullscreenPanel):
         color = _STATUS_COLOR[state]
         self._status_lbl.set_text(_STATUS_TEXT[state], color)
 
+        _dim = (80, 80, 80)
+        _level_x = _W // 2 - 10
         if state == CaptureState.IDLE:
             self._set_countdown(_fmt_time(self._duration), (100, 100, 100))
-            self._level_lbl.set_text("", (0, 0, 0))
+            self._level_lbl.set_text("---", _dim, x=_level_x)
             self._info_lbl.set_text("", (0, 0, 0))
         elif state == CaptureState.CAPTURING:
             self._set_countdown(_fmt_time(self._duration), (255, 200, 0))
             self._last_countdown = _fmt_time(self._duration)
-            self._level_lbl.set_text("", (0, 0, 0))
+            self._prev_diff_none = True
+            self._level_lbl.set_text("---", _dim, x=_level_x)
             self._info_lbl.set_text("", (0, 0, 0))
         elif state == CaptureState.DONE:
             self._set_countdown("0:00", (0, 200, 0))
-            self._level_lbl.set_text("", (0, 0, 0))
+            self._level_lbl.set_text("---", _dim, x=_level_x)
             path = self._engine.output_path
             if path is not None:
                 self._info_lbl.set_text(path.name, (140, 200, 140))
         elif state == CaptureState.FAILED:
             self._set_countdown("--:--", (220, 40, 40))
-            self._level_lbl.set_text("", (0, 0, 0))
+            self._level_lbl.set_text("---", _dim, x=_level_x)
             err = self._engine.error or "Unknown error"
             self._info_lbl.set_text(err[:40], (220, 80, 80))
         else:  # ABORTED
             self._set_countdown(_fmt_time(self._duration), (100, 100, 100))
-            self._level_lbl.set_text("", (0, 0, 0))
+            self._level_lbl.set_text("---", _dim, x=_level_x)
             self._info_lbl.set_text("", (0, 0, 0))
 
     def _set_countdown(self, text: str, color: tuple[int, int, int]) -> None:

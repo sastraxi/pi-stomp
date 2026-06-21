@@ -51,7 +51,6 @@ from pistomp.current import Current
 from pistomp.encoder_controller import EncoderController
 from pistomp.footswitch import Footswitch
 from pistomp.footswitch_chords import FootswitchChords
-from pistomp.handler import Handler
 from pistomp.input.event import (
     AnalogEvent,
     ControllerEvent,
@@ -1396,7 +1395,7 @@ class Modhandler(Handler):
             os.environ.get("MOD_USER_FILES_DIR", os.path.expanduser("~/data/user-files")),
             "Audio Recordings",
         )
-        panel = NamCapturePanel(output_dir=output_dir, on_dismiss=self._dismiss_nam_capture)
+        panel = NamCapturePanel(output_dir=output_dir, on_dismiss=self._dismiss_nam_capture, handler=self)
         self._fullscreen_panel = panel
         self.lcd.show_fullscreen_panel(panel)
 
