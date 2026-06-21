@@ -223,7 +223,7 @@ class Lcd(abstract_lcd.Lcd):
     def handle(self, event: ControllerEvent) -> bool:
         # When a fullscreen panel is top-most and is an InputSink, ask it first.
         # It returns True to stop the event from reaching the normal handler cascade.
-        if self._fullscreen_panel is not None and self.pstack.current is self._fullscreen_panel:
+        if self._fullscreen_panel is not None:
             if self._fullscreen_panel.handle(event):
                 return True
         return False
