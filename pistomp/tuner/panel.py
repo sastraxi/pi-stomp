@@ -393,7 +393,7 @@ class TunerPanel(Panel, InputSink):
         input_port: int = 1,
         coalesce_strobe: bool = False,
     ) -> None:
-        super().__init__(box=Box.xywh(0, 0, _W, 240), auto_destroy=True, no_dim=True)
+        super().__init__(box=Box.xywh(0, 0, _W, 240), auto_destroy=True, no_dim=True, opaque=True)
         self._engine = engine
 
         note_font = make_font(str(_FONTS_DIR / "DejaVuSans-Bold.ttf"), 56)
