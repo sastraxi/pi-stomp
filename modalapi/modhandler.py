@@ -438,7 +438,7 @@ class Modhandler(Handler):
         # redraws flush promptly. Otherwise fall back to the SPI-clock-derived
         # divisor computed by the LCD itself.
         if self._lcd is not None and self._lcd.has_active_fullscreen_panel():
-            return 3  # TEMP: force v2 cadence on all hardware for timing test
+            return 2
         return self._lcd.poll_divisor if self._lcd is not None else 8
 
     def universal_encoder_select(self, direction):
@@ -1334,7 +1334,6 @@ class Modhandler(Handler):
                 on_input_toggle=self._toggle_tuner_input,
                 muted=muted,
                 input_port=input_port,
-                coalesce_strobe=True,  # TEMP: force v2 coalescing on all hardware for timing test
             )
             self._fullscreen_panel = panel
             self.lcd.show_plugin_panel(panel)
