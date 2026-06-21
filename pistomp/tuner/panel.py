@@ -228,7 +228,7 @@ class StrobeWidget(Widget):
     RULE_COLOR: Color = (80, 80, 80)
     VELOCITY_SCALE = 10.0
 
-    def __init__(self, box: Box, **kwargs) -> None:
+    def __init__(self, box: Box, coalesce: bool = False, **kwargs) -> None:
         kwargs.setdefault("bkgnd_color", StrobeWidget.BG_COLOR)
         super().__init__(box=box, **kwargs)
         self._phase: float = 0.0
@@ -236,6 +236,8 @@ class StrobeWidget(Widget):
         self._stripe_color: Color = _ZONE_COLORS["accent"]
         self._last_tick = time.monotonic()
         self._has_reading = False
+        self._coalesce = coalesce
+        self._pending: Box | None = None
 
     # ── drawing ──────────────────────────────────────────────────────────────
 
@@ -310,9 +312,15 @@ class StrobeWidget(Widget):
             if s <= ce + self._MERGE_GAP:
                 ce = max(ce, e)
             else:
-                self.refresh(Box(cs, bx.y0, ce, bx.y1))
+                self._emit_box(Box(cs, bx.y0, ce, bx.y1))
                 cs, ce = s, e
-        self.refresh(Box(cs, bx.y0, ce, bx.y1))
+        self._emit_box(Box(cs, bx.y0, ce, bx.y1))
+
+    def _emit_box(self, box: Box) -> None:
+        if self._coalesce:
+            self._pending = box if self._pending is None else self._pending.union(box)
+        else:
+            self.refresh(box)
 
     def _stripe_spans_at(self, phase_int: int) -> list[tuple[int, int]]:
         return [((phase_int + i * self.STRIPE_P) % _W, self.STRIPE_W) for i in range(self.N_STRIPES)]
@@ -323,6 +331,7 @@ class StrobeWidget(Widget):
         now = time.monotonic()
         dt = min(now - self._last_tick, 0.5)
         self._last_tick = now
+        self._pending = None
 
         if cents is None:
             if self._has_reading:
@@ -330,48 +339,42 @@ class StrobeWidget(Widget):
                 self._zone = "accent"
                 self._stripe_color = _ZONE_COLORS["accent"]
                 self._flush_spans(self._stripe_spans_at(int(self._phase)))
-            return
-
-        if not self._has_reading:
+        elif not self._has_reading:
             self._has_reading = True
             self._flush_spans(self._stripe_spans_at(int(self._phase)))
-            return
-
-        new_zone: Zone = _zone(cents)
-        if new_zone != self._zone:
-            self._zone = new_zone
-            self._stripe_color = _zone_color(cents)
-            self._flush_spans(self._stripe_spans_at(int(self._phase)))
-            return
-
-        K = (self.STRIPE_P / 50.0) * self.VELOCITY_SCALE
-        velocity = max(-50.0, min(50.0, cents)) * K
-        old_phase_int = int(self._phase)
-        self._phase = (self._phase + velocity * dt) % float(_W)
-        k = int(self._phase) - old_phase_int
-
-        if k == 0:
-            return
-
-        if abs(k) >= self.STRIPE_W:
-            # Old and new stripe positions don't overlap; coalescing still merges
-            # any that landed within a stripe width of each other.
-            self._flush_spans(self._stripe_spans_at(old_phase_int) + self._stripe_spans_at(int(self._phase)))
-            return
-
-        ak = abs(k)
-        spans: list[tuple[int, int]] = []
-        for i in range(self.N_STRIPES):
-            old_sx = (old_phase_int + i * self.STRIPE_P) % _W
-            if k > 0:
-                tail_x = old_sx
-                lead_x = (old_sx + self.STRIPE_W) % _W
+        else:
+            new_zone: Zone = _zone(cents)
+            if new_zone != self._zone:
+                self._zone = new_zone
+                self._stripe_color = _zone_color(cents)
+                self._flush_spans(self._stripe_spans_at(int(self._phase)))
             else:
-                tail_x = (old_sx + self.STRIPE_W - ak) % _W
-                lead_x = (old_sx - ak) % _W
-            spans.append((tail_x, ak))
-            spans.append((lead_x, ak))
-        self._flush_spans(spans)
+                K = (self.STRIPE_P / 50.0) * self.VELOCITY_SCALE
+                velocity = max(-50.0, min(50.0, cents)) * K
+                old_phase_int = int(self._phase)
+                self._phase = (self._phase + velocity * dt) % float(_W)
+                k = int(self._phase) - old_phase_int
+
+                if k != 0:
+                    if abs(k) >= self.STRIPE_W:
+                        self._flush_spans(self._stripe_spans_at(old_phase_int) + self._stripe_spans_at(int(self._phase)))
+                    else:
+                        ak = abs(k)
+                        spans: list[tuple[int, int]] = []
+                        for i in range(self.N_STRIPES):
+                            old_sx = (old_phase_int + i * self.STRIPE_P) % _W
+                            if k > 0:
+                                tail_x = old_sx
+                                lead_x = (old_sx + self.STRIPE_W) % _W
+                            else:
+                                tail_x = (old_sx + self.STRIPE_W - ak) % _W
+                                lead_x = (old_sx - ak) % _W
+                            spans.append((tail_x, ak))
+                            spans.append((lead_x, ak))
+                        self._flush_spans(spans)
+
+        if self._coalesce and self._pending is not None:
+            self.refresh(self._pending)
 
 
 # ── TunerPanel ───────────────────────────────────────────────────────────────
@@ -388,6 +391,7 @@ class TunerPanel(Panel, InputSink):
         on_input_toggle: Callable[[], None],
         muted: bool = False,
         input_port: int = 1,
+        coalesce_strobe: bool = False,
     ) -> None:
         super().__init__(box=Box.xywh(0, 0, _W, 240), auto_destroy=True, no_dim=True)
         self._engine = engine
@@ -403,7 +407,7 @@ class TunerPanel(Panel, InputSink):
             parent=self,
         )
         self._bar = TunerOffsetBar(box=Box.xywh(0, 65, _W, 13), parent=self)
-        self._strobe = StrobeWidget(box=Box.xywh(0, 81, _W, _BTN_Y - _BTN_GAP - 81), parent=self)
+        self._strobe = StrobeWidget(box=Box.xywh(0, 81, _W, _BTN_Y - _BTN_GAP - 81), coalesce=coalesce_strobe, parent=self)
 
         self._btn_close = Button(
             box=Box.xywh(_BTN_GAP, _BTN_Y, _BTN_W, _BTN_H),
