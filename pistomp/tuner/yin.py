@@ -57,32 +57,27 @@ def detect_pitch(
     a = np.zeros(n_fft, dtype=np.float32)
     a[:W] = x[:W]
     # irfft(rfft(x)*conj(rfft(a)))[τ] = Σⱼ x[j+τ]·a[j] — positive-lag correlation
-    xcorr = np.fft.irfft(np.fft.rfft(x, n=n_fft) * np.fft.rfft(a).conj())[:tau_max + 1]
+    xcorr = np.fft.irfft(np.fft.rfft(x, n=n_fft) * np.fft.rfft(a).conj())[: tau_max + 1]
 
     diff = E0 + trailing - 2 * xcorr
     diff[0] = 0.0
 
     # Step 2: cumulative mean normalised difference (CMND), eq. 8 in the paper.
-    cumsum = np.cumsum(diff[1:tau_max + 1])
+    cumsum = np.cumsum(diff[1 : tau_max + 1])
     taus = np.arange(1, tau_max + 1, dtype=np.float32)
     cmnd = np.ones(tau_max + 1, dtype=np.float32)
-    cmnd[1:tau_max + 1] = 1.0
-    np.divide(diff[1:tau_max + 1] * taus, cumsum, out=cmnd[1:tau_max + 1], where=cumsum > 0.0)
+    cmnd[1 : tau_max + 1] = 1.0
+    np.divide(diff[1 : tau_max + 1] * taus, cumsum, out=cmnd[1 : tau_max + 1], where=cumsum > 0.0)
 
     # Step 3: absolute threshold — first dip below threshold, walk to its bottom.
     # No argmin fallback: a reading that doesn't pass the threshold is not published.
-    tau_est = -1
-    tau = tau_min
-    while tau < tau_max:
-        if cmnd[tau] < threshold:
-            while tau + 1 <= tau_max and cmnd[tau + 1] <= cmnd[tau]:
-                tau += 1
-            tau_est = tau
-            break
-        tau += 1
-
-    if tau_est < 1:
+    hits = np.nonzero(cmnd[tau_min:tau_max] < threshold)[0]
+    if hits.size == 0:
         return None
+    tau = tau_min + int(hits[0])
+    while tau + 1 <= tau_max and cmnd[tau + 1] <= cmnd[tau]:
+        tau += 1
+    tau_est = tau
 
     # Step 4: sub-sample period = cmnd-weighted centroid of the trough basin. The
     # textbook 3-point parabola is degenerate on a flat trough bottom (two ~equal
@@ -99,7 +94,7 @@ def detect_pitch(
 
     if hi > lo:
         basin = np.arange(lo, hi + 1, dtype=np.float64)
-        weights = band - cmnd[lo:hi + 1]  # >= 0 by construction; peaks at the minimum
+        weights = band - cmnd[lo : hi + 1]  # >= 0 by construction; peaks at the minimum
         tau_refined = float(np.sum(basin * weights) / np.sum(weights))
     elif tau_min < tau_est < tau_max:
         # Single-sample basin (ultra-sharp trough): fall back to the 3-point parabola.
