@@ -1238,10 +1238,15 @@ class Modhandler(Handler):
         return param
 
     def audio_parameter_change(self, direction: int | None, parameter, commit_callback):
-        if parameter is not None:
-            d = self.lcd.draw_audio_parameter_dialog(parameter, commit_callback)
-            if d is not None and direction is not None:
-                self.lcd.enc_step_widget(d, direction)
+        if parameter is None:
+            return
+        d = self.lcd.draw_audio_parameter_dialog(parameter, commit_callback)
+        if d is None or direction is None:
+            return
+        step = (parameter.maximum - parameter.minimum) / 127.0
+        new_value = max(parameter.minimum, min(parameter.maximum, parameter.value + direction * step))
+        commit_callback(parameter.symbol, new_value)
+        d.update_value(new_value)
 
     def system_menu_input_gain(self, arg):
         param = self._create_audio_parameter("Input Gain", self.audiocard.CAPTURE_VOLUME, -19.75, 12)

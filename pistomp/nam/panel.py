@@ -214,11 +214,12 @@ class NamCapturePanel(FullscreenPanel):
     def handle(self, event: ControllerEvent) -> bool:
         if isinstance(event, EncoderEvent) and self._handler is not None:
             cid = getattr(event.controller, "id", None)
-            if cid == 3:
-                self._handler.system_menu_input_gain(event.rotations)
-                return True
-            if cid == 2:
-                self._handler.system_menu_headphone_volume(event.rotations)
+            if cid in (2, 3):
+                steps = int(round(event.rotations * event.multiplier))
+                if cid == 3:
+                    self._handler.system_menu_input_gain(steps)
+                else:
+                    self._handler.system_menu_headphone_volume(steps)
                 return True
         return False
 

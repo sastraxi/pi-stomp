@@ -29,11 +29,11 @@ import numpy as np
 import numpy.typing as npt
 
 _SAMPLE_RATE = 48000
-_SILENCE_SETTLE_FRAMES = _SAMPLE_RATE * 2   # 2 s before detection kicks in
-_SILENCE_ABORT_FRAMES = _SAMPLE_RATE * 2    # 2 s of gated silence → abort
-_SILENCE_INPUT_THRESHOLD = 1e-2             # ≈ −40 dBFS — capture must exceed this
-_SILENCE_PLAY_THRESHOLD = 0.1               # ≈ −20 dBFS — reamp must be this loud to gate
-_CLIP_THRESHOLD = 0.99                      # float32 full-scale; any peak above → abort
+_SILENCE_SETTLE_FRAMES = _SAMPLE_RATE * 2  # 2 s before detection kicks in
+_SILENCE_ABORT_FRAMES = _SAMPLE_RATE * 2  # 2 s of gated silence → abort
+_SILENCE_INPUT_THRESHOLD = 1e-2  # ≈ −40 dBFS — capture must exceed this
+_SILENCE_PLAY_THRESHOLD = 0.1  # ≈ −20 dBFS — reamp must be this loud to gate
+_CLIP_THRESHOLD = 0.99  # float32 full-scale; any peak above → abort
 
 
 class CaptureSession:
@@ -53,8 +53,8 @@ class CaptureSession:
         self._client_name = name
 
         self._capture: npt.NDArray[np.float32] | None = None
-        self._latency: int = 0   # frames; set in start() after JACK query
-        self._total: int = 0     # n + latency; set in start()
+        self._latency: int = 0  # frames; set in start() after JACK query
+        self._total: int = 0  # n + latency; set in start()
         self._pos = 0
         self._frames_elapsed = 0
         self._silence_run = 0
@@ -65,9 +65,10 @@ class CaptureSession:
         self._clip_abort = threading.Event()
 
         # Level accumulators — written by RT callback, read+reset by display thread.
+        # Track max peak so short blips of audio register in the display window.
         self._acc_in: float = 0.0
         self._acc_out: float = 0.0
-        self._acc_count: int = 0
+        self._acc_count: int = 0  # >0 means at least one callback fired
 
     # ── lifecycle ─────────────────────────────────────────────────────────────
 
@@ -88,7 +89,7 @@ class CaptureSession:
         # capture window and trim the result to produce an aligned WAV.
         try:
             send = client.get_port_by_name(self._send_port)
-            ret  = client.get_port_by_name(self._return_port)
+            ret = client.get_port_by_name(self._return_port)
             L = send.get_latency_range(jack.PLAYBACK)[1] + ret.get_latency_range(jack.CAPTURE)[1]
         except Exception:
             L = 0
@@ -130,9 +131,11 @@ class CaptureSession:
 
             # ── level checks (peak without allocating a temp array) ───────────
             out_peak = max(float(np.max(out_buf)), float(-np.min(out_buf)))
-            in_peak  = max(float(np.max(in_buf)),  float(-np.min(in_buf)))
-            self._acc_in  += in_peak
-            self._acc_out += out_peak
+            in_peak = max(float(np.max(in_buf)), float(-np.min(in_buf)))
+            if in_peak > self._acc_in:
+                self._acc_in = in_peak
+            if out_peak > self._acc_out:
+                self._acc_out = out_peak
             self._acc_count += 1
             if in_peak >= _CLIP_THRESHOLD and not self._clip_abort.is_set():
                 self._clip_abort.set()
@@ -164,6 +167,9 @@ class CaptureSession:
             self._silence_abort.set()
             try:
                 self._client.deactivate()
+            except Exception:
+                pass
+            try:
                 self._client.close()
             except Exception:
                 pass
@@ -178,20 +184,20 @@ class CaptureSession:
         return self._clip_abort.is_set()
 
     def level_snapshot(self) -> tuple[float, float] | None:
-        """Return (avg_in_peak, avg_out_peak) since last call and reset accumulators.
+        """Return (max_in_peak, max_out_peak) since last call and reset accumulators.
 
+        Uses max so short blips of audio register over the display window.
         Returns None if no callbacks have fired yet.  Called from display thread;
         relies on CPython GIL atomicity for the integer/float swaps.
         """
-        count = self._acc_count
-        if count == 0:
+        if self._acc_count == 0:
             return None
-        avg_in  = self._acc_in  / count
-        avg_out = self._acc_out / count
-        self._acc_in  = 0.0
+        max_in = self._acc_in
+        max_out = self._acc_out
+        self._acc_in = 0.0
         self._acc_out = 0.0
         self._acc_count = 0
-        return avg_in, avg_out
+        return max_in, max_out
 
     # ── output ────────────────────────────────────────────────────────────────
 

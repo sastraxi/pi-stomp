@@ -99,13 +99,14 @@ class NamCaptureEngine:
         self._thread.start()
 
     def level_diff_db(self) -> float | None:
-        """Return avg_in_dBFS − avg_out_dBFS since last call, or None if no data.
+        """Return peak_in_dBFS − peak_out_dBFS since last call, or None if no data.
 
-        Returns None when the output average for the window is below the play
+        Returns None when the output peak for the window is below the play
         gate threshold — transitions from silence produce meaningless spikes.
         """
         import math
         from pistomp.nam.capture_session import _SILENCE_PLAY_THRESHOLD
+
         with self._lock:
             session = self._session
         if session is None:
@@ -188,7 +189,7 @@ class NamCaptureEngine:
                     routing.restore(saved)
                     saved = None
                     with self._lock:
-                        self._error = "Input clipped — reduce amp output level"
+                        self._error = "Input clipped - reduce amp output level"
                         self._state = CaptureState.FAILED
                     return
                 if session.silence_detected:
