@@ -179,8 +179,7 @@ class LcdIli9341(LcdBase):
             # window, so the RGB565 sub-rect ships row-major with no rotation.
             sw, sh = sub.get_size()
             with profiling.measure("lcd.update:pack"):
-                rgb_bytes = pygame.image.tobytes(sub, "RGB")
-                arr = np.frombuffer(rgb_bytes, dtype=np.uint8).reshape(sh, sw, 3)
+                arr = pygame.surfarray.pixels3d(sub).transpose(1, 0, 2)
 
                 pix = self._pixels[:sh, :sw]
                 g = arr[:, :, 1]
