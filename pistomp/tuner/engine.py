@@ -8,6 +8,7 @@ from dataclasses import dataclass
 import numpy as np
 import numpy.typing as npt
 
+from uilib import profiling
 from pistomp.tuner.ringbuffer import RingBuffer
 from pistomp.tuner.source import AudioSource
 from pistomp.tuner.yin import detect_pitch
@@ -109,7 +110,8 @@ class TunerEngine:
         if not self._ring.read_latest(self.FRAME_SIZE, self._frame):
             return
 
-        rms = float(np.sqrt(np.mean(self._frame.astype(np.float64) ** 2)))
+        with profiling.measure("rms", bin_override="dsp"):
+            rms = float(np.sqrt(np.mean(self._frame.astype(np.float64) ** 2)))
 
         if rms < self.SILENCE_RMS:
             self._freq_history.clear()
@@ -134,7 +136,8 @@ class TunerEngine:
 
         sr = self._source.sample_rate
         lo, hi = self._freq_bounds
-        estimate = detect_pitch(self._frame, sr, freq_min=lo, freq_max=hi, window=self.YIN_WINDOW)
+        with profiling.measure("detect_pitch(YIN)", bin_override="dsp"):
+            estimate = detect_pitch(self._frame, sr, freq_min=lo, freq_max=hi, window=self.YIN_WINDOW)
         if estimate is None:
             return
 

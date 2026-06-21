@@ -19,6 +19,7 @@ from collections import deque
 from pathlib import Path
 from typing import Callable, Literal
 
+from uilib import profiling
 from uilib.box import Box
 from uilib.config import Config
 from uilib.misc import get_text_bbox, get_text_size
@@ -436,6 +437,7 @@ class TunerPanel(Panel, InputSink):
         self.add_sel_widget(self._btn_input)
         self._apply_mute_style(muted)
         self._cents_history: deque[float] = deque(maxlen=3)
+        profiling.maybe_start()
 
     def handle(self, event: ControllerEvent) -> bool:
         return False
@@ -465,6 +467,8 @@ class TunerPanel(Panel, InputSink):
             self._cents_history.clear()
             cents = None
 
-        self._header.tick(reading)
-        self._bar.tick(cents)
-        self._strobe.tick(cents)
+        profiling.set_cents_bin(profiling.bin_for_cents(cents))
+        with profiling.measure("TunerPanel.tick"):
+            self._header.tick(reading)
+            self._bar.tick(cents)
+            self._strobe.tick(cents)

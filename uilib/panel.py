@@ -19,6 +19,7 @@ from abc import ABC
 
 import pygame
 
+from uilib import profiling
 from uilib.box import Box
 from uilib.container import ContainerWidget
 from uilib.widget import Widget
@@ -383,22 +384,23 @@ class PanelStack(ContainerWidget):
         """
         assert self.surface is not None
         clip = local_clip
-        erase_ctx = PaintContext(self.surface, clip, frame=clip)
-        self._draw_erase(erase_ctx)
+        with profiling.measure("panelstack.recompose"):
+            erase_ctx = PaintContext(self.surface, clip, frame=clip)
+            self._draw_erase(erase_ctx)
 
-        for p in self.stack:
-            if self.dimmer is not None and not p.no_dim:
-                self.surface.blit(self.dimmer, clip.topleft, area=_pg_rect(clip))
-            d = p.decorator
-            if d is not None:
-                inter = clip.intersection(d.box)
+            for p in self.stack:
+                if self.dimmer is not None and not p.no_dim:
+                    self.surface.blit(self.dimmer, clip.topleft, area=_pg_rect(clip))
+                d = p.decorator
+                if d is not None:
+                    inter = clip.intersection(d.box)
+                    if not inter.is_empty():
+                        ctx = PaintContext(self.surface, inter)
+                        d.do_draw(ctx, d.box)
+                inter = clip.intersection(p.box)
                 if not inter.is_empty():
                     ctx = PaintContext(self.surface, inter)
-                    d.do_draw(ctx, d.box)
-            inter = clip.intersection(p.box)
-            if not inter.is_empty():
-                ctx = PaintContext(self.surface, inter)
-                p.do_draw(ctx, p.box)
+                    p.do_draw(ctx, p.box)
 
         if self.capture_callback:
             self.capture_callback(self.surface)
