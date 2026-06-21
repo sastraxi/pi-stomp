@@ -105,28 +105,28 @@ class TestNamPanelSnapshot:
 
 
 class TestNamPanelLifecycle:
-    def test_start_button_triggers_engine(self, v3_system):
+    def test_action_button_starts_when_idle(self, v3_system):
         engine = _FakeEngine(CaptureState.IDLE)
         panel = _make_panel(engine)
-        panel._btn_start.action()
+        panel._btn_action.action()
         assert engine.started == ["capture"]
 
-    def test_abort_button_stops_engine_when_capturing(self, v3_system):
+    def test_action_button_aborts_when_capturing(self, v3_system):
         engine = _FakeEngine(CaptureState.CAPTURING)
         panel = _make_panel(engine)
-        panel._btn_abort.action()
+        panel._btn_action.action()
         assert engine.stopped
 
     def test_abort_noop_when_idle(self, v3_system):
         engine = _FakeEngine(CaptureState.IDLE)
         panel = _make_panel(engine)
-        panel._btn_abort.action()
+        panel._on_abort()
         assert not engine.stopped
 
-    def test_dismiss_button_calls_on_dismiss(self, v3_system):
+    def test_close_button_calls_on_dismiss(self, v3_system):
         dismissed = []
         panel = _make_panel(_FakeEngine(CaptureState.IDLE), on_dismiss=lambda: dismissed.append(True))
-        panel._btn_dismiss.action()
+        panel._btn_close.action()
         assert dismissed == [True]
 
     def test_tick_updates_countdown(self, v3_system):

@@ -1,26 +1,24 @@
 """Full-screen LCD panel for the NAM Capture pedalboard marker.
 
-Layout (320×240):
+Layout (320×240) — VU-console style:
 
-    ┌─────────────────────────────┐
-    │       NAM CAPTURE           │ y=8
-    │  ─────────────────────────  │
-    │  Name: [my-amp           ]  │ y=50
-    │                             │
-    │         2:34                │ y=100  countdown (large, centred)
-    │      Ready / Failed…        │ y=148  status
-    │   /Audio Recordings/…       │ y=168  path or error
-    │                             │
-    │  [ Start ] [ Abort ] [Dismiss] │ y=210  chrome row (plugin-panel style)
-    └─────────────────────────────┘
+    ┌─ NAM Capture ─────────────────┐ title bar (house style)
+    │ Name: [ capture            ]  │
+    │  ┌── TIME ──┐  ┌── LEVEL ──┐   │ two recessed gauges
+    │  │   1:44   │  │  +0.3 dB  │   │
+    │  └──────────┘  └───────────┘   │
+    │ [ Close ]            [ Abort ] │ chrome row
+    └───────────────────────────────┘
 
-Buttons cycle with the encoder; pressing the selected button fires its action.
-The name field opens a TextEditor when pressed.
+Exit ("Close") sits in the far-left slot, matching the tuner/plugin panels;
+a single contextual action button ("Start" ↔ "Abort") sits far-right. On a
+failed capture the gauge pair is swapped for the error message. The name field
+opens a TextEditor when pressed.
 """
 
 from __future__ import annotations
 
-import math
+import textwrap
 import time
 from pathlib import Path
 from typing import Callable
@@ -28,7 +26,10 @@ from typing import Callable
 from uilib.box import Box
 from uilib.config import Config
 from uilib.label import Label
-from uilib.text import Button
+from uilib.misc import TextHAlign, get_text_bbox, get_text_size
+from uilib.pygame_init import font as _make_font
+from uilib.text import Button, TextWidget
+from uilib.widget import Widget
 
 from pistomp.fullscreen_panel import FullscreenPanel
 from pistomp.input.event import ControllerEvent, EncoderEvent
@@ -38,34 +39,61 @@ from pistomp.nam.wavio import wav_duration
 _W = 320
 _H = 240
 
-# Chrome row — identical constants to plugins/base.py
+_FONTS_DIR = Path(__file__).resolve().parents[2] / "fonts"
+_REAMP_WAV = Path(__file__).resolve().parents[2] / "setup" / "nam" / "v3_0_0.wav"
+
+# Title bar
+_TITLE_H = 26
+
+# Name row
+_NAME_Y = 30
+_NAME_H = 28
+
+# Gauges
+_G_TOP = 86
+_G_H = 104
+_G_MARGIN = 8
+_G_GAP = 10
+_G_W = (_W - 2 * _G_MARGIN - _G_GAP) // 2  # 147
+_G_CAPTION_Y = 10  # gauge-local
+_G_VALUE_Y = 44  # gauge-local
+
+# Chrome row — same geometry as the tuner/plugin panels
 _BTN_GAP = 2
 _BTN_H = 28
 _BTN_Y = _H - _BTN_H - _BTN_GAP  # 210
 _BTN_W = (_W - 4 * _BTN_GAP) // 3  # 104
+_BTN_X_CLOSE = _BTN_GAP  # far-left, matches tuner "Close" / plugin "Back"
+_BTN_X_ACTION = _BTN_GAP * 3 + _BTN_W * 2  # far-right
 
-_REAMP_WAV = Path(__file__).resolve().parents[2] / "setup" / "nam" / "v3_0_0.wav"
+# Colours
+_GAUGE_BG = (12, 12, 14)
+_GAUGE_OUTLINE = (70, 70, 78)
+_CAPTION_FG = (110, 110, 118)
+_DIM = (90, 90, 96)
+_TIMER_CAP = (255, 200, 0)
+_TIMER_IDLE = (150, 150, 156)
+_TIMER_DONE = (0, 210, 90)
+_LEVEL_FG = (150, 180, 220)
+_ERR_FG = (230, 90, 90)
 
-_STATUS_TEXT: dict[CaptureState, str] = {
-    CaptureState.IDLE: "Ready",
-    CaptureState.CAPTURING: "Capturing…",
-    CaptureState.DONE: "Done",
-    CaptureState.FAILED: "Failed",
-    CaptureState.ABORTED: "Aborted",
-}
-
-_STATUS_COLOR: dict[CaptureState, tuple[int, int, int]] = {
-    CaptureState.IDLE: (180, 180, 180),
-    CaptureState.CAPTURING: (0, 200, 80),
-    CaptureState.DONE: (0, 200, 0),
-    CaptureState.FAILED: (220, 40, 40),
-    CaptureState.ABORTED: (180, 100, 0),
+_STATUS: dict[CaptureState, tuple[str, tuple[int, int, int]]] = {
+    CaptureState.IDLE: ("Ready", (150, 150, 156)),
+    CaptureState.CAPTURING: ("Capturing…", (0, 200, 80)),
+    CaptureState.DONE: ("Done", (0, 210, 90)),
+    CaptureState.FAILED: ("Capture failed", _ERR_FG),
+    CaptureState.ABORTED: ("Aborted", (180, 100, 0)),
 }
 
 
 def _fmt_time(seconds: float) -> str:
     s = max(0, int(seconds))
     return f"{s // 60}:{s % 60:02d}"
+
+
+def _centred_x(text: str, font, width: int) -> int:
+    bb = get_text_bbox(text, font)
+    return (width - (bb[2] - bb[0])) // 2 - bb[0]
 
 
 class NamCapturePanel(FullscreenPanel):
@@ -94,16 +122,30 @@ class NamCapturePanel(FullscreenPanel):
             self._duration = 0.0
 
         font = Config().get_font("default")
+        title_font = Config().get_font("default_title")
+        self._caption_font = _make_font(str(_FONTS_DIR / "DejaVuSans-Bold.ttf"), 12)
+        self._value_font = _make_font(str(_FONTS_DIR / "DejaVuSans-Bold.ttf"), 30)
+        self._status_font = _make_font(str(_FONTS_DIR / "DejaVuSans.ttf"), 14)
 
-        # Title
-        title = Label(0, 8, font, parent=self)
-        title.set_text("NAM CAPTURE", (255, 200, 0), x=_W // 2 - 50)
+        # Title bar — centred bold on the house grey/amber strip
+        _, title_h = get_text_size("NAM Capture", title_font)
+        TextWidget(
+            box=Box.xywh(0, 0, _W, _TITLE_H),
+            text="NAM Capture",
+            font=title_font,
+            text_halign=TextHAlign.CENTRE,
+            h_margin=0,
+            v_margin=max(0, (_TITLE_H - title_h) // 2),
+            outline=0,
+            bkgnd_color=Config().get_color("default_title_bkgnd"),
+            fgnd_color=Config().get_color("default_title_fgnd"),
+            parent=self,
+        )
 
         # Capture name field
-        name_lbl = Label(8, 53, font, parent=self)
-        name_lbl.set_text("Name:", (160, 160, 160))
+        Label(10, _NAME_Y + 7, font, parent=self).set_text("Name:", (160, 160, 160))
         self._name_btn = Button(
-            box=Box.xywh(58, 46, _W - 66, _BTN_H),
+            box=Box.xywh(64, _NAME_Y, _W - 72, _NAME_H),
             text="capture",
             font=font,
             outline_radius=3,
@@ -112,46 +154,62 @@ class NamCapturePanel(FullscreenPanel):
         )
         self.add_sel_widget(self._name_btn)
 
-        # Countdown clock — large, centred
-        self._countdown_lbl = Label(0, 100, font, parent=self)
+        # Status line — subtle, centred under the name field
+        self._status_lbl = Label(0, 64, self._status_font, parent=self)
 
-        # Level difference label — shown during capture
-        self._level_lbl = Label(0, 128, font, parent=self)
+        # Two recessed VU-console gauges: TIME (countdown) and LEVEL (dbFS Δ)
+        self._gauge_time = self._make_gauge(_G_MARGIN, "TIME")
+        self._gauge_level = self._make_gauge(_G_MARGIN + _G_W + _G_GAP, "LEVEL")
+        self._timer_value = Label(0, _G_VALUE_Y, self._value_font, parent=self._gauge_time)
+        self._level_value = Label(0, _G_VALUE_Y, self._value_font, parent=self._gauge_level)
 
-        # Status and info labels
-        self._status_lbl = Label(8, 148, font, parent=self)
-        self._info_lbl = Label(8, 168, font, parent=self)
-
-        # Chrome buttons — same geometry as plugins/base.py
-        self._btn_start = Button(
-            box=Box.xywh(_BTN_GAP, _BTN_Y, _BTN_W, _BTN_H),
-            text="Start",
+        # Error message — replaces the gauges on a failed capture
+        self._error_lbl = TextWidget(
+            box=Box.xywh(_G_MARGIN, _G_TOP, _W - 2 * _G_MARGIN, _G_H),
+            text="",
             font=font,
-            outline_radius=4,
+            text_halign=TextHAlign.CENTRE,
+            v_margin=28,
+            outline=0,
+            fgnd_color=_ERR_FG,
+            visible=False,
             parent=self,
-            action=lambda *_: self._on_start(),
         )
-        self._btn_abort = Button(
-            box=Box.xywh(_BTN_GAP * 2 + _BTN_W, _BTN_Y, _BTN_W, _BTN_H),
-            text="Abort",
-            font=font,
-            outline_radius=4,
-            parent=self,
-            action=lambda *_: self._on_abort(),
-        )
-        self._btn_dismiss = Button(
-            box=Box.xywh(_BTN_GAP * 3 + _BTN_W * 2, _BTN_Y, _BTN_W, _BTN_H),
-            text="Dismiss",
+
+        # Chrome buttons — exit far-left (matches tuner/plugin), action far-right
+        self._btn_close = Button(
+            box=Box.xywh(_BTN_X_CLOSE, _BTN_Y, _BTN_W, _BTN_H),
+            text="Close",
             font=font,
             outline_radius=4,
             parent=self,
             action=lambda *_: on_dismiss(),
         )
-        self.add_sel_widget(self._btn_start)
-        self.add_sel_widget(self._btn_abort)
-        self.add_sel_widget(self._btn_dismiss)
+        self._btn_action = Button(
+            box=Box.xywh(_BTN_X_ACTION, _BTN_Y, _BTN_W, _BTN_H),
+            text="Start",
+            font=font,
+            outline_radius=4,
+            parent=self,
+            action=lambda *_: self._on_action(),
+        )
+        self.add_sel_widget(self._btn_close)
+        self.add_sel_widget(self._btn_action)
 
         self._apply_state(CaptureState.IDLE)
+
+    def _make_gauge(self, x: int, caption: str) -> Widget:
+        gauge = Widget(
+            box=Box.xywh(x, _G_TOP, _G_W, _G_H),
+            bkgnd_color=_GAUGE_BG,
+            outline=1,
+            outline_color=_GAUGE_OUTLINE,
+            outline_radius=6,
+            parent=self,
+        )
+        cap = Label(0, _G_CAPTION_Y, self._caption_font, parent=gauge)
+        cap.set_text(caption, _CAPTION_FG, x=_centred_x(caption, self._caption_font, _G_W))
+        return gauge
 
     def handle(self, event: ControllerEvent) -> bool:
         if isinstance(event, EncoderEvent) and self._handler is not None:
@@ -185,7 +243,7 @@ class NamCapturePanel(FullscreenPanel):
             remaining = self._duration * (1.0 - self._engine.progress())
             countdown = _fmt_time(remaining)
             if countdown != self._last_countdown:
-                self._countdown_lbl.set_text(countdown, (255, 200, 0), x=_W // 2 - 20)
+                self._set_timer(countdown, _TIMER_CAP)
                 self._last_countdown = countdown
 
             now = time.monotonic()
@@ -196,14 +254,20 @@ class NamCapturePanel(FullscreenPanel):
                 self._prev_diff_none = diff is None
                 if diff is not None:
                     sign = "+" if diff >= 0 else ""
-                    self._level_lbl.set_text(f"Δ {sign}{diff:.1f} dB", (160, 160, 200), x=_W // 2 - 30)
+                    self._set_level(f"{sign}{diff:.1f} dB", _LEVEL_FG)
                     if prev_none:
                         # First reading after silence may be skewed — replace it quickly
                         self._last_level_update = now - 0.4
                 else:
-                    self._level_lbl.set_text("---", (80, 80, 80), x=_W // 2 - 10)
+                    self._set_level("---", _DIM)
 
     # ── private ───────────────────────────────────────────────────────────────
+
+    def _on_action(self) -> None:
+        if self._engine.state == CaptureState.CAPTURING:
+            self._on_abort()
+        else:
+            self._on_start()
 
     def _on_start(self) -> None:
         if self._engine.state not in (
@@ -222,37 +286,49 @@ class NamCapturePanel(FullscreenPanel):
             self._engine.stop()
 
     def _apply_state(self, state: CaptureState) -> None:
-        color = _STATUS_COLOR[state]
-        self._status_lbl.set_text(_STATUS_TEXT[state], color)
+        text, color = _STATUS[state]
+        self._btn_action.set_text("Abort" if state == CaptureState.CAPTURING else "Start")
 
-        _dim = (80, 80, 80)
-        _level_x = _W // 2 - 10
+        if state == CaptureState.FAILED:
+            self._show_error(self._engine.error or "Unknown error")
+            self._set_status(text, color)
+            return
+
+        self._show_gauges()
+        self._set_level("---", _DIM)
+
         if state == CaptureState.IDLE:
-            self._set_countdown(_fmt_time(self._duration), (100, 100, 100))
-            self._level_lbl.set_text("---", _dim, x=_level_x)
-            self._info_lbl.set_text("", (0, 0, 0))
+            self._set_timer(_fmt_time(self._duration), _TIMER_IDLE)
+            self._set_status(text, color)
         elif state == CaptureState.CAPTURING:
-            self._set_countdown(_fmt_time(self._duration), (255, 200, 0))
+            self._set_timer(_fmt_time(self._duration), _TIMER_CAP)
             self._last_countdown = _fmt_time(self._duration)
             self._prev_diff_none = True
-            self._level_lbl.set_text("---", _dim, x=_level_x)
-            self._info_lbl.set_text("", (0, 0, 0))
+            self._set_status(text, color)
         elif state == CaptureState.DONE:
-            self._set_countdown("0:00", (0, 200, 0))
-            self._level_lbl.set_text("---", _dim, x=_level_x)
+            self._set_timer("0:00", _TIMER_DONE)
             path = self._engine.output_path
-            if path is not None:
-                self._info_lbl.set_text(path.name, (140, 200, 140))
-        elif state == CaptureState.FAILED:
-            self._set_countdown("--:--", (220, 40, 40))
-            self._level_lbl.set_text("---", _dim, x=_level_x)
-            err = self._engine.error or "Unknown error"
-            self._info_lbl.set_text(err[:40], (220, 80, 80))
+            self._set_status(f"Saved · {path.name}" if path is not None else text, color)
         else:  # ABORTED
-            self._set_countdown(_fmt_time(self._duration), (100, 100, 100))
-            self._level_lbl.set_text("---", _dim, x=_level_x)
-            self._info_lbl.set_text("", (0, 0, 0))
+            self._set_timer(_fmt_time(self._duration), _TIMER_IDLE)
+            self._set_status(text, color)
 
-    def _set_countdown(self, text: str, color: tuple[int, int, int]) -> None:
-        self._countdown_lbl.set_text(text, color, x=_W // 2 - 20)
-        self._last_countdown = text
+    def _set_timer(self, text: str, color: tuple[int, int, int]) -> None:
+        self._timer_value.set_text(text, color, x=_centred_x(text, self._value_font, _G_W))
+
+    def _set_level(self, text: str, color: tuple[int, int, int]) -> None:
+        self._level_value.set_text(text, color, x=_centred_x(text, self._value_font, _G_W))
+
+    def _set_status(self, text: str, color: tuple[int, int, int]) -> None:
+        self._status_lbl.set_text(text, color, x=_centred_x(text, self._status_font, _W))
+
+    def _show_error(self, message: str) -> None:
+        self._gauge_time.hide(refresh=False)
+        self._gauge_level.hide(refresh=False)
+        self._error_lbl.set_text("\n".join(textwrap.wrap(message, width=34)[:3]))
+        self._error_lbl.show()
+
+    def _show_gauges(self) -> None:
+        self._error_lbl.hide(refresh=False)
+        self._gauge_time.show(refresh=False)
+        self._gauge_level.show()
