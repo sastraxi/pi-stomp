@@ -42,10 +42,10 @@ def detect_pitch(
     # Step 1: difference function via FFT.
     # d(τ) = Σⱼ(x[j] - x[j+τ])² = E₀ + trailing(τ) - 2·xcorr(τ)
     # where E₀ = Σx[0:W]², trailing(τ) = Σx[τ:τ+W]², xcorr(τ) = Σx[j]·x[j+τ] for j∈[0,W)
-    x = frame.astype(np.float64)
+    x = frame  # already float32; avoid upcast to float64
     W = half
 
-    x_sq_cs = np.empty(N + 1, dtype=np.float64)
+    x_sq_cs = np.empty(N + 1, dtype=np.float32)
     x_sq_cs[0] = 0.0
     np.cumsum(x * x, out=x_sq_cs[1:])
     E0 = x_sq_cs[W]
@@ -54,18 +54,18 @@ def detect_pitch(
 
     # xcorr via FFT; n_fft must be >= W + N to avoid circular aliasing
     n_fft = 1 << (W + N - 1).bit_length()
-    a = np.zeros(n_fft, dtype=np.float64)
+    a = np.zeros(n_fft, dtype=np.float32)
     a[:W] = x[:W]
     # irfft(rfft(x)*conj(rfft(a)))[τ] = Σⱼ x[j+τ]·a[j] — positive-lag correlation
     xcorr = np.fft.irfft(np.fft.rfft(x, n=n_fft) * np.fft.rfft(a).conj())[:tau_max + 1]
 
-    diff = E0 + trailing - 2.0 * xcorr
+    diff = E0 + trailing - 2 * xcorr
     diff[0] = 0.0
 
     # Step 2: cumulative mean normalised difference (CMND), eq. 8 in the paper.
     cumsum = np.cumsum(diff[1:tau_max + 1])
-    taus = np.arange(1, tau_max + 1, dtype=np.float64)
-    cmnd = np.ones(tau_max + 1, dtype=np.float64)
+    taus = np.arange(1, tau_max + 1, dtype=np.float32)
+    cmnd = np.ones(tau_max + 1, dtype=np.float32)
     cmnd[1:tau_max + 1] = 1.0
     np.divide(diff[1:tau_max + 1] * taus, cumsum, out=cmnd[1:tau_max + 1], where=cumsum > 0.0)
 

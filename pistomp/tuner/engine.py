@@ -111,7 +111,7 @@ class TunerEngine:
             return
 
         with profiling.measure("rms", bin_override="dsp"):
-            rms = float(np.sqrt(np.mean(self._frame.astype(np.float64) ** 2)))
+            rms = float(np.sqrt(np.mean(self._frame ** 2)))
 
         if rms < self.SILENCE_RMS:
             self._freq_history.clear()
