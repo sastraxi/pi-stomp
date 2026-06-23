@@ -31,7 +31,7 @@ class LcdRecorder:
             "-pixel_format", "rgba",
             "-video_size", f"{WIDTH}x{HEIGHT}",
             "-framerate", str(FPS),
-            "-i", "-", # input from pipe
+            "-i", "pipe:",
             "-c:v", "libx264",
         ]
         
@@ -42,7 +42,7 @@ class LcdRecorder:
             # High quality but compressed
             self.ffmpeg_cmd.extend(["-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p"])
             
-        self.ffmpeg_cmd.append(self.output_path)
+        self.ffmpeg_cmd.append(f"file:{self.output_path}")
 
     def stop(self, signum=None, frame=None):
         print("\nStopping recording...")
