@@ -23,7 +23,7 @@ def em() -> Generator[EthernetManager, None, None]:
         patch("os.path.exists", return_value=False),
     ):
         m = EthernetManager()
-    assert m.iface == "eth0"
+        assert m.iface == "eth0"  # force cached_property to compute under the mock
     yield m
     m.shutdown()
 
