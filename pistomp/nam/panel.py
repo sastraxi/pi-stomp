@@ -116,10 +116,7 @@ class NamCapturePanel(FullscreenPanel):
         self._prev_diff_none: bool = True
 
         # Pre-read duration from WAV header (fast — no sample loading).
-        try:
-            self._duration = wav_duration(reamp_wav)
-        except Exception:
-            self._duration = 0.0
+        self._duration = wav_duration(reamp_wav)
 
         font = Config().get_font("default")
         title_font = Config().get_font("default_title")

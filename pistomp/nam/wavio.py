@@ -21,6 +21,9 @@ import numpy.typing as npt
 
 def wav_duration(path: Path | str) -> float:
     """Return the duration in seconds of *path* without loading samples."""
+    path = Path(path)
+    if not path.exists():
+        raise FileNotFoundError(f"WAV file not found: {path}")
     with wave.open(str(path), "rb") as wf:
         return wf.getnframes() / wf.getframerate()
 
