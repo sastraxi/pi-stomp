@@ -16,11 +16,12 @@
 import statistics
 import time
 from collections import deque
-from pathlib import Path
 from typing import Callable, Literal
 
-from uilib.config import Config
+from uilib import profiling
+from common.fonts import font_path
 from uilib.box import Box
+from uilib.config import Config
 from uilib.misc import get_text_bbox, get_text_size
 from uilib.pygame_init import font as make_font
 from uilib.label import Label
@@ -28,9 +29,6 @@ from uilib.text import Button
 from uilib.widget import Widget
 
 from pistomp.fullscreen_panel import FullscreenPanel
-
-_FONTS_DIR = Path(__file__).resolve().parents[2] / "fonts"
-
 
 from pistomp.tuner.engine import TunerEngine, TunerReading
 from pistomp.tuner.source import AudioSource
@@ -60,10 +58,6 @@ def _zone(cents: float) -> Zone:
     if abs(cents) <= _RED_THRESH:
         return "accent"
     return "red"
-
-
-def _zone_color(cents: float) -> Color:
-    return _ZONE_COLORS[_zone(cents)]
 
 
 # ── TunerHeaderWidget ────────────────────────────────────────────────────────
@@ -234,6 +228,7 @@ class StrobeWidget(Widget):
         self._stripe_color: Color = _ZONE_COLORS["accent"]
         self._last_tick = time.monotonic()
         self._has_reading = False
+        self._pending: Box | None = None
 
     # ── drawing ──────────────────────────────────────────────────────────────
 
@@ -274,43 +269,25 @@ class StrobeWidget(Widget):
 
     # ── batched partial-column refresh ─────────────────────────────────────────
 
-    # Bridge gaps up to a stripe width when coalescing so a stripe's tail+lead
-    # edges (and overlapping old/new positions) collapse to one transaction,
-    # while the 53 px-spaced stripes stay separate.
-    _MERGE_GAP = STRIPE_W
-
     def _flush_spans(self, spans: list[tuple[int, int]]) -> None:
-        """Coalesce (x, w) column spans (wrapping at _W) into the minimal set of
-        boxes and push one LCD transaction each. Per-tick overhead — set_window,
-        tobytes/frombytes, rotate — dominates at 80 MHz SPI, so fewer, slightly
-        wider transactions beat many thin ones."""
+        """Union (x, w) column spans (wrapping at _W) into self._pending.
+        tick() issues a single refresh() of the accumulated box each call."""
         bx = self.box
         if bx is None:
             return
-
-        runs: list[tuple[int, int]] = []
         for x, w in spans:
             if w <= 0:
                 continue
             x %= _W
             end = x + w
-            if end <= _W:
-                runs.append((x, end))
-            else:
-                runs.append((x, _W))
-                runs.append((0, end - _W))
-        if not runs:
-            return
-
-        runs.sort()
-        cs, ce = runs[0]
-        for s, e in runs[1:]:
-            if s <= ce + self._MERGE_GAP:
-                ce = max(ce, e)
-            else:
-                self.refresh(Box(cs, bx.y0, ce, bx.y1))
-                cs, ce = s, e
-        self.refresh(Box(cs, bx.y0, ce, bx.y1))
+            self._pending = (
+                Box(x, bx.y0, min(end, _W), bx.y1)
+                if self._pending is None
+                else self._pending.union(Box(x, bx.y0, min(end, _W), bx.y1))
+            )
+            if end > _W:
+                wrap = Box(0, bx.y0, end - _W, bx.y1)
+                self._pending = self._pending.union(wrap)
 
     def _stripe_spans_at(self, phase_int: int) -> list[tuple[int, int]]:
         return [((phase_int + i * self.STRIPE_P) % _W, self.STRIPE_W) for i in range(self.N_STRIPES)]
@@ -321,6 +298,7 @@ class StrobeWidget(Widget):
         now = time.monotonic()
         dt = min(now - self._last_tick, 0.5)
         self._last_tick = now
+        self._pending = None
 
         if cents is None:
             if self._has_reading:
@@ -328,48 +306,44 @@ class StrobeWidget(Widget):
                 self._zone = "accent"
                 self._stripe_color = _ZONE_COLORS["accent"]
                 self._flush_spans(self._stripe_spans_at(int(self._phase)))
-            return
-
-        if not self._has_reading:
+        elif not self._has_reading:
             self._has_reading = True
             self._flush_spans(self._stripe_spans_at(int(self._phase)))
-            return
-
-        new_zone: Zone = _zone(cents)
-        if new_zone != self._zone:
-            self._zone = new_zone
-            self._stripe_color = _zone_color(cents)
-            self._flush_spans(self._stripe_spans_at(int(self._phase)))
-            return
-
-        K = (self.STRIPE_P / 50.0) * self.VELOCITY_SCALE
-        velocity = max(-50.0, min(50.0, cents)) * K
-        old_phase_int = int(self._phase)
-        self._phase = (self._phase + velocity * dt) % float(_W)
-        k = int(self._phase) - old_phase_int
-
-        if k == 0:
-            return
-
-        if abs(k) >= self.STRIPE_W:
-            # Old and new stripe positions don't overlap; coalescing still merges
-            # any that landed within a stripe width of each other.
-            self._flush_spans(self._stripe_spans_at(old_phase_int) + self._stripe_spans_at(int(self._phase)))
-            return
-
-        ak = abs(k)
-        spans: list[tuple[int, int]] = []
-        for i in range(self.N_STRIPES):
-            old_sx = (old_phase_int + i * self.STRIPE_P) % _W
-            if k > 0:
-                tail_x = old_sx
-                lead_x = (old_sx + self.STRIPE_W) % _W
+        else:
+            new_zone: Zone = _zone(cents)
+            if new_zone != self._zone:
+                self._zone = new_zone
+                self._stripe_color = _ZONE_COLORS[new_zone]
+                self._flush_spans(self._stripe_spans_at(int(self._phase)))
             else:
-                tail_x = (old_sx + self.STRIPE_W - ak) % _W
-                lead_x = (old_sx - ak) % _W
-            spans.append((tail_x, ak))
-            spans.append((lead_x, ak))
-        self._flush_spans(spans)
+                K = (self.STRIPE_P / 50.0) * self.VELOCITY_SCALE
+                velocity = max(-50.0, min(50.0, cents)) * K
+                old_phase_int = int(self._phase)
+                self._phase = (self._phase + velocity * dt) % float(_W)
+                k = int(self._phase) - old_phase_int
+
+                if k != 0:
+                    if abs(k) >= self.STRIPE_W:
+                        self._flush_spans(
+                            self._stripe_spans_at(old_phase_int) + self._stripe_spans_at(int(self._phase))
+                        )
+                    else:
+                        ak = abs(k)
+                        spans: list[tuple[int, int]] = []
+                        for i in range(self.N_STRIPES):
+                            old_sx = (old_phase_int + i * self.STRIPE_P) % _W
+                            if k > 0:
+                                tail_x = old_sx
+                                lead_x = (old_sx + self.STRIPE_W) % _W
+                            else:
+                                tail_x = (old_sx + self.STRIPE_W - ak) % _W
+                                lead_x = (old_sx - ak) % _W
+                            spans.append((tail_x, ak))
+                            spans.append((lead_x, ak))
+                        self._flush_spans(spans)
+
+        if self._pending is not None:
+            self.refresh(self._pending)
 
 
 # ── TunerPanel ───────────────────────────────────────────────────────────────
@@ -391,7 +365,7 @@ class TunerPanel(FullscreenPanel):
         self._source_factory = source_factory
         self._engine = self._create_engine(input_port)
 
-        note_font = make_font(str(_FONTS_DIR / "DejaVuSans-Bold.ttf"), 56)
+        note_font = make_font(font_path("DejaVuSans-Bold.ttf"), 56)
         btn_font = Config().get_font("default")
         _, btn_text_h = get_text_size("Mute", btn_font)
         btn_v_margin = max(0, (_BTN_H - btn_text_h) // 2)
@@ -436,6 +410,7 @@ class TunerPanel(FullscreenPanel):
         self.add_sel_widget(self._btn_input)
         self._apply_mute_style(muted)
         self._cents_history: deque[float] = deque(maxlen=3)
+        profiling.maybe_start()
 
     def _create_engine(self, port: int) -> TunerEngine:
         source = self._source_factory(f"system:capture_{port}")
@@ -475,6 +450,8 @@ class TunerPanel(FullscreenPanel):
             self._cents_history.clear()
             cents = None
 
-        self._header.tick(reading)
-        self._bar.tick(cents)
-        self._strobe.tick(cents)
+        profiling.set_cents_bin(profiling.bin_for_cents(cents))
+        with profiling.measure("TunerPanel.tick"):
+            self._header.tick(reading)
+            self._bar.tick(cents)
+            self._strobe.tick(cents)

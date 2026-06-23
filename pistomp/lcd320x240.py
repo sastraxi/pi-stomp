@@ -18,6 +18,7 @@ import os
 import time
 import socket
 from typing import Optional
+from common.fonts import font_path
 import common.token as Token
 import common.parameter as Parameter
 from ui.ethernet_menu import EthernetMenu
@@ -28,6 +29,7 @@ import pistomp.switchstate as switchstate
 import pygame
 
 from uilib import *
+from uilib import profiling
 from uilib.gridpanel import GridPanel
 from uilib.pygame_init import font as _make_font
 from uilib.lcd_ili9341 import *
@@ -43,6 +45,7 @@ from plugins import PANELS
 
 # Parameter dialog auto-dismiss timeout (seconds)
 PARAMETER_DIALOG_TIMEOUT = 1.0
+#import traceback
 
 # Wifi "processing" spinner full-cycle rate (Hz), wall-clock paced.
 WIFI_SPINNER_HZ = 1.5
@@ -97,12 +100,10 @@ class Lcd(abstract_lcd.Lcd):
         }
 
         # TODO get fonts from config.json
-        from pathlib import Path
-        _fonts_dir = Path(__file__).resolve().parent.parent / "fonts"
-        self.title_font = _make_font(_fonts_dir / "DejaVuSans-Bold.ttf", 26)
-        self.splash_font = _make_font(_fonts_dir / "DejaVuSans.ttf", 48)
-        self.small_font = _make_font(_fonts_dir / "DejaVuSans.ttf", 20)
-        self.tiny_font = _make_font(_fonts_dir / "DejaVuSans.ttf", 16)
+        self.title_font = _make_font(font_path("DejaVuSans-Bold.ttf"), 26)
+        self.splash_font = _make_font(font_path("DejaVuSans.ttf"), 48)
+        self.small_font = _make_font(font_path("DejaVuSans.ttf"), 20)
+        self.tiny_font = _make_font(font_path("DejaVuSans.ttf"), 16)
         self.title_split_orig = 190
         self.title_split = self.title_split_orig
         self.display_width = 320
@@ -229,6 +230,10 @@ class Lcd(abstract_lcd.Lcd):
         return False
 
     def poll_updates(self):
+        with profiling.measure("poll_updates"):
+            self._poll_updates()
+
+    def _poll_updates(self):
         for d in self.w_parameter_dialogs.values():
             d.tick()
         if self.w_pedalboard is not None:

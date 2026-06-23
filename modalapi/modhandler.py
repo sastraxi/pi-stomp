@@ -436,7 +436,7 @@ class Modhandler(Handler):
         # redraws flush promptly. Otherwise fall back to the SPI-clock-derived
         # divisor computed by the LCD itself.
         if self._lcd is not None and self._lcd.has_active_fullscreen_panel():
-            return 1
+            return 2
         return self._lcd.poll_divisor if self._lcd is not None else 8
 
     def universal_encoder_select(self, direction):
@@ -1046,7 +1046,12 @@ class Modhandler(Handler):
                 self.software_version = output.decode()
                 logging.info("pi-Stomp Software Version: %s" % self.software_version)
         except subprocess.CalledProcessError:
-            logging.error("Cannot obtain git software tag info")
+            try:
+                output = subprocess.check_output(['dpkg-query', '--showformat=${Version}', '--show', 'pi-stomp'])
+                self.software_version = output.decode().strip()
+                logging.info("pi-Stomp Software Version (pkg): %s" % self.software_version)
+            except subprocess.CalledProcessError:
+                logging.error("Cannot obtain software version info")
 
         try:
             if Path(self.build_file).exists():
