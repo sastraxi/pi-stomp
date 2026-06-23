@@ -40,7 +40,7 @@ _W = 320
 _H = 240
 
 _FONTS_DIR = Path(__file__).resolve().parents[2] / "fonts"
-_REAMP_WAV = Path(__file__).resolve().parents[2] / "setup" / "nam" / "v3_0_0.wav"
+_REAMP_WAV = Path(__file__).resolve().parents[2] / "setup" / "nam" / "T3K-sweep-v3.wav"
 
 # Title bar
 _TITLE_H = 26

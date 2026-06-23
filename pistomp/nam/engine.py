@@ -9,7 +9,7 @@ from pistomp.nam import routing
 from pistomp.nam.capture_session import CaptureSession
 from pistomp.nam.wavio import load_wav_float32
 
-_REAMP_WAV = Path(__file__).resolve().parents[2] / "setup" / "nam" / "v3_0_0.wav"
+_REAMP_WAV = Path(__file__).resolve().parents[2] / "setup" / "nam" / "T3K-sweep-v3.wav"
 
 
 class CaptureState(Enum):
@@ -136,7 +136,7 @@ class NamCaptureEngine:
             if not self._reamp_wav.exists():
                 raise FileNotFoundError(
                     f"Reamp WAV not found: {self._reamp_wav}\n"
-                    "Download v3_0_0.wav from the NAM trainer and place it at "
+                    "Download T3K-sweep-v3.wav from the NAM trainer and place it at "
                     f"{self._reamp_wav}"
                 )
 

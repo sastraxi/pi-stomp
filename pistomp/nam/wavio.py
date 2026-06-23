@@ -1,6 +1,6 @@
 """Read a 24-bit / 48 kHz / mono WAV file into a float32 numpy array.
 
-The NAM reamp file (v3_0_0.wav) is 24-bit mono 48 kHz. stdlib `wave` has no
+The NAM reamp file (T3K-sweep-v3.wav) is 24-bit mono 48 kHz. stdlib `wave` has no
 int24 dtype, so we read the raw bytes and sign-extend manually:
 
     bytes (-1, 3) → pad 4th sign-extension byte → view as little-endian int32

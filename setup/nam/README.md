@@ -1,6 +1,6 @@
 # NAM Reamp Asset
 
-Place `v3_0_0.wav` in this directory during image build. The engine will
+Place `T3K-sweep-v3.wav` in this directory during image build. The engine will
 automatically pick it up.
 
 ## Obtaining the file
@@ -8,9 +8,9 @@ automatically pick it up.
 Download the standardized reamp signal from the Neural Amp Modeler trainer:
 
 1. Go to <https://tone3000.com/capture> (or the NAM Colab notebook).
-2. Click **"Download input file"** — this gives you `v3_0_0.wav`.
+2. Click **"Download input file"** — this gives you `T3K-sweep-v3.wav`.
 3. Verify: 24-bit PCM, 48 000 Hz, mono, ~3 minutes long.
-4. Copy it here as `setup/nam/v3_0_0.wav`.
+4. Copy it here as `setup/nam/T3K-sweep-v3.wav`.
 
 The file is not committed to this repository to keep the repo lightweight.
 

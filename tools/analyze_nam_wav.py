@@ -16,7 +16,7 @@ from pathlib import Path
 
 import numpy as np
 
-_DEFAULT_WAV = Path(__file__).resolve().parents[1] / "setup" / "nam" / "v3_0_0.wav"
+_DEFAULT_WAV = Path(__file__).resolve().parents[1] / "setup" / "nam" / "T3K-sweep-v3.wav"
 _SAMPLE_RATE = 48000
 _SILENCE_SETTLE_S = 2  # mirrors capture_session.py
 _SILENCE_INPUT_THRESHOLD = 1e-2  # mirrors capture_session.py  (≈ −40 dBFS)
