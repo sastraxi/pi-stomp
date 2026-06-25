@@ -267,16 +267,9 @@ class ReelWidget(Widget):
             return
         p = max(0.0, min(1.0, progress))
         elapsed = p * self._total
-        # Only redraw when the integer-second display changes
-        if int(elapsed) == int(self._elapsed) and abs(p - self._progress) < 0.002:
-            self._progress = p
-            self._elapsed = elapsed
-            self._remaining = self._total - elapsed
-            return
         self._progress = p
         self._elapsed = elapsed
         self._remaining = self._total - elapsed
-        self.refresh()
 
     def freeze(self) -> None:
         self._frozen = True
@@ -286,14 +279,12 @@ class ReelWidget(Widget):
         self._elapsed = self._total
         self._remaining = 0.0
         self._frozen = True
-        self.refresh()
 
     def reset(self) -> None:
         self._progress = 0.0
         self._elapsed = 0.0
         self._remaining = self._total
         self._frozen = False
-        self.refresh()
 
     def advance_rotation(self, dt: float) -> None:
         if self._frozen or dt == 0.0:
@@ -303,7 +294,6 @@ class ReelWidget(Widget):
         right_r = max(int(self._MIN_R * (1.0 - p) + self._MAX_R * p), 1)
         self._left_rot = (self._left_rot + self._TAPE_OMEGA / left_r * dt) % 360.0
         self._right_rot = (self._right_rot + self._TAPE_OMEGA / right_r * dt) % 360.0
-        self._refresh_circles()
 
     def _refresh_circles(self) -> None:
         pad = self._MAX_R + 4
@@ -382,12 +372,9 @@ class LevelMeter(Widget):
 
     def set_level(self, db: float | None) -> None:
         self._level_db = db
-        self.refresh()
 
     def set_clip(self, clipping: bool) -> None:
-        if self._clipping != clipping:
-            self._clipping = clipping
-            self.refresh()
+        self._clipping = clipping
 
     def _db_to_segments(self, db: float) -> int:
         return max(0, min(self._SEG_COUNT, int((db + 60.0) / 60.0 * self._SEG_COUNT + 0.5)))
@@ -453,21 +440,15 @@ class StatusLed(Widget):
     def set_color(self, color: tuple[int, int, int]) -> None:
         self._led_color = color
         self._brightness = 1.0
-        self.refresh()
 
     def flash(self) -> None:
         self._brightness = 1.0
-        self.refresh()
 
     def decay_step(self, dt: float) -> None:
         if self._brightness < self._REDRAW_THRESHOLD:
             return
         new_b = self._brightness * math.exp(-self._DECAY_RATE * dt)
-        if abs(new_b - self._brightness) > self._REDRAW_THRESHOLD:
-            self._brightness = new_b
-            self.refresh()
-        else:
-            self._brightness = new_b
+        self._brightness = new_b
 
     def _draw(self, ctx: PaintContext) -> None:
         b = self._brightness
@@ -738,6 +719,10 @@ class NamCapturePanel(FullscreenPanel):
 
     # ── Polling ───────────────────────────────────────────────────────────────
 
+    # Bounding box of all animated content in capture view (reel + meters + LED).
+    # Large enough to always be coalesced → one SPI transfer per tick.
+    _CAP_ANIM_BOX = Box.xywh(0, 0, _W, _METER_IN_Y + _METER_H)
+
     def tick(self) -> None:
         now = time.monotonic()
         dt = 0.0 if self._last_tick is None else now - self._last_tick
@@ -773,6 +758,8 @@ class NamCapturePanel(FullscreenPanel):
                 self._status_led.flash()
             else:
                 self._status_led.decay_step(dt)
+
+            self.refresh(self._CAP_ANIM_BOX)
 
     # ── Private ───────────────────────────────────────────────────────────────
 

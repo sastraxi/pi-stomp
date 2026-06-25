@@ -21,26 +21,7 @@ class CaptureState(Enum):
 
 
 class NamCaptureEngine:
-    """
-    NAM Capture Engine — orchestrates a single FX-loop recording session.
-
-    Lifecycle::
-
-        engine = NamCaptureEngine(output_dir)
-        engine.start("my-amp")          # kicks off background thread
-        while engine.state == CaptureState.CAPTURING:
-            p = engine.progress()       # 0.0 → 1.0
-            ...
-        # engine.state in (DONE, FAILED, ABORTED)
-        path = engine.output_path       # Path to the recorded WAV (if DONE)
-
-    Routing (save/clear/restore) is wrapped in try/finally so the user's
-    audio routing is always restored on completion, abort, or exception.
-
-    A single CaptureSession JACK client handles both playback (FX send) and
-    recording (FX return) in the same RT callback — frame-accurate alignment
-    and equal length, no subprocess race.
-    """
+    """Orchestrates a single FX-loop NAM recording session in a background thread."""
 
     def __init__(
         self,
@@ -220,7 +201,7 @@ class NamCaptureEngine:
                     routing.restore(saved)
                     saved = None
                     with self._lock:
-                        self._error = "No audio detected (In2)"
+                        self._error = "No audio detected"
                         self._state = CaptureState.FAILED
                     return
                 elapsed = time.monotonic() - t0
