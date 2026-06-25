@@ -29,7 +29,7 @@ class _FakeEngine:
 
     @property
     def error(self) -> str | None:
-        return "Oops" if self._state == CaptureState.FAILED else None
+        return "Reduce amp output" if self._state == CaptureState.FAILED else None
 
     @property
     def output_path(self) -> Path | None:
@@ -44,11 +44,13 @@ class _FakeEngine:
 
     def start(self, name: str) -> None:
         self.started.append(name)
+        self._state = CaptureState.CAPTURING
 
     def stop(self) -> None:
         self.stopped = True
+        self._state = CaptureState.ABORTED
 
-    def level_diff_db(self) -> float | None:
+    def level_snapshot_db(self) -> tuple[float, float] | None:
         return None
 
     def set_state(self, state: CaptureState, progress: float = 0.0) -> None:
@@ -92,11 +94,18 @@ class TestNamPanelSnapshot:
         snapshot("done")
 
     def test_failed_state(self, v3_system, snapshot):
-        panel = _make_panel(_FakeEngine(CaptureState.FAILED))
+        panel = _make_panel(_FakeEngine(CaptureState.FAILED, progress=0.3))
         v3_system.handler.lcd.show_fullscreen_panel(panel)
         panel.tick()
         v3_system.handler.poll_lcd_updates()
         snapshot("failed")
+
+    def test_aborted_state(self, v3_system, snapshot):
+        panel = _make_panel(_FakeEngine(CaptureState.ABORTED, progress=0.6))
+        v3_system.handler.lcd.show_fullscreen_panel(panel)
+        panel.tick()
+        v3_system.handler.poll_lcd_updates()
+        snapshot("aborted")
 
 
 # ---------------------------------------------------------------------------
@@ -105,16 +114,17 @@ class TestNamPanelSnapshot:
 
 
 class TestNamPanelLifecycle:
-    def test_action_button_starts_when_idle(self, v3_system):
+    def test_start_button_starts_engine(self, v3_system):
         engine = _FakeEngine(CaptureState.IDLE)
         panel = _make_panel(engine)
-        panel._btn_action.action()
-        assert engine.started == ["capture"]
+        panel._btn_start.action()
+        assert "capture" in engine.started
 
-    def test_action_button_aborts_when_capturing(self, v3_system):
+    def test_abort_button_stops_engine(self, v3_system):
         engine = _FakeEngine(CaptureState.CAPTURING)
         panel = _make_panel(engine)
-        panel._btn_action.action()
+        panel.tick()  # triggers switch to capture view
+        panel._btn_capture_right.action()  # "Abort"
         assert engine.stopped
 
     def test_abort_noop_when_idle(self, v3_system):
@@ -123,19 +133,41 @@ class TestNamPanelLifecycle:
         panel._on_abort()
         assert not engine.stopped
 
-    def test_close_button_calls_on_dismiss(self, v3_system):
+    def test_close_setup_calls_on_dismiss(self, v3_system):
         dismissed = []
         panel = _make_panel(_FakeEngine(CaptureState.IDLE), on_dismiss=lambda: dismissed.append(True))
-        panel._btn_close.action()
+        panel._btn_setup_close.action()
         assert dismissed == [True]
 
-    def test_tick_updates_countdown(self, v3_system):
+    def test_close_capture_calls_on_dismiss(self, v3_system):
+        dismissed = []
+        engine = _FakeEngine(CaptureState.DONE, progress=1.0)
+        panel = _make_panel(engine, on_dismiss=lambda: dismissed.append(True))
+        panel.tick()  # triggers switch to capture view → DONE
+        panel._btn_capture_close.action()
+        assert dismissed == [True]
+
+    def test_tick_updates_reel_progress(self, v3_system):
         engine = _FakeEngine(CaptureState.CAPTURING, progress=0.5)
         panel = _make_panel(engine)
-        panel._duration = 60.0
+        panel._reel._total = 60.0  # override for predictable elapsed
         panel.tick()
-        # At 50% progress, ~30 s remain → "0:30"
-        assert panel._last_countdown == "0:30"
+        assert abs(panel._reel._elapsed - 30.0) < 1.0
+
+    def test_retry_button_restarts_engine(self, v3_system):
+        engine = _FakeEngine(CaptureState.FAILED, progress=0.3)
+        panel = _make_panel(engine)
+        panel.tick()  # switch to capture view → FAILED
+        panel._btn_capture_right.action()  # "Retry"
+        assert "capture" in engine.started
+
+    def test_reel_frozen_on_failure(self, v3_system):
+        engine = _FakeEngine(CaptureState.FAILED, progress=0.3)
+        panel = _make_panel(engine)
+        panel.tick()
+        frozen_progress = panel._reel._progress
+        panel._reel.set_progress(0.9)  # attempt to advance
+        assert panel._reel._progress == frozen_progress
 
     def test_destroy_stops_engine(self, v3_system):
         engine = _FakeEngine(CaptureState.CAPTURING)

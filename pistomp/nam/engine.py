@@ -98,14 +98,9 @@ class NamCaptureEngine:
         self._thread = threading.Thread(target=self._run, args=(name,), daemon=True, name="nam-capture")
         self._thread.start()
 
-    def level_diff_db(self) -> float | None:
-        """Return peak_in_dBFS − peak_out_dBFS since last call, or None if no data.
-
-        Returns None when the output peak for the window is below the play
-        gate threshold — transitions from silence produce meaningless spikes.
-        """
+    def level_snapshot_db(self) -> tuple[float, float] | None:
+        """Return (in_dBFS, out_dBFS) since last call, or None if no data."""
         import math
-        from pistomp.nam.capture_session import _SILENCE_PLAY_THRESHOLD
 
         with self._lock:
             session = self._session
@@ -114,10 +109,12 @@ class NamCaptureEngine:
         snap = session.level_snapshot()
         if snap is None:
             return None
-        avg_in, avg_out = snap
-        if avg_out < _SILENCE_PLAY_THRESHOLD or avg_in <= 0:
-            return None
-        return 20.0 * math.log10(avg_in) - 20.0 * math.log10(avg_out)
+        in_peak, out_peak = snap
+
+        def to_db(p: float) -> float:
+            return 20.0 * math.log10(max(p, 1e-10))
+
+        return to_db(in_peak), to_db(out_peak)
 
     def stop(self) -> None:
         """Abort a running capture and wait for the thread to exit."""
@@ -189,7 +186,7 @@ class NamCaptureEngine:
                     routing.restore(saved)
                     saved = None
                     with self._lock:
-                        self._error = "Input clipped - reduce amp output level"
+                        self._error = "Reduce amp output"
                         self._state = CaptureState.FAILED
                     return
                 if session.silence_detected:
@@ -198,7 +195,7 @@ class NamCaptureEngine:
                     routing.restore(saved)
                     saved = None
                     with self._lock:
-                        self._error = "No audio returned — check FX loop cable"
+                        self._error = "Check FX loop cable"
                         self._state = CaptureState.FAILED
                     return
                 elapsed = time.monotonic() - t0
