@@ -624,7 +624,7 @@ class NamCapturePanel(FullscreenPanel):
     # ── Input handling ────────────────────────────────────────────────────────
 
     def handle(self, event: ControllerEvent) -> bool:
-        if not isinstance(event, EncoderEvent) or self._handler is None:
+        if not isinstance(event, EncoderEvent):
             return False
         cid = getattr(event.controller, "id", None)
         if cid not in (2, 3):
@@ -636,18 +636,20 @@ class NamCapturePanel(FullscreenPanel):
         if state == CaptureState.CAPTURING:
             return True
 
-        # After failure/completion: pass through so the vanilla parameter
-        # overlay pops up (the user can fix levels before retrying).
-        if state in (CaptureState.FAILED, CaptureState.ABORTED, CaptureState.DONE):
+        # Only on failure: pass through so the vanilla parameter overlay pops
+        # up and the user can adjust levels before retrying.
+        if state == CaptureState.FAILED:
             return False
 
         # IDLE: handle locally and update the on-screen knobs.
-        steps = int(round(event.rotations * event.multiplier))
-        if cid == 3:
-            self._handler.system_menu_input_gain(steps)
-        else:
-            self._handler.system_menu_headphone_volume(steps)
-        self._refresh_knob_values()
+        # DONE/ABORTED: swallow — the setup view knobs aren't visible.
+        if state == CaptureState.IDLE and self._handler is not None:
+            steps = int(round(event.rotations * event.multiplier))
+            if cid == 3:
+                self._handler.system_menu_input_gain(steps)
+            else:
+                self._handler.system_menu_headphone_volume(steps)
+            self._refresh_knob_values()
         return True
 
     # ── Polling ───────────────────────────────────────────────────────────────
