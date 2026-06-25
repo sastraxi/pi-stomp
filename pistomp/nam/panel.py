@@ -35,12 +35,13 @@ from __future__ import annotations
 
 import math
 import time
+from functools import lru_cache
 from pathlib import Path
 from typing import Callable
 
 from uilib.box import Box
 from uilib.config import Config
-from uilib.glyphs import ArcRingGlyph
+from uilib.glyphs import ArcRingGlyph, SpinnerGlyph
 from uilib.label import Label
 from uilib.misc import TextHAlign, get_text_bbox, get_text_size
 from uilib.paint import PaintContext
@@ -96,6 +97,7 @@ _METER_IN_Y = _METER_OUT_Y + _METER_H + 2  # 180
 _REEL_BODY = (30, 25, 15)
 _REEL_RIM = (100, 80, 40)
 _REEL_HUB = (60, 50, 30)
+_REEL_SPOKE = (80, 65, 32)
 _TAPE_FILLED = (148, 92, 22)
 _TAPE_EMPTY = (22, 17, 8)
 
@@ -131,6 +133,11 @@ _HEADER_NAME_FG = (100, 100, 110)
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
+
+
+@lru_cache(maxsize=64)
+def _get_cached_spinner(outer_r: int, hub_r: int) -> SpinnerGlyph:
+    return SpinnerGlyph(outer_r, hub_r)
 
 
 def _fmt_time(seconds: float) -> str:
@@ -240,6 +247,8 @@ class ReelWidget(Widget):
     _HUB_R = 5
     _TAPE_Y = 46
     _TAPE_H = 9
+    # At MIN_R radius, 3 rev/s; larger reels spin slower proportionally
+    _TAPE_OMEGA: float = 3.0 * 360.0 * _MIN_R
 
     def __init__(self, box: Box, total_seconds: float, reel_font, caption_font, parent: Widget) -> None:
         super().__init__(box=box, bkgnd_color=(0, 0, 0), parent=parent)
@@ -250,6 +259,8 @@ class ReelWidget(Widget):
         self._remaining = total_seconds
         self._reel_font = reel_font
         self._caption_font = caption_font
+        self._left_rot: float = 0.0
+        self._right_rot: float = 0.0
 
     def set_progress(self, progress: float) -> None:
         if self._frozen:
@@ -284,6 +295,22 @@ class ReelWidget(Widget):
         self._frozen = False
         self.refresh()
 
+    def advance_rotation(self, dt: float) -> None:
+        if self._frozen:
+            return
+        p = self._progress
+        left_r = max(int(self._MAX_R * (1.0 - p) + self._MIN_R * p), 1)
+        right_r = max(int(self._MIN_R * (1.0 - p) + self._MAX_R * p), 1)
+        self._left_rot = (self._left_rot + self._TAPE_OMEGA / left_r * dt) % 360.0
+        self._right_rot = (self._right_rot + self._TAPE_OMEGA / right_r * dt) % 360.0
+        self._refresh_circles()
+
+    def _refresh_circles(self) -> None:
+        pad = self._MAX_R + 4
+        wx, wy = self.box.x0, self.box.y0
+        for cx in (self._LEFT_CX, self._RIGHT_CX):
+            self.refresh(Box.xywh(wx + cx - pad, wy + self._REEL_CY - pad, 2 * pad + 1, 2 * pad + 1))
+
     def _draw(self, ctx: PaintContext) -> None:
         p = self._progress
         lc = self._LEFT_CX
@@ -308,22 +335,20 @@ class ReelWidget(Widget):
                 ctx.draw_rectangle(Box.xywh(tape_left, self._TAPE_Y, filled_w, self._TAPE_H), fill=_TAPE_FILLED)
 
         # Left reel (feed — shrinks)
-        ctx.draw_ellipse(
-            Box.xywh(lc - left_r, cy - left_r, 2 * left_r, 2 * left_r),
-            fill=_REEL_BODY,
-            outline=_REEL_RIM,
-            width=2,
+        left_spinner = _get_cached_spinner(left_r, hub_r)
+        lhs = left_spinner.half_size
+        ctx.paste(
+            left_spinner.render(self._left_rot, _REEL_BODY, _REEL_RIM, _REEL_HUB, _REEL_SPOKE),
+            (lc - lhs, cy - lhs),
         )
-        ctx.draw_ellipse(Box.xywh(lc - hub_r, cy - hub_r, 2 * hub_r, 2 * hub_r), fill=_REEL_HUB)
 
         # Right reel (take-up — grows)
-        ctx.draw_ellipse(
-            Box.xywh(rc - right_r, cy - right_r, 2 * right_r, 2 * right_r),
-            fill=_REEL_BODY,
-            outline=_REEL_RIM,
-            width=2,
+        right_spinner = _get_cached_spinner(right_r, hub_r)
+        rhs = right_spinner.half_size
+        ctx.paste(
+            right_spinner.render(self._right_rot, _REEL_BODY, _REEL_RIM, _REEL_HUB, _REEL_SPOKE),
+            (rc - rhs, cy - rhs),
         )
-        ctx.draw_ellipse(Box.xywh(rc - hub_r, cy - hub_r, 2 * hub_r, 2 * hub_r), fill=_REEL_HUB)
 
         # Time labels — elapsed left, countdown right with leading "−"
         elapsed_str = _fmt_time(self._elapsed)
@@ -415,25 +440,43 @@ class LevelMeter(Widget):
 
 
 class StatusLed(Widget):
-    """10×10 status indicator dot."""
+    """10×10 status indicator dot with phosphor-decay fade."""
+
+    _DECAY_RATE = 4.77   # e-folding rate → half-life ≈ 145ms
+    _REDRAW_THRESHOLD = 0.01
 
     def __init__(self, x: int, y: int, parent: Widget) -> None:
         super().__init__(Box.xywh(x, y, 10, 10), bkgnd_color=(0, 0, 0), parent=parent)
-        self._led_color = _LED_IDLE
-        self._on = True
+        self._led_color: tuple[int, int, int] = _LED_IDLE
+        self._brightness: float = 1.0
 
     def set_color(self, color: tuple[int, int, int]) -> None:
         self._led_color = color
-        self._on = True
+        self._brightness = 1.0
         self.refresh()
 
-    def set_on(self, on: bool) -> None:
-        if self._on != on:
-            self._on = on
+    def flash(self) -> None:
+        self._brightness = 1.0
+        self.refresh()
+
+    def decay_step(self, dt: float) -> None:
+        if self._brightness < self._REDRAW_THRESHOLD:
+            return
+        new_b = self._brightness * math.exp(-self._DECAY_RATE * dt)
+        if abs(new_b - self._brightness) > self._REDRAW_THRESHOLD:
+            self._brightness = new_b
             self.refresh()
+        else:
+            self._brightness = new_b
 
     def _draw(self, ctx: PaintContext) -> None:
-        color = self._led_color if self._on else _LED_OFF
+        b = self._brightness
+        r, g, c_b = self._led_color
+        color: tuple[int, int, int] = (
+            max(0, min(255, int(r * b))),
+            max(0, min(255, int(g * b))),
+            max(0, min(255, int(c_b * b))),
+        )
         ctx.draw_ellipse(ctx.bounds, fill=color)
 
 
@@ -455,9 +498,8 @@ class NamCapturePanel(FullscreenPanel):
         self._handler = handler
         self._engine = self._create_engine(output_dir, reamp_wav)
         self._last_state = CaptureState.IDLE
-        self._last_level_update: float = 0.0
         self._last_blink: float = 0.0
-        self._led_on: bool = True
+        self._last_tick: float | None = None
         self._in_capture_view: bool = False
         self._duration = wav_duration(reamp_wav)
         self._gain_val: float = -10.0
@@ -696,31 +738,34 @@ class NamCapturePanel(FullscreenPanel):
     # ── Polling ───────────────────────────────────────────────────────────────
 
     def tick(self) -> None:
+        now = time.monotonic()
+        dt = 0.0 if self._last_tick is None else now - self._last_tick
+        self._last_tick = now
+
         state = self._engine.state
         if state != self._last_state:
             self._apply_state(state)
             self._last_state = state
 
         if state == CaptureState.CAPTURING:
+            self._reel.advance_rotation(dt)
             self._reel.set_progress(self._engine.progress())
 
-            now = time.monotonic()
-            if now - self._last_level_update >= 0.5:
-                self._last_level_update = now
-                snap = self._engine.level_snapshot_db()
-                if snap is not None:
-                    in_db, out_db = snap
-                    self._meter_in.set_level(in_db)
-                    self._meter_in.set_clip(in_db > -1.0)
-                    self._meter_out.set_level(out_db)
-                else:
-                    self._meter_in.set_level(None)
-                    self._meter_out.set_level(None)
+            snap = self._engine.level_snapshot_db()
+            if snap is not None:
+                in_db, out_db = snap
+                self._meter_in.set_level(in_db)
+                self._meter_in.set_clip(in_db > -1.0)
+                self._meter_out.set_level(out_db)
+            else:
+                self._meter_in.set_level(None)
+                self._meter_out.set_level(None)
 
-            if now - self._last_blink >= 0.5:
+            if now - self._last_blink >= 1.0:
                 self._last_blink = now
-                self._led_on = not self._led_on
-                self._status_led.set_on(self._led_on)
+                self._status_led.flash()
+            else:
+                self._status_led.decay_step(dt)
 
     # ── Private ───────────────────────────────────────────────────────────────
 
@@ -795,7 +840,6 @@ class NamCapturePanel(FullscreenPanel):
             CaptureState.ABORTED: _LED_ABORTED,
         }
         self._status_led.set_color(led_colors.get(state, _LED_IDLE))
-        self._led_on = True
 
         # Reel
         if state == CaptureState.DONE:

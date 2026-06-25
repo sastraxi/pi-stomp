@@ -28,6 +28,7 @@ from uilib.glyphs.keycap_corner import KeycapCornerGlyph
 from uilib.glyphs.knob import KnobGlyph
 from uilib.glyphs.pill import PillGlyph
 from uilib.glyphs.signal_bars import SignalBarsGlyph
+from uilib.glyphs.spinner import SpinnerGlyph
 
 __all__ = [
     "DEFAULT_COLOR",
@@ -41,4 +42,5 @@ __all__ = [
     "KnobGlyph",
     "PillGlyph",
     "SignalBarsGlyph",
+    "SpinnerGlyph",
 ]
