@@ -208,7 +208,7 @@ class NamCaptureEngine:
                     routing.restore(saved)
                     saved = None
                     with self._lock:
-                        self._error = "Check FX loop cable"
+                        self._error = "No audio detected (In2)"
                         self._state = CaptureState.FAILED
                     return
                 elapsed = time.monotonic() - t0
