@@ -58,6 +58,7 @@ class NamCaptureEngine:
         self._progress: float = 0.0
         self._error: str | None = None
         self._output_path: Path | None = None
+        self._pending_path: Path | None = None
         self._thread: threading.Thread | None = None
         self._abort = threading.Event()
         self._lock = threading.Lock()
@@ -80,6 +81,12 @@ class NamCaptureEngine:
         with self._lock:
             return self._output_path
 
+    @property
+    def pending_path(self) -> Path | None:
+        """Resolved output path once known, even before capture completes."""
+        with self._lock:
+            return self._pending_path
+
     def progress(self) -> float:
         with self._lock:
             return self._progress
@@ -93,6 +100,7 @@ class NamCaptureEngine:
             self._progress = 0.0
             self._error = None
             self._output_path = None
+            self._pending_path = None
             self._abort.clear()
 
         self._thread = threading.Thread(target=self._run, args=(name,), daemon=True, name="nam-capture")
@@ -131,6 +139,7 @@ class NamCaptureEngine:
             self._state = CaptureState.IDLE
             self._error = None
             self._output_path = None
+            self._pending_path = None
             self._progress = 0.0
 
     # ── internal ──────────────────────────────────────────────────────────────
@@ -173,6 +182,9 @@ class NamCaptureEngine:
             while out_wav.exists():
                 out_wav = self._output_dir / f"{safe}-{n}.wav"
                 n += 1
+
+            with self._lock:
+                self._pending_path = out_wav
 
             session = CaptureSession(samples, self._send_port, self._return_port)
             with self._lock:

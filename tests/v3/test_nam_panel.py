@@ -39,6 +39,14 @@ class _FakeEngine:
             else None
         )
 
+    @property
+    def pending_path(self) -> Path | None:
+        return (
+            Path("/home/pistomp/data/user-files/Audio Recordings/my-amp.wav")
+            if self._state == CaptureState.CAPTURING
+            else None
+        )
+
     def progress(self) -> float:
         return self._progress
 

@@ -296,7 +296,7 @@ class ReelWidget(Widget):
         self.refresh()
 
     def advance_rotation(self, dt: float) -> None:
-        if self._frozen:
+        if self._frozen or dt == 0.0:
             return
         p = self._progress
         left_r = max(int(self._MAX_R * (1.0 - p) + self._MIN_R * p), 1)
@@ -442,7 +442,7 @@ class LevelMeter(Widget):
 class StatusLed(Widget):
     """10×10 status indicator dot with phosphor-decay fade."""
 
-    _DECAY_RATE = 4.77   # e-folding rate → half-life ≈ 145ms
+    _DECAY_RATE = 4.77  # e-folding rate → half-life ≈ 145ms
     _REDRAW_THRESHOLD = 0.01
 
     def __init__(self, x: int, y: int, parent: Widget) -> None:
@@ -501,6 +501,7 @@ class NamCapturePanel(FullscreenPanel):
         self._last_blink: float = 0.0
         self._last_tick: float | None = None
         self._in_capture_view: bool = False
+        self._pending_path_shown: bool = False
         self._duration = wav_duration(reamp_wav)
         self._gain_val: float = -10.0
         self._vol_val: float = -10.0
@@ -748,6 +749,12 @@ class NamCapturePanel(FullscreenPanel):
             self._last_state = state
 
         if state == CaptureState.CAPTURING:
+            if not self._pending_path_shown:
+                pending = self._engine.pending_path
+                if pending is not None:
+                    self._update_cap_name_label(pending.name)
+                    self._pending_path_shown = True
+
             self._reel.advance_rotation(dt)
             self._reel.set_progress(self._engine.progress())
 
@@ -779,6 +786,7 @@ class NamCapturePanel(FullscreenPanel):
             return
         name = self._name_btn.text or "capture"
         self._update_cap_name_label(name)
+        self._pending_path_shown = False
         self._engine.start(name)
 
     def _on_abort(self) -> None:
