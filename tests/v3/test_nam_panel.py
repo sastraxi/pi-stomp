@@ -50,6 +50,10 @@ class _FakeEngine:
         self.stopped = True
         self._state = CaptureState.ABORTED
 
+    def reset(self) -> None:
+        if self._state in (CaptureState.DONE, CaptureState.FAILED, CaptureState.ABORTED):
+            self._state = CaptureState.IDLE
+
     def level_snapshot_db(self) -> tuple[float, float] | None:
         return None
 
@@ -120,12 +124,31 @@ class TestNamPanelLifecycle:
         panel._btn_start.action()
         assert "capture" in engine.started
 
-    def test_abort_button_stops_engine(self, v3_system):
+    def test_abort_button_requires_confirmation(self, v3_system):
         engine = _FakeEngine(CaptureState.CAPTURING)
         panel = _make_panel(engine)
-        panel.tick()  # triggers switch to capture view
+        panel.tick()
+        panel._btn_capture_right.action()  # "Abort" → enter confirmation mode
+        assert not engine.stopped
+        assert panel._confirming_abort
+
+    def test_abort_confirmed_stops_engine(self, v3_system):
+        engine = _FakeEngine(CaptureState.CAPTURING)
+        panel = _make_panel(engine)
+        panel.tick()
         panel._btn_capture_right.action()  # "Abort"
+        panel._btn_capture_right.action()  # "Confirm Abort"
         assert engine.stopped
+
+    def test_abort_cancel_restores_abort_button(self, v3_system):
+        engine = _FakeEngine(CaptureState.CAPTURING)
+        panel = _make_panel(engine)
+        panel.tick()
+        panel._btn_capture_right.action()  # "Abort" → confirmation mode
+        panel._btn_capture_close.action()  # "Cancel"
+        assert not engine.stopped
+        assert not panel._confirming_abort
+        assert panel._btn_capture_right.text == "Abort"
 
     def test_abort_noop_when_idle(self, v3_system):
         engine = _FakeEngine(CaptureState.IDLE)
@@ -139,13 +162,27 @@ class TestNamPanelLifecycle:
         panel._btn_setup_close.action()
         assert dismissed == [True]
 
-    def test_close_capture_calls_on_dismiss(self, v3_system):
+    def test_done_saved_button_calls_on_dismiss(self, v3_system):
         dismissed = []
         engine = _FakeEngine(CaptureState.DONE, progress=1.0)
         panel = _make_panel(engine, on_dismiss=lambda: dismissed.append(True))
-        panel.tick()  # triggers switch to capture view → DONE
-        panel._btn_capture_close.action()
+        panel.tick()
+        panel._btn_done.action()
         assert dismissed == [True]
+
+    def test_failed_back_returns_to_idle(self, v3_system):
+        engine = _FakeEngine(CaptureState.FAILED, progress=0.3)
+        panel = _make_panel(engine)
+        panel.tick()  # switch to capture view → FAILED
+        panel._btn_capture_close.action()  # "Back"
+        assert engine.state == CaptureState.IDLE
+
+    def test_aborted_back_returns_to_idle(self, v3_system):
+        engine = _FakeEngine(CaptureState.ABORTED, progress=0.6)
+        panel = _make_panel(engine)
+        panel.tick()  # switch to capture view → ABORTED
+        panel._btn_capture_close.action()  # "Back"
+        assert engine.state == CaptureState.IDLE
 
     def test_tick_updates_reel_progress(self, v3_system):
         engine = _FakeEngine(CaptureState.CAPTURING, progress=0.5)

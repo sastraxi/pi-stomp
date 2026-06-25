@@ -123,6 +123,16 @@ class NamCaptureEngine:
             self._thread.join(timeout=10.0)
             self._thread = None
 
+    def reset(self) -> None:
+        """Return to IDLE from any terminal state (DONE/FAILED/ABORTED)."""
+        with self._lock:
+            if self._state not in (CaptureState.DONE, CaptureState.FAILED, CaptureState.ABORTED):
+                return
+            self._state = CaptureState.IDLE
+            self._error = None
+            self._output_path = None
+            self._progress = 0.0
+
     # ── internal ──────────────────────────────────────────────────────────────
 
     def _run(self, name: str) -> None:
@@ -152,6 +162,9 @@ class NamCaptureEngine:
                 saved = None
                 self._set_state(CaptureState.ABORTED)
                 return
+
+            # Re-add monitoring after clear so the user can hear the amp during capture.
+            routing.connect_monitor()
 
             safe = (name.strip() or "capture").replace("/", "_").replace("\\", "_")
             self._output_dir.mkdir(parents=True, exist_ok=True)

@@ -26,9 +26,9 @@ Two distinct layouts:
   └───────────────────────────────────────────────┘
 
 Levels freeze on failure (FAILED/ABORTED) so the screen serves as a
-diagnostic snapshot. Encoders 2/3 control headphone vol / input gain
-in both views (the setup view shows knobs; the capture view adjusts
-silently).
+diagnostic snapshot. Enc 2 (tweak) controls input gain; enc 3 (vol)
+controls headphone volume — in both views (setup shows knobs; capture
+adjusts silently).
 """
 
 from __future__ import annotations
@@ -40,6 +40,7 @@ from typing import Callable
 
 from uilib.box import Box
 from uilib.config import Config
+from uilib.glyphs import ArcRingGlyph
 from uilib.label import Label
 from uilib.misc import TextHAlign, get_text_bbox, get_text_size
 from uilib.paint import PaintContext
@@ -49,6 +50,7 @@ from uilib.widget import Widget
 
 from pistomp.fullscreen_panel import FullscreenPanel
 from pistomp.input.event import ControllerEvent, EncoderEvent
+from pistomp.nam import routing
 from pistomp.nam.engine import CaptureState, NamCaptureEngine
 from pistomp.nam.wavio import wav_duration
 
@@ -64,7 +66,6 @@ _REAMP_WAV = Path(__file__).resolve().parents[2] / "setup" / "nam" / "T3K-sweep-
 _TITLE_H = 26
 _NAME_Y = 30
 _NAME_H = 28
-_HINT_Y = 66
 _KNOB_Y = 82
 _KNOB_H = 114
 _KNOB_W = 148
@@ -81,9 +82,9 @@ _BTN_X_ACTION = _BTN_GAP * 3 + _BTN_W * 2
 _CAP_HDR_H = 22
 _REEL_Y = _CAP_HDR_H
 _REEL_H = 110
-_ERR_Y = _REEL_Y + _REEL_H + 2       # 134 — feedback text above meters
+_ERR_Y = _REEL_Y + _REEL_H + 2  # 134 — feedback text above meters
 _METER_H = 22
-_METER_OUT_Y = _ERR_Y + _METER_H     # 156
+_METER_OUT_Y = _ERR_Y + _METER_H  # 156
 _METER_IN_Y = _METER_OUT_Y + _METER_H + 2  # 180
 
 # ── Colour palette ────────────────────────────────────────────────────────────
@@ -113,9 +114,9 @@ _METER_VALUE_FG = (155, 155, 165)
 _METER_CLIP_FG = (220, 60, 50)
 
 # Knobs
-_KNOB_BODY = (28, 28, 36)
-_KNOB_RIM = (75, 75, 90)
-_KNOB_INDICATOR = (255, 200, 55)
+_KNOB_ARC_FG = (195, 135, 40)  # amber — filled arc
+_KNOB_ARC_BG = (38, 30, 14)  # dim warm dark — empty arc track
+_KNOB_TIP = (255, 210, 80)  # bright amber — tip dot
 _KNOB_LABEL_FG = (115, 115, 125)
 _KNOB_VALUE_FG = (175, 175, 195)
 
@@ -143,7 +144,9 @@ def _centred_x(text: str, font, width: int) -> int:
 
 
 class KnobWidget(Widget):
-    """Skeuomorphic rotary knob for audio parameter display/control."""
+    """Arc-ring rotary display for audio parameter control."""
+
+    _VALUE_H = 20
 
     def __init__(
         self,
@@ -162,51 +165,65 @@ class KnobWidget(Widget):
         self._default_font = default_font
         self._caption_font = caption_font
         self._value = min_val
+        arc_area_h = box.height - self._VALUE_H
+        self._arc_r = min(box.width // 2 - 10, arc_area_h // 2 - 8)
+        self._arc_tip_r = 7.0
+        self._arc = ArcRingGlyph(self._arc_r, tip_radius=self._arc_tip_r)
 
     def set_value(self, value: float) -> None:
-        self._value = max(self._min_val, min(self._max_val, value))
-        self.refresh()
+        new_val = max(self._min_val, min(self._max_val, value))
+        if new_val == self._value:
+            return
+        old_t = self._t()
+        self._value = new_val
+        new_t = self._t()
+        self.refresh(self._dirty_rect(old_t, new_t))
+
+    def _t(self) -> float:
+        if self._max_val == self._min_val:
+            return 0.0
+        return max(0.0, min(1.0, (self._value - self._min_val) / (self._max_val - self._min_val)))
+
+    def _tip_rect_abs(self, t: float) -> Box:
+        """Absolute bounding box of the tip dot at value fraction t."""
+        cx = self.box.x0 + self.box.width // 2
+        cy = self.box.y0 + (self.box.height - self._VALUE_H) // 2
+        rad = math.radians(210.0 + t * 300.0)
+        tx = cx + self._arc_r * math.sin(rad)
+        ty = cy - self._arc_r * math.cos(rad)
+        pad = int(self._arc_tip_r) + 1
+        return Box.xywh(int(tx) - pad, int(ty) - pad, 2 * pad + 1, 2 * pad + 1)
+
+    def _dirty_rect(self, old_t: float, new_t: float) -> Box:
+        """Tight absolute dirty rect for a value change from old_t to new_t.
+
+        For typical encoder ticks (< 10 % range) only the two tip dot areas
+        and the value-text strip need repainting — a ~5× reduction in pixels
+        pushed over SPI vs the full widget, keeping the push inline at all
+        supported SPI speeds including 33 MHz.  Large jumps fall back to the
+        full widget so the changed arc segment is never left stale.
+        """
+        w, h = self.box.width, self.box.height
+        value_rect = Box.xywh(self.box.x0, self.box.y0 + h - self._VALUE_H, w, self._VALUE_H)
+        if abs(new_t - old_t) < 0.10:
+            return self._tip_rect_abs(old_t).union(self._tip_rect_abs(new_t)).union(value_rect)
+        return self.box
 
     def _draw(self, ctx: PaintContext) -> None:
         w, h = ctx.width, ctx.height
-        label_h = 16
-        value_h = 20
-        knob_area_h = h - label_h - value_h
-
-        knob_r = min(w // 2 - 6, knob_area_h // 2 - 4)
         cx = w // 2
-        cy = label_h + knob_area_h // 2
+        cy = (h - self._VALUE_H) // 2
 
-        # Category label
-        ctx.draw_text((cx, label_h // 2), self._label, fill=_KNOB_LABEL_FG, font=self._caption_font, anchor="mm")
+        surf = self._arc.render(self._t(), _KNOB_ARC_FG, _KNOB_ARC_BG, _KNOB_TIP)
+        hs = self._arc.half_size
+        ctx.paste(surf, (cx - hs, cy - hs))
 
-        # Knob body
-        body_box = Box.xywh(cx - knob_r, cy - knob_r, 2 * knob_r, 2 * knob_r)
-        ctx.draw_ellipse(body_box, fill=_KNOB_BODY, outline=_KNOB_RIM, width=2)
+        ctx.draw_text((cx, cy), self._label, fill=_KNOB_LABEL_FG, font=self._caption_font, anchor="mm")
 
-        # Range arc background (the swept area, very dim)
-        for angle_step in range(0, 301, 3):
-            a = math.radians(210.0 + angle_step)
-            rx = cx + int((knob_r - 4) * math.sin(a))
-            ry = cy - int((knob_r - 4) * math.cos(a))
-            dot_box = Box.xywh(rx - 1, ry - 1, 3, 3)
-            ctx.draw_ellipse(dot_box, fill=(45, 45, 55))
-
-        # Indicator line + tip dot
-        t = (self._value - self._min_val) / (self._max_val - self._min_val) if self._max_val != self._min_val else 0.0
-        t = max(0.0, min(1.0, t))
-        angle_deg = 210.0 + t * 300.0
-        angle_rad = math.radians(angle_deg)
-        r_inner = int(knob_r * 0.70)
-        end_x = cx + int(r_inner * math.sin(angle_rad))
-        end_y = cy - int(r_inner * math.cos(angle_rad))
-        ctx.draw_line([(cx, cy), (end_x, end_y)], fill=_KNOB_INDICATOR, width=3)
-        dot_r = 3
-        ctx.draw_ellipse(Box.xywh(end_x - dot_r, end_y - dot_r, dot_r * 2, dot_r * 2), fill=_KNOB_INDICATOR)
-
-        # Value text
         value_text = f"{self._value:.1f} dB"
-        ctx.draw_text((cx, h - value_h // 2), value_text, fill=_KNOB_VALUE_FG, font=self._default_font, anchor="mm")
+        ctx.draw_text(
+            (cx, h - self._VALUE_H // 2), value_text, fill=_KNOB_VALUE_FG, font=self._default_font, anchor="mm"
+        )
 
 
 class ReelWidget(Widget):
@@ -434,7 +451,10 @@ class NamCapturePanel(FullscreenPanel):
         self._last_blink: float = 0.0
         self._led_on: bool = True
         self._in_capture_view: bool = False
+        self._confirming_abort: bool = False
         self._duration = wav_duration(reamp_wav)
+        self._gain_val: float = -19.75  # tracked internally; avoids hardware-quantization stall
+        self._vol_val: float = -25.75
 
         font = Config().get_font("default")
         title_font = Config().get_font("default_title")
@@ -469,15 +489,9 @@ class NamCapturePanel(FullscreenPanel):
             parent=self,
         )
 
-        duration_text = f"~{_fmt_time(self._duration)}  ·  T3K-sweep-v3"
-        self._duration_hint = Label(0, _HINT_Y, self._caption_font, parent=self)
-        self._duration_hint.set_text(
-            duration_text, (78, 78, 86), x=_centred_x(duration_text, self._caption_font, _W)
-        )
-
         self._knob_gain = KnobWidget(
             box=Box.xywh(8, _KNOB_Y, _KNOB_W, _KNOB_H),
-            label="INPUT GAIN",
+            label="IN",
             min_val=-19.75,
             max_val=12.0,
             default_font=font,
@@ -486,7 +500,7 @@ class NamCapturePanel(FullscreenPanel):
         )
         self._knob_vol = KnobWidget(
             box=Box.xywh(_W - _KNOB_W - 8, _KNOB_Y, _KNOB_W, _KNOB_H),
-            label="HEADPH VOL",
+            label="OUT",
             min_val=-25.75,
             max_val=6.0,
             default_font=font,
@@ -504,7 +518,7 @@ class NamCapturePanel(FullscreenPanel):
         )
         self._btn_start = Button(
             box=Box.xywh(_BTN_X_ACTION, _BTN_Y, _BTN_W, _BTN_H),
-            text="Start",
+            text=f"Start ({_fmt_time(self._duration)})",
             font=font,
             outline_radius=4,
             parent=self,
@@ -515,7 +529,6 @@ class NamCapturePanel(FullscreenPanel):
             self._title_bar,
             self._setup_name_label,
             self._name_btn,
-            self._duration_hint,
             self._knob_gain,
             self._knob_vol,
             self._btn_setup_close,
@@ -607,8 +620,11 @@ class NamCapturePanel(FullscreenPanel):
         for w in self._capture_group:
             w.hide(refresh=False)
 
-        # Read initial knob values from hardware
-        self._refresh_knob_values()
+        # Read initial values from hardware to seed the internal trackers
+        self._init_knob_values()
+
+        # Connect In2 → Out1 so the user can hear the amp while the panel is open.
+        routing.connect_monitor()
 
     # ── Engine factory (overridden in tests) ──────────────────────────────────
 
@@ -619,6 +635,7 @@ class NamCapturePanel(FullscreenPanel):
 
     def destroy(self) -> None:
         self._engine.stop()
+        routing.disconnect_monitor()
         super().destroy()
 
     # ── Input handling ────────────────────────────────────────────────────────
@@ -645,11 +662,7 @@ class NamCapturePanel(FullscreenPanel):
         # DONE/ABORTED: swallow — the setup view knobs aren't visible.
         if state == CaptureState.IDLE and self._handler is not None:
             steps = int(round(event.rotations * event.multiplier))
-            if cid == 3:
-                self._handler.system_menu_input_gain(steps)
-            else:
-                self._handler.system_menu_headphone_volume(steps)
-            self._refresh_knob_values()
+            self._nudge_audio(cid == 2, steps)
         return True
 
     # ── Polling ───────────────────────────────────────────────────────────────
@@ -696,8 +709,37 @@ class NamCapturePanel(FullscreenPanel):
         self._engine.start(name)
 
     def _on_abort(self) -> None:
-        if self._engine.state == CaptureState.CAPTURING:
-            self._engine.stop()
+        """First Abort press — enter confirmation mode."""
+        if self._engine.state != CaptureState.CAPTURING:
+            return
+        self._confirming_abort = True
+        self._btn_capture_close.set_text("Cancel")
+        self._btn_capture_close.set_action(lambda *_: self._on_cancel_abort())
+        self._btn_capture_close.show(refresh=False)
+        self.add_sel_widget(self._btn_capture_close)
+        self._btn_capture_right.set_text("Confirm Abort")
+        self._btn_capture_right.set_action(lambda *_: self._on_confirmed_abort())
+        self.refresh()
+
+    def _on_cancel_abort(self) -> None:
+        """Cancel the abort confirmation — restore normal capture buttons."""
+        self._confirming_abort = False
+        if self._btn_capture_close in self.sel_list:
+            self.del_sel_widget(self._btn_capture_close)
+        self._btn_capture_close.hide(refresh=False)
+        self._btn_capture_right.set_text("Abort")
+        self._btn_capture_right.set_action(lambda *_: self._on_abort())
+        self.refresh()
+
+    def _on_confirmed_abort(self) -> None:
+        """Confirmed abort — stop capture then return to IDLE setup view."""
+        self._confirming_abort = False
+        self._engine.stop()
+        self._engine.reset()
+
+    def _on_reset(self) -> None:
+        """Return to IDLE (setup view) from FAILED or ABORTED."""
+        self._engine.reset()
 
     def _apply_state(self, state: CaptureState) -> None:
         if state == CaptureState.IDLE:
@@ -755,6 +797,7 @@ class NamCapturePanel(FullscreenPanel):
             w.hide(refresh=False)
 
         if state == CaptureState.CAPTURING:
+            self._confirming_abort = False
             self._btn_capture_right.set_text("Abort")
             self._btn_capture_right.set_action(lambda *_: self._on_abort())
             self._btn_capture_right.show(refresh=False)
@@ -768,6 +811,8 @@ class NamCapturePanel(FullscreenPanel):
             self.add_sel_widget(self._btn_done)
 
         elif state == CaptureState.ABORTED:
+            self._btn_capture_close.set_text("Back")
+            self._btn_capture_close.set_action(lambda *_: self._on_reset())
             self._btn_capture_right.set_text("Restart")
             self._btn_capture_right.set_action(lambda *_: self._on_start())
             self._btn_capture_close.show(refresh=False)
@@ -776,6 +821,8 @@ class NamCapturePanel(FullscreenPanel):
             self.add_sel_widget(self._btn_capture_right)
 
         elif state == CaptureState.FAILED:
+            self._btn_capture_close.set_text("Back")
+            self._btn_capture_close.set_action(lambda *_: self._on_reset())
             self._btn_capture_right.set_text("Retry")
             self._btn_capture_right.set_action(lambda *_: self._on_start())
             self._btn_capture_close.show(refresh=False)
@@ -803,7 +850,7 @@ class NamCapturePanel(FullscreenPanel):
                 self.del_sel_widget(w)
         for w in self._capture_group:
             w.hide(refresh=False)
-        self._refresh_knob_values()
+        self._init_knob_values()
         for w in self._setup_group:
             w.show(refresh=False)
         self.add_sel_widget(self._name_btn)
@@ -816,12 +863,44 @@ class NamCapturePanel(FullscreenPanel):
         rx = _W - 4 - tw
         self._cap_name_lbl.set_text(name, _HEADER_NAME_FG, x=rx)
 
-    def _refresh_knob_values(self) -> None:
+    def _nudge_audio(self, is_gain: bool, steps: int) -> None:
+        """Adjust input gain or output volume by steps encoder detents.
+
+        Tracks the desired value internally so hardware quantization can't
+        stall incremental movement — the same approach the normal encoder uses
+        via its step_values array.  Step size matches the normal encoder's
+        256-step float resolution (~0.124 dB/step over a 31.75 dB range).
+        """
+        if self._handler is None:
+            return
+        step_size = 31.75 / 256.0
+        if is_gain:
+            self._gain_val = max(-19.75, min(12.0, self._gain_val + steps * step_size))
+            self._handler.audio_parameter_commit(self._handler.audiocard.CAPTURE_VOLUME, self._gain_val)
+            self._knob_gain.set_value(self._gain_val)
+        else:
+            self._vol_val = max(-25.75, min(6.0, self._vol_val + steps * step_size))
+            self._handler.audio_parameter_commit(self._handler.audiocard.MASTER, self._vol_val)
+            self._knob_vol.set_value(self._vol_val)
+
+    def _init_knob_values(self) -> None:
+        """Read current hardware values once to seed _gain_val/_vol_val."""
         if self._handler is None or not hasattr(self._handler, "audiocard"):
+            self._refresh_knob_values()
             return
         try:
             ac = self._handler.audiocard
-            self._knob_gain.set_value(ac.get_volume_parameter(ac.CAPTURE_VOLUME))
-            self._knob_vol.set_value(ac.get_volume_parameter(ac.MASTER))
+            gain = ac.get_volume_parameter(ac.CAPTURE_VOLUME)
+            vol = ac.get_volume_parameter(ac.MASTER)
+            if gain != 0.0:
+                self._gain_val = gain
+            if vol != 0.0:
+                self._vol_val = vol
         except Exception:
             pass
+        self._refresh_knob_values()
+
+    def _refresh_knob_values(self) -> None:
+        """Update knob display from tracked values (no hardware read)."""
+        self._knob_gain.set_value(self._gain_val)
+        self._knob_vol.set_value(self._vol_val)

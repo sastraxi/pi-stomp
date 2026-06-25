@@ -18,6 +18,9 @@ import logging
 FX_SEND_PORT = "system:playback_2"  # JACK input: we drive audio into the pedal
 FX_RETURN_PORT = "system:capture_2"  # JACK output: pedal's output comes back here
 
+# Monitoring: FX return → main output so the user can hear the amp while capturing.
+MONITOR_OUT_PORT = "system:playback_1"
+
 # Saved connections: list of (src_port, dst_port) pairs for jack_connect
 Saved = list[tuple[str, str]]
 
@@ -60,6 +63,22 @@ def _lsp_connections(port: str) -> list[str]:
         return []
     # Output format: port name on its own line, connections indented below it.
     return [line.strip() for line in out.splitlines() if line.startswith((" ", "\t"))]
+
+
+def connect_monitor(
+    return_port: str = FX_RETURN_PORT,
+    monitor_out: str = MONITOR_OUT_PORT,
+) -> None:
+    """Connect the FX return to the main output so the user can hear the amp."""
+    _run("jack_connect", return_port, monitor_out)
+
+
+def disconnect_monitor(
+    return_port: str = FX_RETURN_PORT,
+    monitor_out: str = MONITOR_OUT_PORT,
+) -> None:
+    """Remove the FX return → main output monitoring connection."""
+    _run("jack_disconnect", return_port, monitor_out)
 
 
 def _run(tool: str, src: str, dst: str) -> None:
