@@ -48,8 +48,10 @@ from uilib.pygame_init import font as _make_font
 from uilib.text import Button, TextWidget
 from uilib.widget import Widget
 
+import pistomp.switchstate as switchstate
+
 from pistomp.fullscreen_panel import FullscreenPanel
-from pistomp.input.event import ControllerEvent, EncoderEvent
+from pistomp.input.event import ControllerEvent, EncoderEvent, SwitchEvent, SwitchEventKind
 from pistomp.nam import routing
 from pistomp.nam.engine import CaptureState, NamCaptureEngine
 from pistomp.nam.wavio import wav_duration
@@ -451,7 +453,6 @@ class NamCapturePanel(FullscreenPanel):
         self._last_blink: float = 0.0
         self._led_on: bool = True
         self._in_capture_view: bool = False
-        self._confirming_abort: bool = False
         self._duration = wav_duration(reamp_wav)
         self._gain_val: float = -19.75  # tracked internally; avoids hardware-quantization stall
         self._vol_val: float = -25.75
@@ -641,9 +642,21 @@ class NamCapturePanel(FullscreenPanel):
     # ── Input handling ────────────────────────────────────────────────────────
 
     def handle(self, event: ControllerEvent) -> bool:
+        cid = getattr(event.controller, "id", None)
+
+        # Tweak1 (cid=1) mirrors the NAV encoder for the whole panel.
+        if cid == 1 and self._handler is not None:
+            if isinstance(event, EncoderEvent):
+                self._handler.universal_encoder_select(event.rotations)
+                return True
+            if isinstance(event, SwitchEvent) and event.kind == SwitchEventKind.LONGPRESS:
+                self._handler.universal_encoder_sw(switchstate.Value.LONGPRESSED)
+                return True
+            # PRESS falls through — modhandler already calls universal_encoder_sw(RELEASED).
+            return False
+
         if not isinstance(event, EncoderEvent):
             return False
-        cid = getattr(event.controller, "id", None)
         if cid not in (2, 3):
             return False
 
@@ -709,31 +722,27 @@ class NamCapturePanel(FullscreenPanel):
         self._engine.start(name)
 
     def _on_abort(self) -> None:
-        """First Abort press — enter confirmation mode."""
+        """Show a confirmation dialog before aborting."""
         if self._engine.state != CaptureState.CAPTURING:
             return
-        self._confirming_abort = True
-        self._btn_capture_close.set_text("Cancel")
-        self._btn_capture_close.set_action(lambda *_: self._on_cancel_abort())
-        self._btn_capture_close.show(refresh=False)
-        self.add_sel_widget(self._btn_capture_close)
-        self._btn_capture_right.set_text("Confirm Abort")
-        self._btn_capture_right.set_action(lambda *_: self._on_confirmed_abort())
-        self.refresh()
+        if self.parent is None:
+            # No display (e.g. unit tests) — abort immediately.
+            self._on_confirmed_abort()
+            return
+        from uilib.dialog import ConfirmDialog
 
-    def _on_cancel_abort(self) -> None:
-        """Cancel the abort confirmation — restore normal capture buttons."""
-        self._confirming_abort = False
-        if self._btn_capture_close in self.sel_list:
-            self.del_sel_widget(self._btn_capture_close)
-        self._btn_capture_close.hide(refresh=False)
-        self._btn_capture_right.set_text("Abort")
-        self._btn_capture_right.set_action(lambda *_: self._on_abort())
-        self.refresh()
+        d = ConfirmDialog(
+            self.parent,
+            message="Discard this recording?",
+            title="Abort Capture",
+            on_confirm=self._on_confirmed_abort,
+            confirm_text="Abort",
+            cancel_text="Cancel",
+        )
+        self.parent.push_panel(d)
 
     def _on_confirmed_abort(self) -> None:
-        """Confirmed abort — stop capture then return to IDLE setup view."""
-        self._confirming_abort = False
+        """Abort the running capture and return to IDLE setup view."""
         self._engine.stop()
         self._engine.reset()
 
@@ -797,7 +806,6 @@ class NamCapturePanel(FullscreenPanel):
             w.hide(refresh=False)
 
         if state == CaptureState.CAPTURING:
-            self._confirming_abort = False
             self._btn_capture_right.set_text("Abort")
             self._btn_capture_right.set_action(lambda *_: self._on_abort())
             self._btn_capture_right.show(refresh=False)
@@ -857,6 +865,7 @@ class NamCapturePanel(FullscreenPanel):
         self.add_sel_widget(self._btn_setup_close)
         self.add_sel_widget(self._btn_start)
         self._in_capture_view = False
+        self.refresh()
 
     def _update_cap_name_label(self, name: str) -> None:
         tw, _ = get_text_size(name, self._caption_font)
