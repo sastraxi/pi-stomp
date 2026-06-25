@@ -10,10 +10,9 @@ import numpy as np
 import numpy.typing as npt
 
 _SAMPLE_RATE = 48000
-_SILENCE_SETTLE_FRAMES = _SAMPLE_RATE * 2  # 2 s before detection kicks in
-_SILENCE_ABORT_FRAMES = _SAMPLE_RATE * 2  # 2 s of loud-in / quiet-out → abort
-_SILENCE_INPUT_THRESHOLD = 1e-2  # ≈ −40 dBFS — capture must exceed this
-_SILENCE_PLAY_THRESHOLD = 0.1  # ≈ −20 dBFS — reamp must be this loud to gate
+_SILENCE_PLAY_THRESHOLD = 0.1  # ≈ −20 dBFS — output must exceed this to count toward detection
+_NOISE_FLOOR_THRESHOLD = 10 ** (-50 / 20)  # ≈ −50 dBFS — input high-water mark must exceed this
+_NOISE_FLOOR_SETTLE_FRAMES = _SAMPLE_RATE * 4  # 4 s of loud output before we decide
 _CLIP_THRESHOLD = 0.99  # float32 full-scale; any peak above → abort
 
 
@@ -37,8 +36,8 @@ class CaptureSession:
         self._latency: int = 0  # frames; set in start() after JACK query
         self._total: int = 0  # n + latency; set in start()
         self._pos = 0
-        self._frames_elapsed = 0
-        self._silence_run = 0
+        self._loud_out_frames: int = 0
+        self._in_peak_max_during_loud: float = 0.0
 
         self._client = None
         self._done = threading.Event()
@@ -108,7 +107,6 @@ class CaptureSession:
             # ── advance position ──────────────────────────────────────────────
             new_pos = pos + frames
             self._pos = new_pos
-            self._frames_elapsed += frames
 
             # ── level checks (peak without allocating a temp array) ───────────
             out_peak = max(float(np.max(out_buf)), float(-np.min(out_buf)))
@@ -120,13 +118,15 @@ class CaptureSession:
             self._acc_count += 1
             if in_peak >= _CLIP_THRESHOLD and not self._clip_abort.is_set():
                 self._clip_abort.set()
-            if self._frames_elapsed > _SILENCE_SETTLE_FRAMES and not self._silence_abort.is_set():
-                if out_peak >= _SILENCE_PLAY_THRESHOLD and in_peak < _SILENCE_INPUT_THRESHOLD:
-                    self._silence_run += frames
-                    if self._silence_run >= _SILENCE_ABORT_FRAMES:
-                        self._silence_abort.set()
-                else:
-                    self._silence_run = 0
+            if out_peak >= _SILENCE_PLAY_THRESHOLD and not self._silence_abort.is_set():
+                self._loud_out_frames += frames
+                if in_peak > self._in_peak_max_during_loud:
+                    self._in_peak_max_during_loud = in_peak
+                if (
+                    self._loud_out_frames >= _NOISE_FLOOR_SETTLE_FRAMES
+                    and self._in_peak_max_during_loud < _NOISE_FLOOR_THRESHOLD
+                ):
+                    self._silence_abort.set()
 
             # ── EOF ───────────────────────────────────────────────────────────
             if new_pos >= total and not self._done.is_set():
