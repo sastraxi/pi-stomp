@@ -10,10 +10,11 @@ buffer is extended by L extra frames so the reamp signal plays to completion;
 write_wav() trims the first L frames so the output WAV is sample-aligned with
 the reamp signal.
 
-Silence detection: after a 2-second settling window, 2 consecutive seconds of
-near-silence on the input *while the reamp output is loud* triggers an abort.
-Gating on playback level prevents false triggers during intentionally quiet
-sections of the reamp WAV.
+Silence detection: after a 2-second settling window two paths can abort.
+The gated path requires 2 s of near-silence while the reamp output is loud
+(≥ −20 dBFS), preventing false triggers during intentionally quiet sweep
+sections.  The ungated path aborts after 2 s of total silence regardless of
+playback level, catching a disconnected FX loop before the sweep has ramped up.
 
 write_wav() is called after the client stops (outside the RT callback) and
 serialises the captured float32 buffer to a 24-bit / 48 kHz / mono WAV.
@@ -31,6 +32,9 @@ import numpy.typing as npt
 _SAMPLE_RATE = 48000
 _SILENCE_SETTLE_FRAMES = _SAMPLE_RATE * 2  # 2 s before detection kicks in
 _SILENCE_ABORT_FRAMES = _SAMPLE_RATE * 2  # 2 s of gated silence → abort
+_SILENCE_UNGATED_ABORT_FRAMES = (
+    _SAMPLE_RATE * 2
+)  # 2 s of total silence → abort (catches disconnected FX loop before sweep gets loud)
 _SILENCE_INPUT_THRESHOLD = 1e-2  # ≈ −40 dBFS — capture must exceed this
 _SILENCE_PLAY_THRESHOLD = 0.1  # ≈ −20 dBFS — reamp must be this loud to gate
 _CLIP_THRESHOLD = 0.99  # float32 full-scale; any peak above → abort
@@ -58,6 +62,7 @@ class CaptureSession:
         self._pos = 0
         self._frames_elapsed = 0
         self._silence_run = 0
+        self._silence_ungated_run = 0
 
         self._client = None
         self._done = threading.Event()
@@ -140,14 +145,17 @@ class CaptureSession:
             if in_peak >= _CLIP_THRESHOLD and not self._clip_abort.is_set():
                 self._clip_abort.set()
             if self._frames_elapsed > _SILENCE_SETTLE_FRAMES and not self._silence_abort.is_set():
-                if out_peak >= _SILENCE_PLAY_THRESHOLD:
-                    if in_peak < _SILENCE_INPUT_THRESHOLD:
+                if in_peak < _SILENCE_INPUT_THRESHOLD:
+                    self._silence_ungated_run += frames
+                    if self._silence_ungated_run >= _SILENCE_UNGATED_ABORT_FRAMES:
+                        self._silence_abort.set()
+                    if out_peak >= _SILENCE_PLAY_THRESHOLD:
                         self._silence_run += frames
                         if self._silence_run >= _SILENCE_ABORT_FRAMES:
                             self._silence_abort.set()
-                    else:
-                        self._silence_run = 0
-                # else: reamp is quiet — freeze counter, neither accumulate nor reset.
+                else:
+                    self._silence_run = 0
+                    self._silence_ungated_run = 0
 
             # ── EOF ───────────────────────────────────────────────────────────
             if new_pos >= total and not self._done.is_set():
