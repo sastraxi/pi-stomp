@@ -337,15 +337,15 @@ class ReelWidget(Widget):
 class LevelMeter(Widget):
     """Segmented horizontal VU meter with dB readout and clip indicator."""
 
-    _SEG_COUNT = 20
+    _SEG_COUNT = 19
     _SEG_GREEN_MAX = 10
-    _SEG_YELLOW_MAX = 16
-    _LABEL_W = 28
-    _BAR_X = 30
+    _SEG_YELLOW_MAX = 15
+    _LABEL_W = 36
+    _BAR_X = 42
     _SEG_W = 10
     _SEG_GAP = 1
-    # Total bar width: 20*10 + 19*1 = 219px → x=30 to x=249
-    _VALUE_CX = 284  # center of value region x=252..316
+    # Total bar width: 19*10 + 18*1 = 208px → x=42 to x=249
+    _VALUE_CX = 288  # center of value region x=252..320
 
     def __init__(self, box: Box, label: str, default_font, caption_font, parent: Widget) -> None:
         super().__init__(box=box, bkgnd_color=(0, 0, 0), parent=parent)
@@ -372,8 +372,13 @@ class LevelMeter(Widget):
         bar_y = (h - 10) // 2
         bar_h = 10
 
+        tw, _ = get_text_size(self._label, self._caption_font)
         ctx.draw_text(
-            (self._LABEL_W // 2, h // 2), self._label, fill=_METER_LABEL_FG, font=self._caption_font, anchor="mm"
+            (self._LABEL_W - 2 - tw // 2, h // 2),
+            self._label,
+            fill=_METER_LABEL_FG,
+            font=self._caption_font,
+            anchor="mm",
         )
 
         if self._clipping:
