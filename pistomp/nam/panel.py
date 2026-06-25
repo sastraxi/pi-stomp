@@ -48,6 +48,7 @@ from uilib.pygame_init import font as _make_font
 from uilib.text import Button, TextWidget
 from uilib.widget import Widget
 
+import common.token as Token
 import pistomp.switchstate as switchstate
 
 from pistomp.fullscreen_panel import FullscreenPanel
@@ -200,7 +201,7 @@ class KnobWidget(Widget):
         """Tight absolute dirty rect for a value change from old_t to new_t.
 
         For typical encoder ticks (< 10 % range) only the two tip dot areas
-        and the value-text strip need repainting — a ~5× reduction in pixels
+        and the value-text strip need repainting — a ~5x reduction in pixels
         pushed over SPI vs the full widget, keeping the push inline at all
         supported SPI speeds including 33 MHz.  Large jumps fall back to the
         full widget so the changed arc segment is never left stale.
@@ -454,8 +455,10 @@ class NamCapturePanel(FullscreenPanel):
         self._led_on: bool = True
         self._in_capture_view: bool = False
         self._duration = wav_duration(reamp_wav)
-        self._gain_val: float = -19.75  # tracked internally; avoids hardware-quantization stall
-        self._vol_val: float = -25.75
+        self._gain_val: float = -10.0
+        self._vol_val: float = -10.0
+        self._saved_gain: float | None = None
+        self._saved_vol: float | None = None
 
         font = Config().get_font("default")
         title_font = Config().get_font("default_title")
@@ -635,6 +638,13 @@ class NamCapturePanel(FullscreenPanel):
     # ── Panel lifecycle ───────────────────────────────────────────────────────
 
     def destroy(self) -> None:
+        if self._handler is not None:
+            self._handler.settings.set_setting(Token.NAM_CAPTURE_GAIN, self._gain_val)
+            self._handler.settings.set_setting(Token.NAM_OUTPUT_VOL, self._vol_val)
+            if self._saved_gain is not None:
+                self._handler.audio_parameter_commit(self._handler.audiocard.CAPTURE_VOLUME, self._saved_gain)
+            if self._saved_vol is not None:
+                self._handler.audio_parameter_commit(self._handler.audiocard.MASTER, self._saved_vol)
         self._engine.stop()
         routing.disconnect_monitor()
         super().destroy()
@@ -858,7 +868,7 @@ class NamCapturePanel(FullscreenPanel):
                 self.del_sel_widget(w)
         for w in self._capture_group:
             w.hide(refresh=False)
-        self._init_knob_values()
+        self._refresh_knob_values()
         for w in self._setup_group:
             w.show(refresh=False)
         self.add_sel_widget(self._name_btn)
@@ -893,20 +903,17 @@ class NamCapturePanel(FullscreenPanel):
             self._knob_vol.set_value(self._vol_val)
 
     def _init_knob_values(self) -> None:
-        """Read current hardware values once to seed _gain_val/_vol_val."""
-        if self._handler is None or not hasattr(self._handler, "audiocard"):
-            self._refresh_knob_values()
-            return
-        try:
+        """Snapshot HW levels, then apply persisted NAM levels (defaults -10 dB)."""
+        if self._handler is not None:
             ac = self._handler.audiocard
-            gain = ac.get_volume_parameter(ac.CAPTURE_VOLUME)
-            vol = ac.get_volume_parameter(ac.MASTER)
-            if gain != 0.0:
-                self._gain_val = gain
-            if vol != 0.0:
-                self._vol_val = vol
-        except Exception:
-            pass
+            hw_gain = ac.get_volume_parameter(ac.CAPTURE_VOLUME)
+            hw_vol = ac.get_volume_parameter(ac.MASTER)
+            self._saved_gain = hw_gain if hw_gain != 0.0 else -10.0
+            self._saved_vol = hw_vol if hw_vol != 0.0 else -10.0
+            self._gain_val = self._handler.settings.get_setting(Token.NAM_CAPTURE_GAIN) or -10.0
+            self._vol_val = self._handler.settings.get_setting(Token.NAM_OUTPUT_VOL) or -10.0
+            self._handler.audio_parameter_commit(ac.CAPTURE_VOLUME, self._gain_val)
+            self._handler.audio_parameter_commit(ac.MASTER, self._vol_val)
         self._refresh_knob_values()
 
     def _refresh_knob_values(self) -> None:
