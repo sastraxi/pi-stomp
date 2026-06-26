@@ -74,7 +74,10 @@ def _make_panel(engine: _FakeEngine, on_dismiss=None) -> NamCapturePanel:
     """Build a NamCapturePanel backed by *engine* without touching the filesystem."""
     if on_dismiss is None:
         on_dismiss = lambda: None
-    with patch.object(NamCapturePanel, "_create_engine", return_value=engine):
+    with (
+        patch.object(NamCapturePanel, "_create_engine", return_value=engine),
+        patch("pistomp.nam.panel.wav_duration", return_value=190.0),
+    ):
         return NamCapturePanel(output_dir="/tmp", on_dismiss=on_dismiss)
 
 
