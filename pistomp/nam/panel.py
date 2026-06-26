@@ -17,9 +17,9 @@ Two distinct layouts:
 
   CAPTURE VIEW (CAPTURING / DONE / FAILED / ABORTED)
   ┌─ ● NAM Capture              my-fender-clean ──┐
-  │    ╭────╮  ▓▓▓▓▓▓▓░░░░░░░░░░  ╭──────╮      │
-  │    │ ◎  │▓▓▓▓▓▓▓▓▓░░░░░░░░░░│  ◎    │      │
-  │    ╰────╯   0:52 elapsed  1:18 remaining      │
+  │  ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░░░░░░░░░░░░░░░░░░░░░░░░░░  │
+  │  0:52                                  −1:18  │
+  │                                               │
   │ OUT ████████████░░░░░░  -9.1dB                │
   │  IN ████████████████░░  -3.1dB                │
   │                              [ Abort ]        │
@@ -35,13 +35,12 @@ from __future__ import annotations
 
 import math
 import time
-from functools import lru_cache
 from pathlib import Path
 from typing import Callable
 
 from uilib.box import Box
 from uilib.config import Config
-from uilib.glyphs import ArcRingGlyph, SpinnerGlyph
+from uilib.glyphs import ArcRingGlyph
 from uilib.label import Label
 from uilib.misc import TextHAlign, get_text_bbox, get_text_size
 from uilib.paint import PaintContext
@@ -51,6 +50,8 @@ from uilib.widget import Widget
 
 import common.token as Token
 import pistomp.switchstate as switchstate
+
+from uilib import profiling
 
 from pistomp.fullscreen_panel import FullscreenPanel
 from pistomp.input.event import ControllerEvent, EncoderEvent, SwitchEvent, SwitchEventKind
@@ -93,13 +94,14 @@ _METER_IN_Y = _METER_OUT_Y + _METER_H + 2  # 180
 
 # ── Colour palette ────────────────────────────────────────────────────────────
 
-# Reel / tape
-_REEL_BODY = (30, 25, 15)
-_REEL_RIM = (100, 80, 40)
-_REEL_HUB = (60, 50, 30)
-_REEL_SPOKE = (80, 65, 32)
-_TAPE_FILLED = (148, 92, 22)
-_TAPE_EMPTY = (22, 17, 8)
+# Progress bar colour stops (position 0.0–1.0 along bar width)
+_BAR_STOPS: list[tuple[float, tuple[int, int, int]]] = [
+    (0.00, (0, 200, 75)),
+    (0.35, (120, 215, 0)),
+    (0.65, (230, 148, 0)),
+    (1.00, (215, 55, 10)),
+]
+_BAR_DIM = 0.13  # brightness of unfilled segments
 
 # Status LED
 _LED_IDLE = (70, 70, 78)
@@ -133,11 +135,6 @@ _HEADER_NAME_FG = (100, 100, 110)
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
-
-
-@lru_cache(maxsize=64)
-def _get_cached_spinner(outer_r: int, hub_r: int) -> SpinnerGlyph:
-    return SpinnerGlyph(outer_r, hub_r)
 
 
 def _fmt_time(seconds: float) -> str:
@@ -236,40 +233,38 @@ class KnobWidget(Widget):
         )
 
 
-class ReelWidget(Widget):
-    """Tape-reel progress display with elapsed/remaining time labels."""
+class ProgressBarWidget(Widget):
+    """Segmented colour-gradient progress bar with elapsed/remaining time labels."""
 
-    _LEFT_CX = 55
-    _RIGHT_CX = 265
-    _REEL_CY = 50
-    _MAX_R = 36
-    _MIN_R = 10
-    _HUB_R = 5
-    _TAPE_Y = 46
-    _TAPE_H = 9
-    # At MIN_R radius, 3 rev/s; larger reels spin slower proportionally
-    _TAPE_OMEGA: float = 3.0 * 360.0 * _MIN_R
+    _MARGIN = 12        # left/right inset
+    _BAR_Y = 30         # top of bar within widget
+    _BAR_H = 30         # bar height
+    _LABEL_GAP = 10     # gap between bar bottom and label top
+    _N_SEGS = 40        # number of colour segments
+    _SEG_GAP = 2        # gap between segments in pixels
 
-    def __init__(self, box: Box, total_seconds: float, reel_font, caption_font, parent: Widget) -> None:
+    def __init__(self, box: Box, total_seconds: float, font, caption_font, parent: Widget) -> None:
         super().__init__(box=box, bkgnd_color=(0, 0, 0), parent=parent)
         self._total = total_seconds
         self._progress = 0.0
         self._frozen = False
         self._elapsed = 0.0
         self._remaining = total_seconds
-        self._reel_font = reel_font
+        self._font = font
         self._caption_font = caption_font
-        self._left_rot: float = 0.0
-        self._right_rot: float = 0.0
+        inner_w = box.width - 2 * self._MARGIN
+        self._seg_w = max(1, (inner_w - (self._N_SEGS - 1) * self._SEG_GAP) // self._N_SEGS)
 
     def set_progress(self, progress: float) -> None:
         if self._frozen:
             return
         p = max(0.0, min(1.0, progress))
-        elapsed = p * self._total
+        old_filled = int(self._progress * self._N_SEGS)
         self._progress = p
-        self._elapsed = elapsed
-        self._remaining = self._total - elapsed
+        self._elapsed = p * self._total
+        self._remaining = self._total - self._elapsed
+        if int(p * self._N_SEGS) != old_filled:
+            self.refresh()
 
     def freeze(self) -> None:
         self._frozen = True
@@ -287,66 +282,54 @@ class ReelWidget(Widget):
         self._frozen = False
 
     def advance_rotation(self, dt: float) -> None:
-        if self._frozen or dt == 0.0:
-            return
-        p = self._progress
-        left_r = max(int(self._MAX_R * (1.0 - p) + self._MIN_R * p), 1)
-        right_r = max(int(self._MIN_R * (1.0 - p) + self._MAX_R * p), 1)
-        self._left_rot = (self._left_rot + self._TAPE_OMEGA / left_r * dt) % 360.0
-        self._right_rot = (self._right_rot + self._TAPE_OMEGA / right_r * dt) % 360.0
+        pass
 
-    def _refresh_circles(self) -> None:
-        pad = self._MAX_R + 4
-        wx, wy = self.box.x0, self.box.y0
-        for cx in (self._LEFT_CX, self._RIGHT_CX):
-            self.refresh(Box.xywh(wx + cx - pad, wy + self._REEL_CY - pad, 2 * pad + 1, 2 * pad + 1))
+    @staticmethod
+    def _color_at(t: float) -> tuple[int, int, int]:
+        stops = _BAR_STOPS
+        if t <= stops[0][0]:
+            return stops[0][1]
+        if t >= stops[-1][0]:
+            return stops[-1][1]
+        for i in range(len(stops) - 1):
+            t0, c0 = stops[i]
+            t1, c1 = stops[i + 1]
+            if t0 <= t <= t1:
+                f = (t - t0) / (t1 - t0)
+                return (
+                    int(c0[0] + f * (c1[0] - c0[0])),
+                    int(c0[1] + f * (c1[1] - c0[1])),
+                    int(c0[2] + f * (c1[2] - c0[2])),
+                )
+        return stops[-1][1]
 
     def _draw(self, ctx: PaintContext) -> None:
-        p = self._progress
-        lc = self._LEFT_CX
-        rc = self._RIGHT_CX
-        cy = self._REEL_CY
-        max_r, min_r, hub_r = self._MAX_R, self._MIN_R, self._HUB_R
+        with profiling.measure("nam.bar._draw"):
+            n = self._N_SEGS
+            filled = int(self._progress * n)
+            sw = self._seg_w
+            bx = self._MARGIN
+            by = self._BAR_Y
+            ctx.fill((0, 0, 0))
 
-        left_r = int(max_r * (1.0 - p) + min_r * p)
-        right_r = int(min_r * (1.0 - p) + max_r * p)
+            for i in range(n):
+                t = i / (n - 1) if n > 1 else 0.0
+                r, g, b = self._color_at(t)
+                if i < filled:
+                    color: tuple[int, int, int] = (r, g, b)
+                else:
+                    color = (int(r * _BAR_DIM), int(g * _BAR_DIM), int(b * _BAR_DIM))
+                ctx.draw_rectangle(Box.xywh(bx + i * (sw + self._SEG_GAP), by, sw, self._BAR_H), fill=color)
 
-        tape_left = lc + left_r + 3
-        tape_right = rc - right_r - 3
+            label_y = by + self._BAR_H + self._LABEL_GAP
+            right_x = ctx.width - self._MARGIN
 
-        ctx.fill((0, 0, 0))
+            elapsed_str = _fmt_time(self._elapsed)
+            ctx.draw_text((bx, label_y), elapsed_str, fill=(130, 118, 80), font=self._font)
 
-        # Tape ribbon
-        if tape_left < tape_right:
-            tape_w = tape_right - tape_left
-            ctx.draw_rectangle(Box.xywh(tape_left, self._TAPE_Y, tape_w, self._TAPE_H), fill=_TAPE_EMPTY)
-            filled_w = int(tape_w * p)
-            if filled_w > 0:
-                ctx.draw_rectangle(Box.xywh(tape_left, self._TAPE_Y, filled_w, self._TAPE_H), fill=_TAPE_FILLED)
-
-        # Left reel (feed — shrinks)
-        left_spinner = _get_cached_spinner(left_r, hub_r)
-        lhs = left_spinner.half_size
-        ctx.paste(
-            left_spinner.render(self._left_rot, _REEL_BODY, _REEL_RIM, _REEL_HUB, _REEL_SPOKE),
-            (lc - lhs, cy - lhs),
-        )
-
-        # Right reel (take-up — grows)
-        right_spinner = _get_cached_spinner(right_r, hub_r)
-        rhs = right_spinner.half_size
-        ctx.paste(
-            right_spinner.render(self._right_rot, _REEL_BODY, _REEL_RIM, _REEL_HUB, _REEL_SPOKE),
-            (rc - rhs, cy - rhs),
-        )
-
-        # Time labels — elapsed left, countdown right with leading "−"
-        elapsed_str = _fmt_time(self._elapsed)
-        remaining_str = f"−{_fmt_time(self._remaining)}"
-        label_y = self._REEL_CY + self._MAX_R + 14
-
-        ctx.draw_text((lc, label_y), elapsed_str, fill=(125, 100, 48), font=self._caption_font, anchor="mm")
-        ctx.draw_text((rc, label_y), remaining_str, fill=(200, 158, 68), font=self._reel_font, anchor="mm")
+            remaining_str = f"−{_fmt_time(self._remaining)}"
+            rw, _ = get_text_size(remaining_str, self._font)
+            ctx.draw_text((right_x - rw, label_y), remaining_str, fill=(205, 180, 110), font=self._font)
 
 
 class LevelMeter(Widget):
@@ -443,12 +426,14 @@ class StatusLed(Widget):
 
     def flash(self) -> None:
         self._brightness = 1.0
+        self.refresh()
 
     def decay_step(self, dt: float) -> None:
         if self._brightness < self._REDRAW_THRESHOLD:
             return
         new_b = self._brightness * math.exp(-self._DECAY_RATE * dt)
         self._brightness = new_b
+        self.refresh()
 
     def _draw(self, ctx: PaintContext) -> None:
         b = self._brightness
@@ -492,7 +477,6 @@ class NamCapturePanel(FullscreenPanel):
         font = Config().get_font("default")
         title_font = Config().get_font("default_title")
         self._caption_font = _make_font(str(_FONTS_DIR / "DejaVuSans-Bold.ttf"), 12)
-        self._reel_font = _make_font(str(_FONTS_DIR / "DejaVuSans-Bold.ttf"), 18)
 
         # ── SETUP VIEW ────────────────────────────────────────────────────────
 
@@ -585,10 +569,10 @@ class NamCapturePanel(FullscreenPanel):
         self._cap_name_lbl = Label(0, 5, self._caption_font, parent=self)
         self._cap_name_lbl.set_text("", _HEADER_NAME_FG)
 
-        self._reel = ReelWidget(
+        self._reel = ProgressBarWidget(
             box=Box.xywh(0, _REEL_Y, _W, _REEL_H),
             total_seconds=self._duration,
-            reel_font=self._reel_font,
+            font=font,
             caption_font=self._caption_font,
             parent=self,
         )
@@ -655,6 +639,7 @@ class NamCapturePanel(FullscreenPanel):
 
         # Read initial values from hardware to seed the internal trackers
         self._init_knob_values()
+        profiling.maybe_start()
 
         # Connect In2 → Out1 so the user can hear the amp while the panel is open.
         routing.connect_monitor()
@@ -719,9 +704,9 @@ class NamCapturePanel(FullscreenPanel):
 
     # ── Polling ───────────────────────────────────────────────────────────────
 
-    # Bounding box of all animated content in capture view (reel + meters + LED).
-    # Large enough to always be coalesced → one SPI transfer per tick.
-    _CAP_ANIM_BOX = Box.xywh(0, 0, _W, _METER_IN_Y + _METER_H)
+    # Meters are the only content that changes every tick; coalesce them into
+    # one SPI transfer. LED and progress bar refresh themselves when they change.
+    _METER_ANIM_BOX = Box.xywh(0, _METER_OUT_Y, _W, _METER_IN_Y + _METER_H - _METER_OUT_Y)
 
     def tick(self) -> None:
         now = time.monotonic()
@@ -729,6 +714,12 @@ class NamCapturePanel(FullscreenPanel):
         self._last_tick = now
 
         state = self._engine.state
+        profiling.set_context_tag(state.name.lower())
+
+        with profiling.measure("nam.tick"):
+            self._tick_body(now, dt, state)
+
+    def _tick_body(self, now: float, dt: float, state: CaptureState) -> None:
         if state != self._last_state:
             self._apply_state(state)
             self._last_state = state
@@ -759,7 +750,7 @@ class NamCapturePanel(FullscreenPanel):
             else:
                 self._status_led.decay_step(dt)
 
-            self.refresh(self._CAP_ANIM_BOX)
+            self.refresh(self._METER_ANIM_BOX)
 
     # ── Private ───────────────────────────────────────────────────────────────
 
