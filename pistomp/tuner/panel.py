@@ -30,8 +30,7 @@ from uilib.widget import Widget
 
 from pistomp.fullscreen_panel import FullscreenPanel
 
-from pistomp.tuner.engine import TunerEngine, TunerReading
-from pistomp.tuner.source import AudioSource
+from pistomp.tuner.engine import TunerBackend, TunerReading
 
 _W = 320  # display width
 
@@ -354,7 +353,7 @@ class TunerPanel(FullscreenPanel):
 
     def __init__(
         self,
-        source_factory: Callable[[str], AudioSource],
+        backend_factory: Callable[[int], TunerBackend],
         input_port: int,
         on_dismiss: Callable[[], None],
         on_mute_toggle: Callable[[], None],
@@ -362,8 +361,8 @@ class TunerPanel(FullscreenPanel):
         muted: bool = False,
     ) -> None:
         super().__init__()
-        self._source_factory = source_factory
-        self._engine = self._create_engine(input_port)
+        self._backend_factory = backend_factory
+        self._engine: TunerBackend = self._create_engine(input_port)
 
         note_font = make_font(font_path("DejaVuSans-Bold.ttf"), 56)
         btn_font = Config().get_font("default")
@@ -412,11 +411,8 @@ class TunerPanel(FullscreenPanel):
         self._cents_history: deque[float] = deque(maxlen=3)
         profiling.maybe_start()
 
-    def _create_engine(self, port: int) -> TunerEngine:
-        source = self._source_factory(f"system:capture_{port}")
-        engine = TunerEngine(source)
-        engine.start()
-        return engine
+    def _create_engine(self, port: int) -> TunerBackend:
+        return self._backend_factory(port)
 
     def destroy(self) -> None:
         self._engine.stop()
@@ -429,6 +425,7 @@ class TunerPanel(FullscreenPanel):
         old_engine = self._engine
         self._engine = self._create_engine(new_port)
         old_engine.stop()
+        self._btn_input.set_text(f"Input {new_port}")
         self._btn_input.set_text(f"Input {new_port}")
 
     def set_muted(self, muted: bool) -> None:

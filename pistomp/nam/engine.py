@@ -1,15 +1,22 @@
 from __future__ import annotations
 
 import logging
+import math
 import threading
 from enum import Enum, auto
 from pathlib import Path
 
 from pistomp.nam import routing
-from pistomp.nam.capture_session import CaptureSession
-from pistomp.nam.wavio import load_wav_float32
+from pistomp.nam.client import NamCaptureClient
+from pistomp.nam.wavio import wav_duration
 
 _REAMP_WAV = Path(__file__).resolve().parents[2] / "setup" / "nam" / "T3K-sweep-v3.wav"
+
+# Exit codes from the NAM subprocess
+_EXIT_DONE = 0
+_EXIT_SILENCE = 1
+_EXIT_CLIP = 2
+_EXIT_ABORTED = 5
 
 
 class CaptureState(Enum):
@@ -21,7 +28,7 @@ class CaptureState(Enum):
 
 
 class NamCaptureEngine:
-    """Orchestrates a single FX-loop NAM recording session in a background thread."""
+    """Orchestrates a single FX-loop NAM recording session via a subprocess."""
 
     def __init__(
         self,
@@ -43,7 +50,7 @@ class NamCaptureEngine:
         self._thread: threading.Thread | None = None
         self._abort = threading.Event()
         self._lock = threading.Lock()
-        self._session: CaptureSession | None = None
+        self._client: NamCaptureClient | None = None
 
     # ── public API ────────────────────────────────────────────────────────────
 
@@ -64,7 +71,6 @@ class NamCaptureEngine:
 
     @property
     def pending_path(self) -> Path | None:
-        """Resolved output path once known, even before capture completes."""
         with self._lock:
             return self._pending_path
 
@@ -73,7 +79,6 @@ class NamCaptureEngine:
             return self._progress
 
     def start(self, name: str) -> None:
-        """Begin a capture.  No-op if already capturing."""
         with self._lock:
             if self._state == CaptureState.CAPTURING:
                 return
@@ -88,14 +93,11 @@ class NamCaptureEngine:
         self._thread.start()
 
     def level_snapshot_db(self) -> tuple[float, float] | None:
-        """Return (in_dBFS, out_dBFS) since last call, or None if no data."""
-        import math
-
         with self._lock:
-            session = self._session
-        if session is None:
+            client = self._client
+        if client is None:
             return None
-        snap = session.level_snapshot()
+        snap = client.level_snapshot()
         if snap is None:
             return None
         in_peak, out_peak = snap
@@ -106,14 +108,12 @@ class NamCaptureEngine:
         return to_db(in_peak), to_db(out_peak)
 
     def stop(self) -> None:
-        """Abort a running capture and wait for the thread to exit."""
         self._abort.set()
         if self._thread is not None:
             self._thread.join(timeout=10.0)
             self._thread = None
 
     def reset(self) -> None:
-        """Return to IDLE from any terminal state (DONE/FAILED/ABORTED)."""
         with self._lock:
             if self._state not in (CaptureState.DONE, CaptureState.FAILED, CaptureState.ABORTED):
                 return
@@ -127,7 +127,7 @@ class NamCaptureEngine:
 
     def _run(self, name: str) -> None:
         saved: routing.Saved | None = None
-        session: CaptureSession | None = None
+        client: NamCaptureClient | None = None
 
         try:
             if not self._reamp_wav.exists():
@@ -137,8 +137,7 @@ class NamCaptureEngine:
                     f"{self._reamp_wav}"
                 )
 
-            samples = load_wav_float32(self._reamp_wav)
-            duration = len(samples) / 48000.0
+            duration = wav_duration(self._reamp_wav)
 
             if self._abort.is_set():
                 self._set_state(CaptureState.ABORTED)
@@ -146,6 +145,7 @@ class NamCaptureEngine:
 
             saved = routing.snapshot(self._send_port, self._return_port)
             routing.clear(self._send_port, self._return_port)
+            routing.connect_monitor()
 
             if self._abort.is_set():
                 routing.restore(saved)
@@ -153,88 +153,97 @@ class NamCaptureEngine:
                 self._set_state(CaptureState.ABORTED)
                 return
 
-            # Re-add monitoring after clear so the user can hear the amp during capture.
-            routing.connect_monitor()
-
-            safe = (name.strip() or "capture").replace("/", "_").replace("\\", "_")
-            self._output_dir.mkdir(parents=True, exist_ok=True)
-            out_wav = self._output_dir / f"{safe}.wav"
-            n = 2
-            while out_wav.exists():
-                out_wav = self._output_dir / f"{safe}-{n}.wav"
-                n += 1
-
+            out_wav = self._resolve_output_path(name)
             with self._lock:
                 self._pending_path = out_wav
 
-            session = CaptureSession(samples, self._send_port, self._return_port)
+            client = NamCaptureClient()
+            client.start(
+                str(self._reamp_wav),
+                str(out_wav),
+                self._send_port,
+                self._return_port,
+            )
             with self._lock:
-                self._session = session
-            session.start()
+                self._client = client
 
             import time
 
             t0 = time.monotonic()
-            while not session.wait(timeout=0.1):
+
+            while True:
                 if self._abort.is_set():
-                    session.stop()
-                    session.write_wav(out_wav)
-                    session = None
-                    routing.restore(saved)
-                    saved = None
+                    client.stop()
+                    client.wait(timeout=10.0)
                     with self._lock:
+                        self._client = None
                         self._output_path = out_wav
                         self._state = CaptureState.ABORTED
                     return
-                if session.clip_detected:
-                    session.stop()
-                    session = None
-                    routing.restore(saved)
-                    saved = None
+
+                rc = client.poll()
+                if rc is not None:
                     with self._lock:
-                        self._error = "Reduce amp output"
-                        self._state = CaptureState.FAILED
+                        self._client = None
+                    self._apply_exit_code(rc, out_wav)
                     return
-                if session.silence_detected:
-                    session.stop()
-                    session = None
-                    routing.restore(saved)
-                    saved = None
-                    with self._lock:
-                        self._error = "No audio detected"
-                        self._state = CaptureState.FAILED
-                    return
+
                 elapsed = time.monotonic() - t0
                 with self._lock:
                     self._progress = min(elapsed / duration, 0.99)
 
-            session.write_wav(out_wav)
-            session.stop()
-            session = None
-            routing.restore(saved)
-            saved = None
-
-            with self._lock:
-                self._output_path = out_wav
-                self._progress = 1.0
-                self._state = CaptureState.DONE
+                time.sleep(0.1)
 
         except Exception as exc:
             logging.error("NAM capture failed: %s", exc, exc_info=True)
             with self._lock:
+                self._client = None
                 self._error = str(exc)
                 self._state = CaptureState.FAILED
 
         finally:
+            if client is not None and client.poll() is None:
+                client.stop()
             with self._lock:
-                self._session = None
+                self._client = None
             if saved is not None:
                 try:
                     routing.restore(saved)
                 except Exception as exc:
                     logging.error("NAM routing restore failed: %s", exc)
-            if session is not None:
-                session.stop()
+
+    def _apply_exit_code(self, rc: int, out_wav: Path) -> None:
+        if rc == _EXIT_DONE:
+            with self._lock:
+                self._output_path = out_wav
+                self._progress = 1.0
+                self._state = CaptureState.DONE
+        elif rc == _EXIT_SILENCE:
+            with self._lock:
+                self._error = "No audio detected"
+                self._state = CaptureState.FAILED
+        elif rc == _EXIT_CLIP:
+            with self._lock:
+                self._error = "Reduce amp output"
+                self._state = CaptureState.FAILED
+        elif rc == _EXIT_ABORTED:
+            with self._lock:
+                self._output_path = out_wav
+                self._state = CaptureState.ABORTED
+        else:
+            with self._lock:
+                self._error = "Capture failed"
+                self._state = CaptureState.FAILED
+
+    def _resolve_output_path(self, name: str) -> Path:
+        safe = (name.strip() or "capture").replace("/", "_").replace("\\", "_")
+        self._output_dir.mkdir(parents=True, exist_ok=True)
+        out_wav = self._output_dir / f"{safe}.wav"
+        n = 2
+        while out_wav.exists():
+            out_wav = self._output_dir / f"{safe}-{n}.wav"
+            n += 1
+        return out_wav
 
     def _set_state(self, state: CaptureState) -> None:
         with self._lock:

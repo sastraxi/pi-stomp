@@ -43,7 +43,21 @@ from pistomp.hardware import Hardware
 import pistomp.settings as Settings
 from blend.snapshot import SnapshotManager
 from modalapi.websocket_bridge import AsyncWebSocketBridge
-from modalapi.ws_protocol import parse_message, LoadingEndMessage, LoadingStartMessage, PedalSnapshotMessage, PluginBypassMessage, TransportMessage, AddPluginMessage, RemovePluginMessage, ConnectMessage, DisconnectMessage, ParamSetMessage, MidiMapMessage, WebSocketMessage
+from modalapi.ws_protocol import (
+    parse_message,
+    LoadingEndMessage,
+    LoadingStartMessage,
+    PedalSnapshotMessage,
+    PluginBypassMessage,
+    TransportMessage,
+    AddPluginMessage,
+    RemovePluginMessage,
+    ConnectMessage,
+    DisconnectMessage,
+    ParamSetMessage,
+    MidiMapMessage,
+    WebSocketMessage,
+)
 from modalapi.pedalboard_monitor import FileChangeMonitor, read_pedalboard_bundle
 
 from pistomp.controller_manager import ControllerManager
@@ -59,8 +73,9 @@ from pistomp.input.event import (
     SwitchEventKind,
 )
 import pistomp.switchstate as switchstate
-from pistomp.tuner import TunerEngine, TunerPanel, TunerSourceFactory
-from pistomp.tuner.source import AudioSource, build_source
+from pistomp.tuner import TunerPanel, TunerSourceFactory
+from pistomp.tuner.client import TunerClient
+from pistomp.tuner.engine import TunerBackend, TunerEngine
 from rtmidi.midiconstants import CONTROL_CHANGE
 from pathlib import Path
 
@@ -128,8 +143,8 @@ class Modhandler(Handler):
 
         # WebSocket bridge for MOD-UI communication
         self.ws_bridge = AsyncWebSocketBridge(
-            ws_url='ws://localhost:80/websocket',
-            backpressure_threshold=8192  # 8 KB
+            ws_url="ws://localhost:80/websocket",
+            backpressure_threshold=8192,  # 8 KB
         )
         self.ws_bridge.start()
         logging.info("WebSocket bridge started")
@@ -139,6 +154,7 @@ class Modhandler(Handler):
 
         # Tuner state
         self._tuner_source_factory: TunerSourceFactory | None = None
+        self._tuner_source_spec: str = "jack"
         self._tuner_muted: bool = False
 
         # Full-screen panel state (tuner, NAM capture, or generic plugin panel)
@@ -146,12 +162,13 @@ class Modhandler(Handler):
 
         # Callback function map.  Key is the user specified name, value is function from this handler
         # Used for calling handler callbacks pointed to by names which may be user set in the config file
-        self.callbacks = {"set_mod_tap_tempo": self.set_mod_tap_tempo,
-                          "next_snapshot": self.preset_incr_and_change,
-                          "previous_snapshot": self.preset_decr_and_change,
-                          "toggle_bypass": self.system_toggle_bypass,
-                          "toggle_tap_tempo_enable": self.toggle_tap_tempo_enable,
-                          "toggle_tuner_enable": self.toggle_tuner_enable,
+        self.callbacks = {
+            "set_mod_tap_tempo": self.set_mod_tap_tempo,
+            "next_snapshot": self.preset_incr_and_change,
+            "previous_snapshot": self.preset_decr_and_change,
+            "toggle_bypass": self.system_toggle_bypass,
+            "toggle_tap_tempo_enable": self.toggle_tap_tempo_enable,
+            "toggle_tuner_enable": self.toggle_tuner_enable,
         }
 
         # External MIDI device synchronization
@@ -291,7 +308,11 @@ class Modhandler(Handler):
                 # Give the LCD first crack so the selected widget sees LONG_CLICK.
                 # Only run the configured callback if nothing on the LCD consumed it.
                 # Only the nav encoder button routes through the LCD panel stack.
-                if controller.type == Token.NAV and self._lcd is not None and self._lcd.enc_sw(switchstate.Value.LONGPRESSED):
+                if (
+                    controller.type == Token.NAV
+                    and self._lcd is not None
+                    and self._lcd.enc_sw(switchstate.Value.LONGPRESSED)
+                ):
                     return True
                 callback_name = controller.longpress
                 if callback_name:
@@ -367,13 +388,13 @@ class Modhandler(Handler):
     def poll_system_info(self):
         # Get the system state from the systemd service
         try:
-            output = subprocess.check_output(['systemctl', 'show', '-p', 'SystemState'])
+            output = subprocess.check_output(["systemctl", "show", "-p", "SystemState"])
             if output:
                 # Parse the output to extract the SystemState value
                 # Output format is typically: SystemState=running
                 system_state_line = output.decode().strip()
-                if '=' in system_state_line:
-                    self.SystemState = system_state_line.split('=', 1)[1]
+                if "=" in system_state_line:
+                    self.SystemState = system_state_line.split("=", 1)[1]
                 else:
                     self.SystemState = system_state_line
                 logging.debug("System State: %s" % self.SystemState)
@@ -386,13 +407,13 @@ class Modhandler(Handler):
 
         # Check for throttling
         try:
-            output = subprocess.check_output(['vcgencmd', 'get_throttled'])
+            output = subprocess.check_output(["vcgencmd", "get_throttled"])
             if output:
                 # Parse the output to extract the throttled value
                 # Output format is typically: throttled=0x0
                 throttled_line = output.decode().strip()
-                if '=' in throttled_line:
-                    throttled_value = throttled_line.split('=', 1)[1]
+                if "=" in throttled_line:
+                    throttled_value = throttled_line.split("=", 1)[1]
                     self.throttled = throttled_value
                 else:
                     self.throttled = throttled_line
@@ -406,13 +427,13 @@ class Modhandler(Handler):
 
         # Check temperature
         try:
-            output = subprocess.check_output(['vcgencmd', 'measure_temp'])
+            output = subprocess.check_output(["vcgencmd", "measure_temp"])
             if output:
                 # Parse the output to extract the temperature value
                 # Output format is typically: temp=45.2'C
                 temp_line = output.decode().strip()
-                if '=' in temp_line:
-                    temp_value = temp_line.split('=', 1)[1]
+                if "=" in temp_line:
+                    temp_value = temp_line.split("=", 1)[1]
                     self.temperature = temp_value
                 else:
                     self.temperature = temp_line
@@ -458,13 +479,15 @@ class Modhandler(Handler):
             return
 
         new_snapshot_name = self.current.presets.get(new_snapshot_index)
-        logging.debug(f"Snapshot change: index={new_snapshot_index}, name='{new_snapshot_name}', "
-                     f"active_blend={self.active_blend_mode.config.get('name') if self.active_blend_mode else None}")
+        logging.debug(
+            f"Snapshot change: index={new_snapshot_index}, name='{new_snapshot_name}', "
+            f"active_blend={self.active_blend_mode.config.get('name') if self.active_blend_mode else None}"
+        )
 
         # Deactivate current blend mode if switching away
         active = self.active_blend_mode
         if active:
-            old_name = active.config.get('name')
+            old_name = active.config.get("name")
             if old_name != new_snapshot_name:
                 logging.info(f"Deactivating blend mode '{old_name}' (switching to '{new_snapshot_name}')")
                 active.deactivate()
@@ -509,7 +532,9 @@ class Modhandler(Handler):
                 mod_bundle = read_pedalboard_bundle(self.last_json_monitor.path)
                 if mod_bundle and self.current and mod_bundle == self.current.pedalboard.bundle:
                     # Same pedalboard - this is a new snapshot on current board, not a pre-switch
-                    logging.debug(f"WebSocket: Snapshot changed to {msg.snapshot_id} ({msg.snapshot_name}) - clearing stale pre-switch flag")
+                    logging.debug(
+                        f"WebSocket: Snapshot changed to {msg.snapshot_id} ({msg.snapshot_name}) - clearing stale pre-switch flag"
+                    )
                     self.next_pedalboard_preset_index = None
 
                     if msg.snapshot_id not in self.current.presets:
@@ -572,8 +597,7 @@ class Modhandler(Handler):
                     # Also purge any connections that referenced the removed plugin
                     iid = msg.instance
                     self.current.pedalboard.connections = [
-                        c for c in self.current.pedalboard.connections
-                        if c.src.id != iid and c.dst.id != iid
+                        c for c in self.current.pedalboard.connections if c.src.id != iid and c.dst.id != iid
                     ]
                     # Strip the removed instance from blend diff maps so the
                     # parameter_setter stops sending WS messages for it.
@@ -706,15 +730,15 @@ class Modhandler(Handler):
     def load_banks(self):
         self.current_bank = self.settings.get_setting(Token.BANK)
         if Path(self.banks_file).exists():
-            with open(self.banks_file, 'r') as file:
+            with open(self.banks_file, "r") as file:
                 self.banks = {}
                 j = json.load(file)
                 for bd in j:
-                    bank = util.DICT_GET(bd, 'title')
-                    pbs = util.DICT_GET(bd, 'pedalboards') or {}
+                    bank = util.DICT_GET(bd, "title")
+                    pbs = util.DICT_GET(bd, "pedalboards") or {}
                     b = self.banks[bank] = []
                     for p in pbs:
-                        title = util.DICT_GET(p, 'title')
+                        title = util.DICT_GET(p, "title")
                         b.append(title)
 
     def get_banks(self):
@@ -726,7 +750,6 @@ class Modhandler(Handler):
     def set_bank(self, bank_name):
         self.current_bank = bank_name
         self.settings.set_setting(Token.BANK, bank_name)
-
 
     #
     # Pedalboard Stuff
@@ -748,7 +771,7 @@ class Modhandler(Handler):
             pedalboard.load_bundle(bundle, self.plugin_dict)
             self.pedalboards[bundle] = pedalboard
             self.pedalboard_list.append(pedalboard)
-            #logging.debug("dump: %s" % pedalboard.to_json())
+            # logging.debug("dump: %s" % pedalboard.to_json())
 
     def reload_pedalboard(self, bundle):
         # find the current pedalboard object associated with that bundle
@@ -811,7 +834,7 @@ class Modhandler(Handler):
         config_file = Path(pedalboard.bundle) / "config.yml"
         cfg = None
         if config_file.exists():
-            with open(config_file.as_posix(), 'r') as ymlfile:
+            with open(config_file.as_posix(), "r") as ymlfile:
                 cfg = yaml.load(ymlfile, Loader=yaml.SafeLoader)
         self.hardware.reinit(cfg)
 
@@ -835,20 +858,17 @@ class Modhandler(Handler):
 
         # Prepare blend modes if configured (snapshot-based activation)
         try:
-            blend_configs = cfg.get('blend_snapshots', []) if cfg else []
+            blend_configs = cfg.get("blend_snapshots", []) if cfg else []
             bundle_path = Path(self.current.pedalboard.bundle)
 
             # Sync all blend snapshots (create/recreate based on config)
-            snapshot_indices = SnapshotManager.sync_blend_snapshots(
-                bundle_path,
-                blend_configs,
-                self.root_uri
-            )
+            snapshot_indices = SnapshotManager.sync_blend_snapshots(bundle_path, blend_configs, self.root_uri)
 
             # Create and prepare BlendMode instances for each blend snapshot
             from blend import BlendMode
+
             for blend_cfg in blend_configs:
-                snapshot_name = blend_cfg.get('name')
+                snapshot_name = blend_cfg.get("name")
                 if not snapshot_name:
                     continue
 
@@ -863,7 +883,9 @@ class Modhandler(Handler):
                 first_snapshot_idx = snapshot_indices.get(first_snapshot_name)
 
                 if first_snapshot_idx is not None:
-                    logging.info(f"Auto-switching to first blend snapshot: '{first_snapshot_name}' (index {first_snapshot_idx})")
+                    logging.info(
+                        f"Auto-switching to first blend snapshot: '{first_snapshot_name}' (index {first_snapshot_idx})"
+                    )
                     self.preset_change(first_snapshot_idx)
                     # Note: preset_change calls _handle_blend_mode_snapshot_change which activates the blend mode
 
@@ -880,7 +902,6 @@ class Modhandler(Handler):
         # The pedalboard data has already been loaded, but this will overlay
         # any real time settings
         self._controller_manager.bind(self.current)
-
 
     def _redraw_after_binding(self, controller, is_footswitch):
         if is_footswitch:
@@ -966,7 +987,7 @@ class Modhandler(Handler):
         self._handle_blend_mode_snapshot_change(index)
 
         self.lcd.draw_info_message("Loading...")
-        url = (self.root_uri + "snapshot/load?id=%d" % index)
+        url = self.root_uri + "snapshot/load?id=%d" % index
         # req.get(self.root_uri + "reset")
         resp = self._rest_get(url)
         if resp is None or resp.status_code != 200:
@@ -1039,15 +1060,24 @@ class Modhandler(Handler):
     #
     def system_info_load(self):
         try:
-            output = subprocess.check_output(['git', '--git-dir', self.homedir + '/.git',
-                                              '--work-tree', self.homedir, 'describe',
-                                              '--dirty=*', '--always'])
+            output = subprocess.check_output(
+                [
+                    "git",
+                    "--git-dir",
+                    self.homedir + "/.git",
+                    "--work-tree",
+                    self.homedir,
+                    "describe",
+                    "--dirty=*",
+                    "--always",
+                ]
+            )
             if output:
                 self.software_version = output.decode()
                 logging.info("pi-Stomp Software Version: %s" % self.software_version)
         except subprocess.CalledProcessError:
             try:
-                output = subprocess.check_output(['dpkg-query', '--showformat=${Version}', '--show', 'pi-stomp'])
+                output = subprocess.check_output(["dpkg-query", "--showformat=${Version}", "--show", "pi-stomp"])
                 self.software_version = output.decode().strip()
                 logging.info("pi-Stomp Software Version (pkg): %s" % self.software_version)
             except subprocess.CalledProcessError:
@@ -1056,10 +1086,10 @@ class Modhandler(Handler):
         try:
             if Path(self.build_file).exists():
                 self.build_version = ""
-                with open(self.build_file, 'r') as file:
+                with open(self.build_file, "r") as file:
                     j = json.load(file)
-                    build_tag = util.DICT_GET(j, 'build-tag')
-                    build_date = util.DICT_GET(j, 'build-date')
+                    build_tag = util.DICT_GET(j, "build-tag")
+                    build_date = util.DICT_GET(j, "build-date")
                     self.build_version = "{}-{}".format(build_tag, build_date)
             else:
                 logging.warning("Build file does not exist: %s" % self.build_file)
@@ -1079,34 +1109,38 @@ class Modhandler(Handler):
 
     @cached_property
     def recovery_available(self) -> bool:
-        return subprocess.call(
-            ["systemctl", "cat", "pistomp-recovery"],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        ) == 0
+        return (
+            subprocess.call(
+                ["systemctl", "cat", "pistomp-recovery"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            == 0
+        )
 
     def system_menu_shutdown(self, arg):
         self.lcd.splash_show(False)
         logging.info("System Shutdown")
-        os.system('sudo systemctl --no-wall poweroff')
+        os.system("sudo systemctl --no-wall poweroff")
         os._exit(0)
 
     def system_menu_reboot(self, arg):
         self.lcd.splash_show(False)
         logging.info("System Reboot")
-        os.system('sudo systemctl reboot')
+        os.system("sudo systemctl reboot")
         os._exit(0)
 
     def system_menu_recovery_mode(self, arg):
         self.lcd.draw_info_message("Entering recovery mode...", refresh=True)
         logging.info("Entering recovery mode")
-        os.system('sudo systemctl --no-block start pistomp-recovery')
+        os.system("sudo systemctl --no-block start pistomp-recovery")
 
     def check_usb(self):
         self.usbflash = False
         if not os.path.exists(self.backup_dir):
             os.mkdir(self.backup_dir)
         stat = subprocess.call(["systemctl", "is-active", "--quiet", "usbmount@dev-sda1"])
-        if(stat == 0):
+        if stat == 0:
             self.usbflash = True
         else:
             self.usbflash = False
@@ -1116,14 +1150,14 @@ class Modhandler(Handler):
         if self.usbflash:
             self.lcd.draw_info_message("Backing up, please wait...", refresh=True)
             logging.info("Data backup...")
-            cmd = os.path.join(self.homedir, 'util', 'data-backup.sh')
+            cmd = os.path.join(self.homedir, "util", "data-backup.sh")
             try:
                 subprocess.check_output([cmd, os.path.join(self.backup_dir, self.backup_file), self.data_dir])
                 self.lcd.draw_message_dialog("Backup complete", "Info")
                 logging.info("Backup complete")
             except subprocess.CalledProcessError as e:
                 logging.error("user_backup_data:" + str(e.output))
-                return e.output.decode('utf-8')
+                return e.output.decode("utf-8")
             finally:
                 self.lcd.draw_info_message("", refresh=True)
         else:
@@ -1135,15 +1169,16 @@ class Modhandler(Handler):
         if self.usbflash:
             self.lcd.draw_info_message("Restoring, please wait...", refresh=True)
             logging.info("Restoring data backup...")
-            cmd = os.path.join(self.homedir, 'util', 'data-restore.sh')
+            cmd = os.path.join(self.homedir, "util", "data-restore.sh")
             try:
-                subprocess.check_output(['sudo', '-u', self.username, cmd,
-                                         os.path.join(self.backup_dir, self.backup_file), self.data_dir])
+                subprocess.check_output(
+                    ["sudo", "-u", self.username, cmd, os.path.join(self.backup_dir, self.backup_file), self.data_dir]
+                )
                 logging.info("Restore complete")
                 self.system_menu_restart_sound(None)
             except subprocess.CalledProcessError as e:
-                self.lcd.draw_message_dialog(e.output.decode('utf-8'))
-                logging.error("user_restore_data: " + e.output.decode('utf-8'))
+                self.lcd.draw_message_dialog(e.output.decode("utf-8"))
+                logging.error("user_restore_data: " + e.output.decode("utf-8"))
             finally:
                 self.lcd.draw_info_message("", refresh=True)
         else:
@@ -1170,13 +1205,13 @@ class Modhandler(Handler):
 
     def system_menu_update_sample_pedalboards(self):
         logging.debug("update_sample_pedalboards")
-        cmd = os.path.join(self.homedir, 'util', 'update-sample-pedalboards.sh')
+        cmd = os.path.join(self.homedir, "util", "update-sample-pedalboards.sh")
         try:
-            output = subprocess.check_output(['sudo', '-u', self.username, cmd])
-            return output.decode('utf-8')
+            output = subprocess.check_output(["sudo", "-u", self.username, cmd])
+            return output.decode("utf-8")
         except subprocess.CalledProcessError as e:
             logging.error("update sample pedalboards:" + str(e.output))
-            return e.output.decode('utf-8')
+            return e.output.decode("utf-8")
 
     def system_menu_reload(self, arg):
         logging.info("Exiting main process, systemctl should restart if enabled")
@@ -1185,7 +1220,7 @@ class Modhandler(Handler):
     def system_menu_restart_sound(self, arg):
         self.lcd.splash_show()
         logging.info("Restart sound engine (jack)")
-        os.system('sudo systemctl restart jack')
+        os.system("sudo systemctl restart jack")
 
     def system_disable_eq(self):
         self.lcd.draw_info_message("Disabling, please wait...")
@@ -1230,14 +1265,7 @@ class Modhandler(Handler):
 
     def _create_audio_parameter(self, name, symbol, min_val, max_val):
         value = self.audiocard.get_volume_parameter(symbol)
-        info = {
-            Token.NAME: name,
-            Token.SYMBOL: symbol,
-            Token.RANGES: {
-                Token.MINIMUM: min_val,
-                Token.MAXIMUM: max_val
-            }
-        }
+        info = {Token.NAME: name, Token.SYMBOL: symbol, Token.RANGES: {Token.MINIMUM: min_val, Token.MAXIMUM: max_val}}
         param = Parameter(info, value, None)
         param.unit_symbol = "dB"
         return param
@@ -1264,9 +1292,8 @@ class Modhandler(Handler):
         self.audio_parameter_change(arg, param, self.audio_parameter_commit)
 
     def system_menu_vu_calibration(self, arg):
-        value = self.settings.get_setting('analogVU.adc_baseline')
-        self.lcd.draw_vu_calibration_dialog('analogVU.adc_baseline', value,
-                                            commit_callback=self.settings_file_commit)
+        value = self.settings.get_setting("analogVU.adc_baseline")
+        self.lcd.draw_vu_calibration_dialog("analogVU.adc_baseline", value, commit_callback=self.settings_file_commit)
 
     def settings_file_commit(self, symbol, value):
         self.settings.set_setting(symbol, value)
@@ -1318,18 +1345,41 @@ class Modhandler(Handler):
         self.lcd.update_footswitches()
 
     def set_tuner_source_factory(self, factory: TunerSourceFactory) -> None:
+        """Override tuner audio source with an in-process factory (for tests/emulator)."""
         self._tuner_source_factory = factory
 
-    def _tuner_factory(self, port: str) -> AudioSource:
-        factory = self._tuner_source_factory or (lambda p, *, name: build_source("jack", p, name=name))
-        return factory(port, name=f"pistomp-tuner-{port.split('_')[-1]}")
+    def set_tuner_source_spec(self, spec: str) -> None:
+        """Override the source spec passed to the tuner subprocess (e.g. 'tone:440')."""
+        self._tuner_source_spec = spec
+
+    def _make_tuner_backend_factory(self):
+        """Return a Callable[[int], TunerBackend] appropriate for the current config."""
+        if self._tuner_source_factory is not None:
+            source_factory = self._tuner_source_factory
+
+            def in_process(port: int) -> TunerBackend:
+                source = source_factory(f"system:capture_{port}", name=f"pistomp-tuner-{port}")
+                engine = TunerEngine(source)
+                engine.start()
+                return engine
+
+            return in_process
+
+        spec = self._tuner_source_spec
+
+        def subprocess_backend(port: int) -> TunerBackend:
+            client = TunerClient()
+            client.start(f"system:capture_{port}", spec)
+            return client
+
+        return subprocess_backend
 
     @property
     def _tuner_panel(self) -> TunerPanel | None:
         return self._fullscreen_panel if isinstance(self._fullscreen_panel, TunerPanel) else None
 
     @property
-    def _tuner_engine(self) -> TunerEngine | None:
+    def _tuner_engine(self) -> TunerBackend | None:
         p = self._tuner_panel
         return p._engine if p is not None else None
 
@@ -1341,7 +1391,7 @@ class Modhandler(Handler):
                 self.audiocard.set_output_muted(True)
                 self._tuner_muted = True
             panel = TunerPanel(
-                self._tuner_factory,
+                self._make_tuner_backend_factory(),
                 input_port,
                 on_dismiss=self.toggle_tuner_enable,
                 on_mute_toggle=self._toggle_tuner_mute,
