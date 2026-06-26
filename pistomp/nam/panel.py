@@ -466,6 +466,7 @@ class NamCapturePanel(FullscreenPanel):
         self._last_state = CaptureState.IDLE
         self._last_blink: float = 0.0
         self._last_tick: float | None = None
+        self._meter_tick: int = 0
         self._in_capture_view: bool = False
         self._pending_path_shown: bool = False
         self._duration = wav_duration(reamp_wav)
@@ -750,7 +751,11 @@ class NamCapturePanel(FullscreenPanel):
             else:
                 self._status_led.decay_step(dt)
 
-            self.refresh(self._METER_ANIM_BOX)
+            self._meter_tick += 1
+            if self._meter_tick >= 10:
+                self._meter_tick = 0
+                self._meter_out.refresh()
+                self._meter_in.refresh()
 
     # ── Private ───────────────────────────────────────────────────────────────
 
