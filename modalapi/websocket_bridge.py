@@ -273,6 +273,29 @@ class AsyncWebSocketBridge:
         self.command_queue.put_nowait(f"param_set /graph/{instance_id}/{symbol} {value}")
         return True
 
+    def send_atom_patch(self, instance_id: str, param_uri: str, value: str, valuetype: str = "p") -> bool:
+        """Queue an LV2 patch:Set (atom:Path / atom:String / …).
+
+        Used for writable atom ports that ``send_parameter`` can't address
+        (e.g. NAM's ``#model``). ``param_uri`` is the full LV2 URI
+        (``http://github.com/mikeoliphant/neural-amp-modeler-lv2#model``),
+        and ``valuetype`` defaults to ``"p"`` (atom:Path); pass ``"s"`` for
+        atom:String.
+
+        mod-ui's webserver splits the inbound frame with ``split(" ", 3)``,
+        so the entire remainder of the line after the valuetype is the
+        value — paths containing spaces are preserved verbatim.
+        Returns False if backpressure is active.
+        """
+        if self._worker.backpressure_active:
+            return False
+        if not param_uri.startswith("/") and not param_uri.startswith("http"):
+            # Bare short symbol: assume the canonical /graph path.
+            self.command_queue.put_nowait(f"patch_set /graph/{instance_id}/{param_uri} {valuetype} {value}")
+        else:
+            self.command_queue.put_nowait(f"patch_set /graph/{instance_id} {param_uri} {valuetype} {value}")
+        return True
+
     def get_received_messages(self) -> list:
         """Drain all pending inbound messages (non-blocking). Called from main thread."""
         messages = []
