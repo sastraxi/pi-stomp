@@ -167,6 +167,15 @@ class FakeWebSocketBridge:
         self.sent.append(f"param_set /graph/{instance_id}/{symbol} {value}")
         return True
 
+    def send_atom_patch(self, instance_id: str, param_uri: str, value: str, valuetype: str = "p") -> bool:
+        # Mirror AsyncWebSocketBridge.send_atom_patch's outbound format.
+        if param_uri.startswith("/") or param_uri.startswith("http"):
+            prefix = f"patch_set /graph/{instance_id} {param_uri}"
+        else:
+            prefix = f"patch_set /graph/{instance_id}/{param_uri}"
+        self.sent.append(f"{prefix} {valuetype} {value}")
+        return True
+
     def send_bpm(self, bpm: float) -> bool:
         self.sent.append(f"transport-bpm {bpm}")
         return True

@@ -1,8 +1,13 @@
 """NAM (Neural Amp Modeler) plugin customizations.
 
-Registers custom tile colors, border, display name, and subtitle
-for NAM plugin URIs.  A fullscreen panel will be added here in a
-future change.
+Registers the tri-color tile chrome (yellow body, red top, blue bottom
+borders) and a fullscreen ``NamPanel`` for selecting models and adjusting
+the three NAM control-port parameters (input level, output level,
+quality).
+
+The panel's file list is virtualised over the user's NAM library under
+``~/data/user-files/NAM Models/`` (recursively scanned at open time),
+so the 300+ models installed on a typical system don't cost 300 widgets.
 """
 
 from __future__ import annotations
@@ -12,6 +17,7 @@ import urllib.parse
 
 from common.color import RectBorder
 from plugins.customization import PluginCustomization, register
+from plugins.nam.panel import NamPanel
 
 _NAM_YELLOW = (224, 179, 0)
 _NAM_RED = (220, 20, 20)
@@ -60,5 +66,6 @@ register(
         ),
         display_name_fn=_nam_display_name,
         subtitle_fn=_nam_subtitle,
+        panel_cls=NamPanel,
     ),
 )
