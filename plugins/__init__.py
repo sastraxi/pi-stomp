@@ -18,9 +18,19 @@ from plugins.customization import (
 )
 
 # Import all panel/customization modules to trigger their registrations.
-import plugins.eq.panel      # noqa: F401
+import plugins.eq.panel      # noqa: F401  # ParametricEqPanel (ABC) + GraphWidget etc.
+import plugins.eq.graphic    # noqa: F401  # GraphicEqPanel (ABC) + BarWidget
+import plugins.fil4          # noqa: F401
 import plugins.nam           # noqa: F401
 import plugins.notes.panel   # noqa: F401
+import plugins.distaq        # noqa: F401
+import plugins.zameq2        # noqa: F401
+import plugins.tapeq         # noqa: F401
+import plugins.tapeqbw       # noqa: F401
+import plugins.capseq10      # noqa: F401
+import plugins.graphiceq     # noqa: F401
+import plugins.barkgraphiceq # noqa: F401
+import plugins.zamgeq31      # noqa: F401
 
 
 __all__ = [
