@@ -59,6 +59,17 @@ HALO_COLOR = (255, 255, 255)
 READOUT_COLOR = (200, 200, 200)
 INACTIVE_SHADE = 0.45
 
+NODE_R = 3
+HALO_R = 6
+
+
+def paint_band_node(ctx, cx: int, cy: int, color: tuple[int, int, int], selected: bool) -> None:
+    """Paint the parametric-EQ node circle (black eraser, coloured fill, optional halo)."""
+    ctx.draw_ellipse(Box(cx - NODE_R - 2, cy - NODE_R - 2, cx + NODE_R + 2, cy + NODE_R + 2), fill=BG_BLACK)
+    ctx.draw_ellipse(Box(cx - NODE_R, cy - NODE_R, cx + NODE_R, cy + NODE_R), fill=color)
+    if selected:
+        ctx.draw_ellipse(Box(cx - HALO_R, cy - HALO_R, cx + HALO_R, cy + HALO_R), outline=HALO_COLOR, width=1)
+
 SMEAR_ALPHA = 0.65
 SMEAR_LENGTH_MAX = 60
 
@@ -186,9 +197,6 @@ class GraphWidget(Widget):
     Assumes the widget spans the full panel width with image x == local x.
     """
 
-    NODE_R = 3
-    HALO_R = 6
-
     def __init__(self, box: Box, bands: Sequence[BandSpec], axis_font=None, show_axis_labels: bool = True, **kwargs) -> None:
         kwargs.setdefault("bkgnd_color", BG_BLACK)
         super().__init__(box=box, **kwargs)
@@ -283,7 +291,7 @@ class GraphWidget(Widget):
         if pos is None:
             return
         cx, cy, _, _ = pos
-        r = self.HALO_R + 1
+        r = HALO_R + 1
         bx = self.box
         if bx is None:
             return
@@ -354,7 +362,7 @@ class GraphWidget(Widget):
         old_nodes: dict[str, _NodePos],
         new_nodes: dict[str, _NodePos],
     ) -> tuple[Optional[int], Optional[int]]:
-        node_r = self.HALO_R + 1
+        node_r = HALO_R + 1
         names = set(old_nodes) | set(new_nodes)
         for name in names:
             if old_nodes.get(name) == new_nodes.get(name):
@@ -375,7 +383,7 @@ class GraphWidget(Widget):
         if pos is None:
             return None
         cx = pos[0]
-        node_r = self.HALO_R + 1
+        node_r = HALO_R + 1
         return cx - node_r, cx + node_r + 1
 
     def _refresh_x_range(self, x_min: Optional[int], x_max: Optional[int]) -> None:
@@ -521,7 +529,7 @@ class GraphWidget(Widget):
                     del px
 
         if self._state is not None and self._node_positions:
-            node_r = self.HALO_R + 1
+            node_r = HALO_R + 1
             ordered: list[BandSpec] = [b for b in self._bands if b.name != self._selected_band]
             sel = next((b for b in self._bands if b.name == self._selected_band), None)
             if sel is not None:
@@ -560,12 +568,7 @@ class GraphWidget(Widget):
             ctx.draw_text((tx, ty), text, fill=_AXIS_LABEL_COLOR, font=font)
 
     def _paint_node(self, ctx, cx: int, cy: int, color: tuple[int, int, int], selected: bool) -> None:
-        r = self.NODE_R
-        ctx.draw_ellipse(Box(cx - r - 2, cy - r - 2, cx + r + 2, cy + r + 2), fill=BG_BLACK)
-        ctx.draw_ellipse(Box(cx - r, cy - r, cx + r, cy + r), fill=color)
-        if selected:
-            hr = self.HALO_R
-            ctx.draw_ellipse(Box(cx - hr, cy - hr, cx + hr, cy + hr), outline=HALO_COLOR, width=1)
+        paint_band_node(ctx, cx, cy, color, selected)
 
 
 # ── ReadoutWidget ────────────────────────────────────────────────────────────

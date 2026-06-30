@@ -1,8 +1,8 @@
-"""Graphic EQ panel — traditional horizontal-bar visualization.
+"""Graphic EQ panel — vertical bar visualization.
 
 ``GraphicEqPanel`` is the abstract base; subclasses provide band specs via
-``build_band_specs()``. ``BarWidget`` renders the vertical bars, frequency
-labels, and dB readout.
+``build_band_specs()``. ``BarWidget`` renders a 4 px wide track + fill bar
+per band, centered in equal-width columns, with a coloured selection handle.
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ from typing import Optional
 
 from plugins.base import PluginPanel
 from plugins.eq.band_spec import GraphicBandSpec
-from plugins.eq.curve import freq_to_x
+from plugins.eq.panel import paint_band_node
 from uilib.box import Box
 from uilib.config import Config
 from uilib.misc import InputEvent, get_text_size
@@ -24,36 +24,67 @@ from uilib.widget import Widget
 _W = 320
 _H = 240
 
-LABEL_Y0 = 0
-LABEL_Y1 = 16
+VISIBLE_BANDS  = 10
+COL_W          = _W // VISIBLE_BANDS   # 32 px per column
+BAR_W          = 3                      # track + fill width (matches node diameter)
 
-BAR_Y0 = 16
-BAR_Y1 = 200
-BAR_H = BAR_Y1 - BAR_Y0
-
-READOUT_Y0 = 200
-READOUT_Y1 = 212
-
-DB_MAX = 18.0
+DB_LABEL_H     = 16
+FREQ_LABEL_H   = 14
+BAR_Y0         = DB_LABEL_H            # 16
+BAR_Y1         = 192                   # bar area ends here
+BAR_H          = BAR_Y1 - BAR_Y0      # 176
+FREQ_LABEL_Y   = BAR_Y1 + 2            # 194 — just below bars, above chrome
+WIDGET_H       = FREQ_LABEL_Y + FREQ_LABEL_H  # 208 — includes freq labels, ends at chrome
 
 # ── colours ──────────────────────────────────────────────────────────────────
 
-BG_BLACK = (0, 0, 0)
-GRID_DIM = (45, 45, 45)
-GRID_0DB = (140, 140, 140)
-HALO_COLOR = (255, 255, 255)
-READOUT_COLOR = (200, 200, 200)
-LABEL_COLOR = (110, 110, 110)
-INACTIVE_ALPHA = 0.35  # multiplier for unselected bars
+BG_BLACK        = (0, 0, 0)
+TRACK_COLOR     = (40, 40, 40)
+FILL_INACTIVE   = (160, 160, 160)
+FILL_ACTIVE     = (240, 240, 240)
+DB_LABEL_COLOR  = (200, 200, 200)
+FREQ_LABEL_COLOR = (110, 110, 110)
 
-_DB_GRID = (-12.0, -6.0, 6.0, 12.0)
+
+# ── label helpers ────────────────────────────────────────────────────────────
+
+
+def _fmt_freq(hz: float) -> str:
+    """Format a frequency as ≤3 chars."""
+    if hz >= 10_000:
+        return f"{int(round(hz / 1000))}k"
+    if hz >= 1_000:
+        v = hz / 1000.0
+        return f"{v:.3g}k"
+    return f"{int(round(hz))}"
+
+
+def _fmt_db(db: float) -> str:
+    """Format a dB value as ≤3 chars (e.g. +6, -12, 0)."""
+    v = int(round(db))
+    if v == 0:
+        return "0"
+    return f"{v:+d}"
+
+
+# ── coordinate helper ────────────────────────────────────────────────────────
+
+
+def _gain_to_y(gain: float, band: GraphicBandSpec) -> int:
+    """Map gain_db to a pixel row; gain_min → BAR_Y1 (bottom), gain_max → BAR_Y0 (top)."""
+    span = band.gain_max - band.gain_min
+    if span <= 0:
+        return BAR_Y1
+    norm = (gain - band.gain_min) / span
+    norm = max(0.0, min(1.0, norm))
+    return int(BAR_Y1 - norm * BAR_H)
 
 
 # ── palette helper ──────────────────────────────────────────────────────────
 
 
 def _graphic_palette(n: int) -> list[tuple[int, int, int]]:
-    """Generate *n* RGB colours sweeping hue from 0° to 300° (red→yellow→green→cyan→blue→magenta)."""
+    """Generate *n* RGB colours sweeping hue 0°→300°."""
     import colorsys
 
     out: list[tuple[int, int, int]] = []
@@ -64,84 +95,44 @@ def _graphic_palette(n: int) -> list[tuple[int, int, int]]:
     return out
 
 
-# ── coordinate helpers ──────────────────────────────────────────────────────
-
-
-def _gain_to_y(gain_db: float, y_top: int, y_bot: int, db_max: float = DB_MAX) -> int:
-    """Map a dB value to a pixel row. y_top = +db_max, y_bot = -db_max."""
-    norm = (db_max - max(-db_max, min(db_max, gain_db))) / (2.0 * db_max)
-    return int(y_top + norm * (y_bot - y_top))
-
-
-def _db_to_y_scalar(db: float) -> int:
-    return _gain_to_y(db, BAR_Y0, BAR_Y1)
-
-
-_ZERO_DB_Y: int = _db_to_y_scalar(0.0)
-_DB_GRID_Y: frozenset[int] = frozenset(_db_to_y_scalar(db) for db in _DB_GRID)
-
-
 # ── BarWidget ────────────────────────────────────────────────────────────────
 
 
 class BarWidget(Widget):
-    """Vertical-bar visualization for graphic EQs.
+    """4 px-wide track+fill bars for graphic EQs, 10 bands visible at once.
 
-    Bars positioned by ``freq_hz`` on a log x-axis; height mapped from gain
-    within [gain_min, gain_max]. Frequency labels along the top, dB readout
-    along the bottom. Does NOT reuse ``GraphWidget``.
+    Each column is COL_W pixels wide. The track and fill bar are BAR_W=4 px,
+    centred in the column. A coloured handle sits at the fill's top edge for
+    the selected band. Bands scroll horizontally as selection moves.
     """
-
-    BAR_MIN_WIDTH = 4
-    BAR_GAP = 2
 
     def __init__(
         self,
         box: Box,
         bands: Sequence[GraphicBandSpec],
         font,
+        db_font=None,
         **kwargs,
     ) -> None:
         kwargs.setdefault("bkgnd_color", BG_BLACK)
         super().__init__(box=box, **kwargs)
         self._bands = bands
         self._font = font
+        self._db_font = db_font
         self._state: Optional[GraphicEqState] = None
         self._selected_band: Optional[str] = None
         self._bypassed: bool = False
+        self._first_visible: int = 0
 
-        # Precompute bar x-positions and widths
-        self._bar_xs: list[int] = []
-        self._bar_widths: list[int] = []
-        for i, band in enumerate(bands):
-            x = int(freq_to_x(band.freq_hz))
-            self._bar_xs.append(x)
-            if i < len(bands) - 1:
-                next_x = int(freq_to_x(bands[i + 1].freq_hz))
-                w = max(self.BAR_MIN_WIDTH, next_x - x - self.BAR_GAP)
-            else:
-                w = self.BAR_MIN_WIDTH
-            self._bar_widths.append(w)
+    @property
+    def first_visible(self) -> int:
+        return self._first_visible
 
-        # Staggered frequency labels — show every Nth label to avoid overlap
-        n_bands = len(bands)
-        label_step = max(1, n_bands // 8)
-        self._freq_labels: list[tuple[str, int]] = []
-        for i, band in enumerate(bands):
-            if i % label_step == 0:
-                label = self._fmt_freq_label(band.freq_hz)
-                self._freq_labels.append((label, self._bar_xs[i]))
-
-    @staticmethod
-    def _fmt_freq_label(hz: float) -> str:
-        if hz >= 1000.0:
-            k = hz / 1000.0
-            if k >= 10.0:
-                return f"{int(round(k))}k"
-            return f"{k:.1f}k"
-        return f"{int(round(hz))}"
-
-    # ── state setters ──────────────────────────────────────────────────────
+    def set_first_visible(self, n: int) -> None:
+        n = max(0, min(n, max(0, len(self._bands) - VISIBLE_BANDS)))
+        if n != self._first_visible:
+            self._first_visible = n
+            self.refresh()
 
     def set_state(self, state: GraphicEqState) -> None:
         self._state = state
@@ -165,83 +156,67 @@ class BarWidget(Widget):
         pass
 
     def _draw(self, ctx) -> None:
-        db = ctx.dirty_bounds
-        rx0, ry0 = db.x0, db.y0
-        rx1, ry1 = db.x1, db.y1
+        ctx.draw_rectangle(ctx.dirty_bounds, fill=BG_BLACK)
 
-        # Background
-        ctx.draw_rectangle(db, fill=BG_BLACK)
+        if self._state is None:
+            return
 
-        # Horizontal dB gridlines
-        hx0 = max(rx0, 0)
-        hx1 = min(rx1, _W)
-        hy0 = max(ry0, 0)
-        hy1 = min(ry1, BAR_H)
-        if hx0 < hx1 and hy0 < hy1:
-            for db_val in _DB_GRID:
-                y = _db_to_y_scalar(db_val) - BAR_Y0
-                if hy0 <= y < hy1:
-                    ctx.draw_line([(hx0, y), (hx1 - 1, y)], fill=GRID_DIM, width=1)
-            zero_y = _ZERO_DB_Y - BAR_Y0
-            if hy0 <= zero_y < hy1:
-                ctx.draw_line([(hx0, zero_y), (hx1 - 1, zero_y)], fill=GRID_0DB, width=1)
+        shade = 0.45 if self._bypassed else 1.0
+        fv = self._first_visible
+        visible = self._bands[fv : fv + VISIBLE_BANDS]
 
-        # Bars
-        if self._state is not None:
-            shade = 0.45 if self._bypassed else 1.0
-            for i, band in enumerate(self._bands):
-                p = self._state.bands.get(band.name)
-                if p is None:
-                    continue
-                cx = self._bar_xs[i]
-                bw = self._bar_widths[i]
-                if cx + bw // 2 <= rx0 or cx - bw // 2 >= rx1:
-                    continue
+        # 0 dB reference line — faint grey across full width
+        zero_y = _gain_to_y(0.0, visible[0]) if visible else BAR_Y0
+        ctx.draw_line(
+            [(ctx.dirty_bounds.x0, zero_y), (ctx.dirty_bounds.x1 - 1, zero_y)],
+            fill=(60, 60, 60),
+            width=1,
+        )
 
-                gain = p.gain_db if p.enabled else 0.0
-                y_top = _gain_to_y(gain, BAR_Y0, BAR_Y1)
-                y_bot = _ZERO_DB_Y
+        for col, band in enumerate(visible):
+            cx = col * COL_W + COL_W // 2
+            bar_x = cx - BAR_W // 2
 
-                bar_box = Box(cx - bw // 2, min(y_top, y_bot), cx + bw // 2 + 1, max(y_top, y_bot) + 1)
+            # Track — full height
+            ctx.draw_rectangle(Box(bar_x, BAR_Y0, bar_x + BAR_W, BAR_Y1), fill=TRACK_COLOR)
 
-                is_selected = band.name == self._selected_band
-                if is_selected:
-                    color = band.color
-                else:
-                    color = tuple(int(c * INACTIVE_ALPHA) for c in band.color)
+            p = self._state.bands.get(band.name)
+            if p is None:
+                continue
 
-                if shade < 1.0:
-                    color = tuple(int(c * shade) for c in color)
+            gain = p.gain_db if p.enabled else band.gain_min
+            gain_y = _gain_to_y(gain, band)
 
-                ctx.draw_rectangle(bar_box, fill=color)
+            is_sel = band.name == self._selected_band
 
-                if is_selected:
-                    ctx.draw_rectangle(bar_box, outline=HALO_COLOR, width=1)
+            fill_color: tuple[int, int, int] = FILL_ACTIVE if is_sel else FILL_INACTIVE
+            if shade < 1.0:
+                fill_color = tuple(int(c * shade) for c in fill_color)  # type: ignore[assignment]
 
-        # Frequency labels at top
-        if self._font is not None:
-            for text, fx in self._freq_labels:
-                tw, th = get_text_size(text, self._font)
-                tx = fx - tw // 2
-                if tx + tw <= rx0 or tx >= rx1:
-                    continue
-                ty = 0
-                ctx.draw_text((tx, ty), text, fill=LABEL_COLOR, font=self._font)
+            # Fill — bottom to gain position
+            if gain_y < BAR_Y1:
+                ctx.draw_rectangle(Box(bar_x, gain_y, bar_x + BAR_W, BAR_Y1), fill=fill_color)
 
-        # dB readout at bottom for selected band
-        if self._state is not None and self._selected_band is not None:
-            band = next((b for b in self._bands if b.name == self._selected_band), None)
-            if band is not None:
-                p = self._state.bands.get(band.name)
-                if p is not None:
-                    if p.enabled:
-                        readout = f"{band.name}: {p.gain_db:+.1f} dB"
-                    else:
-                        readout = f"{band.name}: disabled"
-                    tw, th = get_text_size(readout, self._font)
-                    tx = (_W - tw) // 2
-                    ty = READOUT_Y0 - BAR_Y0
-                    ctx.draw_text((tx, ty), readout, fill=READOUT_COLOR, font=self._font)
+            # Node — same circle style as parametric EQ
+            node_color: tuple[int, int, int] = band.color
+            if shade < 1.0:
+                node_color = tuple(int(c * shade) for c in node_color)  # type: ignore[assignment]
+            paint_band_node(ctx, cx, gain_y, node_color, is_sel)
+
+            # Frequency label — below bars, above chrome
+            if self._font is not None:
+                label = _fmt_freq(band.freq_hz)
+                tw, th = get_text_size(label, self._font)
+                tx = cx - tw // 2
+                ctx.draw_text((tx, FREQ_LABEL_Y), label, fill=FREQ_LABEL_COLOR, font=self._font)
+
+            # dB label — top of column for selected band only, smaller font
+            if is_sel:
+                db_font = self._db_font if self._db_font is not None else self._font
+                db_str = _fmt_db(p.gain_db if p.enabled else 0.0)
+                tw, th = get_text_size(db_str, db_font)
+                tx = cx - tw // 2
+                ctx.draw_text((tx, 0), db_str, fill=DB_LABEL_COLOR, font=db_font)
 
 
 # ── GraphicEqState ──────────────────────────────────────────────────────────
@@ -255,7 +230,7 @@ class GraphicBandParams:
 
 @dataclass(frozen=True)
 class GraphicEqState:
-    """State for graphic EQ panels — gain per band, no curve."""
+    """State for graphic EQ panels — gain per band."""
 
     plugin_enabled: bool
     bands: dict[str, GraphicBandParams]  # keyed by GraphicBandSpec.name
@@ -345,11 +320,13 @@ class GraphicEqPanel(PluginPanel[GraphicEqState]):
         self._state = self.snapshot_state()
         cfg = Config()
         font = cfg.get_font("tiny") or cfg.get_font("default")
+        db_font = cfg.get_font("small") or cfg.get_font("default")
 
         self._bar_widget = BarWidget(
-            box=Box.xywh(0, BAR_Y0, _W, BAR_H),
+            box=Box.xywh(0, 0, _W, WIDGET_H),
             bands=self.bands,
             font=font,
+            db_font=db_font,
             parent=self,
         )
 
@@ -422,17 +399,21 @@ class GraphicEqPanel(PluginPanel[GraphicEqState]):
             p = self._state.bands.get(sel_w.band.name)
             if p is not None:
                 self._bar_widget.set_state(self._state)
-        elif sel_w is self._btn_bypass:
-            pass
-        elif sel_w is self._btn_back:
-            pass
-        elif sel_w is self._btn_reset:
-            pass
 
     def _select_widget_ref(self, w):  # type: ignore[override]
         super()._select_widget_ref(w)
-        band_name = w.band.name if isinstance(w, GraphicBandSelectable) else None
-        self._bar_widget.set_selected(band_name)
+        if isinstance(w, GraphicBandSelectable):
+            band_name = w.band.name
+            self._bar_widget.set_selected(band_name)
+            # Scroll to keep selected band in view
+            idx = next((i for i, b in enumerate(self.bands) if b.name == band_name), 0)
+            fv = self._bar_widget.first_visible
+            if idx < fv:
+                self._bar_widget.set_first_visible(idx)
+            elif idx >= fv + VISIBLE_BANDS:
+                self._bar_widget.set_first_visible(idx - VISIBLE_BANDS + 1)
+        else:
+            self._bar_widget.set_selected(None)
 
     # ── band-selectable callbacks ───────────────────────────────────────────
 
