@@ -135,13 +135,14 @@ class TestGxGraphicEqBandSpecs:
     def test_band_count(self):
         from plugins.graphiceq.band_spec import BAND_SPECS
 
-        assert len(BAND_SPECS) == 10
+        assert len(BAND_SPECS) == 11
 
-    def test_non_sequential_port_naming(self):
+    def test_sequential_port_naming(self):
         from plugins.graphiceq.band_spec import BAND_SPECS
 
+        # Faust graphiceq.dsp maps g1..g11 to 31 Hz..20 kHz sequentially.
         syms = [b.gain_sym for b in BAND_SPECS]
-        assert syms == ["G10", "G11", "G1", "G2", "G3", "G4", "G5", "G6", "G7", "G8"]
+        assert syms == ["G1", "G2", "G3", "G4", "G5", "G6", "G7", "G8", "G9", "G10", "G11"]
 
     def test_gain_range(self):
         from plugins.graphiceq.band_spec import BAND_SPECS
