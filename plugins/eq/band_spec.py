@@ -26,9 +26,9 @@ class BandSpec:
     freq_max: float
     q_min: float
     q_max: float
+    color: tuple[int, int, int]
     gain_min: float = -18.0
     gain_max: float = 18.0
-    color: tuple[int, int, int] = (255, 255, 255)
 
 
 @dataclass(frozen=True)
@@ -36,6 +36,6 @@ class GraphicBandSpec:
     name: str
     freq_hz: float
     gain_sym: str
+    color: tuple[int, int, int]
     gain_min: float = -18.0
     gain_max: float = 18.0
-    color: tuple[int, int, int] = (255, 255, 255)

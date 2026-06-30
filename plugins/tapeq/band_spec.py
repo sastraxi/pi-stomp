@@ -17,6 +17,17 @@ _FREQ_RANGES: list[tuple[float, float]] = [
     (10000.0, 20000.0),
 ]
 
+_COLORS: list[tuple[int, int, int]] = [
+    (255, 110, 110),
+    (255, 180, 80),
+    (255, 230, 80),
+    (130, 220, 110),
+    (110, 200, 230),
+    (140, 150, 240),
+    (210, 130, 230),
+    (240, 140, 180),
+]
+
 BAND_SPECS: tuple[BandSpec, ...] = tuple(
     BandSpec(
         name=f"B{i+1}",
@@ -32,6 +43,7 @@ BAND_SPECS: tuple[BandSpec, ...] = tuple(
         q_max=5.0,
         gain_min=-50.0,
         gain_max=20.0,
+        color=_COLORS[i],
     )
     for i, (fmin, fmax) in enumerate(_FREQ_RANGES)
 )
