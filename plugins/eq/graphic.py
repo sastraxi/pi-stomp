@@ -30,11 +30,11 @@ BAR_W          = 3                      # track + fill width (matches node diame
 
 READOUT_H      = 22
 FREQ_LABEL_H   = 14
-BAR_Y0         = 0                      # bars start at widget top (readout is above)
-BAR_Y1         = 172                    # bar area height
-BAR_H          = BAR_Y1 - BAR_Y0      # 172
-FREQ_LABEL_Y   = BAR_Y1 + 2            # 174 — just below bars, above chrome
-WIDGET_H       = FREQ_LABEL_Y + FREQ_LABEL_H  # 188 — includes freq labels
+BAR_Y0         = 6                      # bars start 6px from widget top (halo clearance from readout)
+BAR_Y1         = 164                    # bar area ends 8px before freq labels (halo clearance)
+BAR_H          = BAR_Y1 - BAR_Y0      # 158
+FREQ_LABEL_Y   = BAR_Y1 + 8            # 172 — 6px halo + 2px padding below bars
+WIDGET_H       = FREQ_LABEL_Y + FREQ_LABEL_H  # 186 — includes freq labels
 
 # ── colours ──────────────────────────────────────────────────────────────────
 
