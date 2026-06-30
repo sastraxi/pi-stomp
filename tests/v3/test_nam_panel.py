@@ -5,8 +5,22 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from pistomp.nam.engine import CaptureState
 from pistomp.nam.panel import NamCapturePanel
+
+
+@pytest.fixture(autouse=True)
+def _no_jack(monkeypatch):
+    """Suppress all jack_connect/jack_disconnect/jack_lsp subprocess calls."""
+    import pistomp.nam.routing as routing
+
+    monkeypatch.setattr(routing, "connect_monitor", lambda **_: None)
+    monkeypatch.setattr(routing, "disconnect_monitor", lambda **_: None)
+    monkeypatch.setattr(routing, "snapshot", lambda **_: [])
+    monkeypatch.setattr(routing, "clear", lambda **_: None)
+    monkeypatch.setattr(routing, "restore", lambda *_: None)
 
 
 # ---------------------------------------------------------------------------
