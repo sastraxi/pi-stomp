@@ -7,17 +7,13 @@ labels, and dB readout.
 
 from __future__ import annotations
 
-import math
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Optional
 
-import numpy as np
-import pygame
-
 from plugins.base import PluginPanel
 from plugins.eq.band_spec import GraphicBandSpec
-from plugins.eq.curve import FREQ_MAX_HZ, FREQ_MIN_HZ, GRAPH_W, freq_to_x
+from plugins.eq.curve import freq_to_x
 from uilib.box import Box
 from uilib.config import Config
 from uilib.misc import InputEvent, get_text_size
