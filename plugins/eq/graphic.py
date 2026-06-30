@@ -13,7 +13,7 @@ from typing import Optional
 
 from plugins.base import PluginPanel
 from plugins.eq.band_spec import GraphicBandSpec
-from plugins.eq.panel import paint_band_node
+from plugins.eq.panel import paint_band_node, _fmt_freq as _fmt_freq_long
 from uilib.box import Box
 from uilib.config import Config
 from uilib.misc import InputEvent, get_text_size
@@ -28,13 +28,13 @@ VISIBLE_BANDS  = 10
 COL_W          = _W // VISIBLE_BANDS   # 32 px per column
 BAR_W          = 3                      # track + fill width (matches node diameter)
 
-DB_LABEL_H     = 16
+READOUT_H      = 22
 FREQ_LABEL_H   = 14
-BAR_Y0         = DB_LABEL_H            # 16
-BAR_Y1         = 192                   # bar area ends here
-BAR_H          = BAR_Y1 - BAR_Y0      # 176
-FREQ_LABEL_Y   = BAR_Y1 + 2            # 194 — just below bars, above chrome
-WIDGET_H       = FREQ_LABEL_Y + FREQ_LABEL_H  # 208 — includes freq labels, ends at chrome
+BAR_Y0         = 0                      # bars start at widget top (readout is above)
+BAR_Y1         = 172                    # bar area height
+BAR_H          = BAR_Y1 - BAR_Y0      # 172
+FREQ_LABEL_Y   = BAR_Y1 + 2            # 174 — just below bars, above chrome
+WIDGET_H       = FREQ_LABEL_Y + FREQ_LABEL_H  # 188 — includes freq labels
 
 # ── colours ──────────────────────────────────────────────────────────────────
 
@@ -42,7 +42,7 @@ BG_BLACK        = (0, 0, 0)
 TRACK_COLOR     = (40, 40, 40)
 FILL_INACTIVE   = (160, 160, 160)
 FILL_ACTIVE     = (240, 240, 240)
-DB_LABEL_COLOR  = (200, 200, 200)
+READOUT_COLOR   = (200, 200, 200)
 FREQ_LABEL_COLOR = (110, 110, 110)
 
 
@@ -99,9 +99,9 @@ def _graphic_palette(n: int) -> list[tuple[int, int, int]]:
 
 
 class BarWidget(Widget):
-    """4 px-wide track+fill bars for graphic EQs, 10 bands visible at once.
+    """3 px-wide track+fill bars for graphic EQs, 10 bands visible at once.
 
-    Each column is COL_W pixels wide. The track and fill bar are BAR_W=4 px,
+    Each column is COL_W pixels wide. The track and fill bar are BAR_W=3 px,
     centred in the column. A coloured handle sits at the fill's top edge for
     the selected band. Bands scroll horizontally as selection moves.
     """
@@ -111,14 +111,12 @@ class BarWidget(Widget):
         box: Box,
         bands: Sequence[GraphicBandSpec],
         font,
-        db_font=None,
         **kwargs,
     ) -> None:
         kwargs.setdefault("bkgnd_color", BG_BLACK)
         super().__init__(box=box, **kwargs)
         self._bands = bands
         self._font = font
-        self._db_font = db_font
         self._state: Optional[GraphicEqState] = None
         self._selected_band: Optional[str] = None
         self._bypassed: bool = False
@@ -210,13 +208,57 @@ class BarWidget(Widget):
                 tx = cx - tw // 2
                 ctx.draw_text((tx, FREQ_LABEL_Y), label, fill=FREQ_LABEL_COLOR, font=self._font)
 
-            # dB label — top of column for selected band only, smaller font
-            if is_sel:
-                db_font = self._db_font if self._db_font is not None else self._font
-                db_str = _fmt_db(p.gain_db if p.enabled else 0.0)
-                tw, th = get_text_size(db_str, db_font)
-                tx = cx - tw // 2
-                ctx.draw_text((tx, 0), db_str, fill=DB_LABEL_COLOR, font=db_font)
+
+# ── ReadoutWidget ────────────────────────────────────────────────────────────
+
+
+class GraphicReadoutWidget(Widget):
+    """Top-bar with band-number / frequency / dB, left/center/right aligned."""
+
+    def __init__(self, box: Box, font, **kwargs) -> None:
+        kwargs.setdefault("bkgnd_color", BG_BLACK)
+        super().__init__(box=box, **kwargs)
+        self._font = font
+        self._band_idx: int = 0
+        self._band_total: int = 0
+        self._freq: str = ""
+        self._gain: str = ""
+        self._message: Optional[str] = None
+
+    def set_fields(self, band_idx: int, band_total: int, freq: str, gain: str) -> None:
+        if self._message is None and band_idx == self._band_idx and band_total == self._band_total and freq == self._freq and gain == self._gain:
+            return
+        self._band_idx = band_idx
+        self._band_total = band_total
+        self._freq = freq
+        self._gain = gain
+        self._message = None
+        self.refresh()
+
+    def set_message(self, text: str) -> None:
+        if self._message == text:
+            return
+        self._message = text
+        self.refresh()
+
+    def _draw_erase(self, ctx) -> None:
+        ctx.draw_rectangle(ctx.bounds, fill=BG_BLACK)
+
+    def _draw(self, ctx) -> None:
+        if self._message is not None:
+            ctx.draw_text((6, 1), self._message, fill=READOUT_COLOR, font=self._font)
+            return
+        # Left: band number
+        band_str = f"Band {self._band_idx + 1}/{self._band_total}"
+        ctx.draw_text((6, 1), band_str, fill=READOUT_COLOR, font=self._font)
+        # Center: frequency
+        if self._freq:
+            tw, _ = get_text_size(self._freq, self._font)
+            ctx.draw_text((_W // 2 - tw // 2, 1), self._freq, fill=READOUT_COLOR, font=self._font)
+        # Right: gain
+        if self._gain:
+            tw, _ = get_text_size(self._gain, self._font)
+            ctx.draw_text((_W - 6 - tw, 1), self._gain, fill=READOUT_COLOR, font=self._font)
 
 
 # ── GraphicEqState ──────────────────────────────────────────────────────────
@@ -320,13 +362,17 @@ class GraphicEqPanel(PluginPanel[GraphicEqState]):
         self._state = self.snapshot_state()
         cfg = Config()
         font = cfg.get_font("tiny") or cfg.get_font("default")
-        db_font = cfg.get_font("small") or cfg.get_font("default")
+        btn_font = cfg.get_font("default")
 
+        self._readout = GraphicReadoutWidget(
+            box=Box.xywh(0, 0, _W, READOUT_H),
+            font=btn_font,
+            parent=self,
+        )
         self._bar_widget = BarWidget(
-            box=Box.xywh(0, 0, _W, WIDGET_H),
+            box=Box.xywh(0, READOUT_H, _W, WIDGET_H),
             bands=self.bands,
             font=font,
-            db_font=db_font,
             parent=self,
         )
 
@@ -397,8 +443,24 @@ class GraphicEqPanel(PluginPanel[GraphicEqState]):
         sel_w = self.sel_ref
         if isinstance(sel_w, GraphicBandSelectable):
             p = self._state.bands.get(sel_w.band.name)
-            if p is not None:
-                self._bar_widget.set_state(self._state)
+            if p is None:
+                self._readout.set_message("")
+            else:
+                idx = next((i for i, b in enumerate(self.bands) if b.name == sel_w.band.name), 0)
+                freq = _fmt_freq_long(sel_w.band.freq_hz)
+                if not p.enabled:
+                    gain = "disabled"
+                else:
+                    gain = f"{p.gain_db:+.1f} dB"
+                self._readout.set_fields(idx, len(self.bands), freq, gain)
+        elif sel_w is self._btn_bypass:
+            self._readout.set_message("Plugin bypassed" if self.plugin.is_bypassed() else "Bypass plugin")
+        elif sel_w is self._btn_back:
+            self._readout.set_message("Close EQ")
+        elif sel_w is self._btn_reset:
+            self._readout.set_message("Reset to pedalboard")
+        else:
+            self._readout.set_message("")
 
     def _select_widget_ref(self, w):  # type: ignore[override]
         super()._select_widget_ref(w)
@@ -414,6 +476,7 @@ class GraphicEqPanel(PluginPanel[GraphicEqState]):
                 self._bar_widget.set_first_visible(idx - VISIBLE_BANDS + 1)
         else:
             self._bar_widget.set_selected(None)
+        self._update_readout()
 
     # ── band-selectable callbacks ───────────────────────────────────────────
 
