@@ -25,6 +25,7 @@ from plugins.eq.curve import (
 )
 from uilib.box import Box
 from uilib.config import Config
+from uilib.glyphs.circle import CircleGlyph, RingGlyph
 from uilib.misc import InputEvent, get_text_size
 from uilib.widget import Widget
 
@@ -59,16 +60,27 @@ HALO_COLOR = (255, 255, 255)
 READOUT_COLOR = (200, 200, 200)
 INACTIVE_SHADE = 0.45
 
-NODE_R = 3
+NODE_R = 4
 HALO_R = 6
+
+
+def _tint_mask(mask: pygame.Surface, color: tuple[int, int, int]) -> pygame.Surface:
+    tinted = mask.copy()
+    color_surf = pygame.Surface(mask.get_size(), pygame.SRCALPHA)
+    color_surf.fill(color)
+    tinted.blit(color_surf, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
+    return tinted
 
 
 def paint_band_node(ctx, cx: int, cy: int, color: tuple[int, int, int], selected: bool) -> None:
     """Paint the parametric-EQ node circle (black eraser, coloured fill, optional halo)."""
-    ctx.draw_ellipse(Box(cx - NODE_R - 2, cy - NODE_R - 2, cx + NODE_R + 2, cy + NODE_R + 2), fill=BG_BLACK)
-    ctx.draw_ellipse(Box(cx - NODE_R, cy - NODE_R, cx + NODE_R, cy + NODE_R), fill=color)
+    eraser = CircleGlyph(NODE_R + 2)
+    ctx.paste(_tint_mask(eraser.render(), BG_BLACK), (cx - eraser.radius, cy - eraser.radius))
+    node = CircleGlyph(NODE_R)
+    ctx.paste(_tint_mask(node.render(), color), (cx - node.radius, cy - node.radius))
     if selected:
-        ctx.draw_ellipse(Box(cx - HALO_R, cy - HALO_R, cx + HALO_R, cy + HALO_R), outline=HALO_COLOR, width=1)
+        halo = RingGlyph(HALO_R)
+        ctx.paste(_tint_mask(halo.render(), HALO_COLOR), (cx - halo.half_size, cy - halo.half_size))
 
 SMEAR_ALPHA = 0.65
 SMEAR_LENGTH_MAX = 60
@@ -461,6 +473,7 @@ class GraphWidget(Widget):
                 ox, oy = ctx._f().topleft
                 surf = ctx.surface
                 px = None
+                sub = None
                 try:
                     px = pygame.surfarray.pixels3d(surf)
                     sub = px[ox + cx0 : ox + cx1, oy + cy0 : oy + cy1, :]
@@ -526,6 +539,7 @@ class GraphWidget(Widget):
                     np.clip(result, 0, 255, out=result)
                     sub[:] = result.astype(np.uint8)
                 finally:
+                    del sub
                     del px
 
         if self._state is not None and self._node_positions:
