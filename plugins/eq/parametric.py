@@ -642,10 +642,10 @@ class BandSelectable(Widget):
 
     def input_event(self, event) -> bool:  # type: ignore[override]
         if event == InputEvent.CLICK:
-            self._panel._on_band_click(self.band)
+            self._panel._toggle_band_enable(self.band)
             return True
         if event == InputEvent.LONG_CLICK:
-            self._panel._on_band_long(self.band)
+            self._panel._reset_band_to_snapshot(self.band)
             return True
         return False
 
@@ -864,7 +864,7 @@ class ParametricEqPanel(PluginPanel[EqState]):
 
     # ── band-selectable callbacks ───────────────────────────────────────────
 
-    def _on_band_click(self, band: BandSpec) -> None:
+    def _toggle_band_enable(self, band: BandSpec) -> None:
         if band.enable_sym is None:
             return
         p = self._state.bands[band.name]
@@ -872,7 +872,7 @@ class ParametricEqPanel(PluginPanel[EqState]):
         self.set_param(band.enable_sym, 1.0 if new_enabled else 0.0)
         self._replace_band(band, enabled=new_enabled)
 
-    def _on_band_long(self, band: BandSpec) -> None:
+    def _reset_band_to_snapshot(self, band: BandSpec) -> None:
         snap = self.plugin.pedalboard_snapshot
         for symbol in (band.enable_sym, band.freq_sym, band.q_sym):
             if symbol is None:

@@ -13,7 +13,7 @@ from typing import Optional
 
 from plugins.base import PluginPanel
 from plugins.eq.band_spec import GraphicBandSpec
-from plugins.eq.panel import paint_band_node, _fmt_freq as _fmt_freq_long
+from plugins.eq.parametric import paint_band_node, _fmt_freq as _fmt_freq_long
 from uilib.box import Box
 from uilib.config import Config
 from uilib.misc import InputEvent, get_text_size
@@ -298,9 +298,10 @@ class GraphicBandSelectable(Widget):
 
     def input_event(self, event) -> bool:  # type: ignore[override]
         if event == InputEvent.CLICK:
-            return False
+            self._panel._reset_band_gain(self.band)
+            return True
         if event == InputEvent.LONG_CLICK:
-            self._panel._on_band_long(self.band)
+            self._panel._reset_band_to_snapshot(self.band)
             return True
         return False
 
@@ -480,7 +481,15 @@ class GraphicEqPanel(PluginPanel[GraphicEqState]):
 
     # ── band-selectable callbacks ───────────────────────────────────────────
 
-    def _on_band_long(self, band: GraphicBandSpec) -> None:
+    def _reset_band_gain(self, band: GraphicBandSpec) -> None:
+        """Reset the band's gain to 0 dB."""
+        p = self._state.bands.get(band.name)
+        if p is None or p.gain_db == 0.0:
+            return
+        self.set_param(band.gain_sym, 0.0)
+        self._replace_band(band, gain_db=0.0)
+
+    def _reset_band_to_snapshot(self, band: GraphicBandSpec) -> None:
         snap = self.plugin.pedalboard_snapshot
         if band.gain_sym in snap and not self._is_symbol_locked(self.plugin.instance_id, band.gain_sym):
             self.set_param(band.gain_sym, snap[band.gain_sym])

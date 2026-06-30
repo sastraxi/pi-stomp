@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from plugins.eq.panel import ParametricEqPanel
+from plugins.eq.parametric import ParametricEqPanel
 from plugins.tapeq.band_spec import BAND_SPECS
 
 
