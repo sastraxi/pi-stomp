@@ -10,7 +10,7 @@ import pytest
 from common.parameter import Parameter
 from modalapi.plugin import Plugin
 from plugins import lookup, register, PluginCustomization
-from plugins.base import PluginPanel
+from plugins.fullscreen import FullscreenPluginPanel
 from pistomp.input.event import EncoderEvent, SwitchEvent, SwitchEventKind
 from uilib.box import Box
 from uilib.panel import PanelStack
@@ -45,7 +45,7 @@ class DemoState:
     gain: float = 0.0
 
 
-class DemoPanel(PluginPanel[DemoState]):
+class DemoPanel(FullscreenPluginPanel[DemoState]):
     def snapshot_state(self) -> DemoState:
         p = self.plugin.parameters.get("gain")
         return DemoState(gain=float(p.value) if p else 0.0)
@@ -82,6 +82,7 @@ def fake_plugin():
         info={},
         category="Utility",
         uri="http://example.com/demo",
+        customization=lookup("http://example.com/demo"),
     )
     # pedalboard_snapshot set by parser in real life; simulate here
     # Note: Plugin.__init__ strips leading '/' from instance_id
@@ -99,7 +100,7 @@ def fake_handler():
 
 class TestRegistry:
     def test_register_panel_populates_dict(self, fake_plugin):
-        c = lookup(fake_plugin)
+        c = lookup(fake_plugin.uri)
         assert c.panel_cls is DemoPanel
 
 

@@ -1,79 +1,48 @@
-"""Plugin customization registry.
-
-A single source of truth for all per-plugin-type overrides.  Each LV2 URI
-can register a ``PluginCustomization`` dataclass that bundles:
-
-1. **Panel** — a fullscreen ``PluginPanel`` subclass for this plugin type.
-2. **Display name** — override the heuristic name (static string or callable).
-3. **Subtitle** — override the subtitle shown below the plugin name.
-4. **Shortpress** — whether a short click opens the panel (like longpress)
-   instead of toggling bypass.
-5. **Tile active color** — background color when the plugin is active.
-6. **Tile border** — per-side border colors for the plugin tile.
-7. **Menu widget** — a custom ``Widget`` subclass rendered inside a regular
-   menu dialog for low-band-count plugins (instead of a fullscreen panel).
-
-Future customizations (color schemes, …) are just new fields on
-the dataclass — no existing registrations break.
-"""
+"""URI → PluginCustomization registry. The type lives in `modalapi.plugin_customization`."""
 
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from dataclasses import replace
+from pathlib import Path
 
-from common.color import RectBorder
+from modalapi.plugin_customization import PluginCustomization, PluginExtraData
 
-if TYPE_CHECKING:
-    from plugins.base import PluginPanel
-    from modalapi.plugin import Plugin
-    from uilib.widget import Widget
+__all__ = ["PluginCustomization", "register", "lookup", "registered_uris"]
 
 
-@dataclass(frozen=True)
-class PluginCustomization:
-    """All per-plugin-type overrides for a single LV2 URI.
-
-    Every field has a sensible default — unregistered plugins get a
-    ``PluginCustomization()`` with all ``None`` / ``False``, which means
-    "use the standard heuristic behaviour".
-    """
-
-    panel_cls: type[PluginPanel] | None = None
-    menu_widget_cls: type[Widget] | None = None
-    display_name: str | None = None
-    display_name_fn: Callable[[Plugin], str | None] | None = field(default=None, compare=False, hash=False)
-    subtitle_fn: Callable[[Plugin], str | None] | None = field(default=None, compare=False, hash=False)
-    intercept_shortpress: bool = False
-    tile_active_color: tuple[int, int, int] | None = None
-    tile_border: RectBorder | None = None
+ExtraDataParser = Callable[[str], PluginExtraData | None]
+_URI_MAP: dict[str, tuple[PluginCustomization, ExtraDataParser | None]] = {}
 
 
-# ── Registry ──────────────────────────────────────────────────────────────────
-
-_URI_MAP: dict[str, PluginCustomization] = {}
-_DEFAULT = PluginCustomization()
-
-
-def register(*uris: str, customization: PluginCustomization) -> None:
-    """Register a ``PluginCustomization`` for one or more LV2 URIs."""
+def register(
+    *uris: str,
+    customization: PluginCustomization,
+    extra_data_fn: ExtraDataParser | None = None,
+) -> None:
+    """`extra_data_fn` (if given) is called by `lookup` with the plugin's `effect.ttl` contents to populate `customization.extra_data`."""
     for uri in uris:
-        _URI_MAP[uri] = customization
+        _URI_MAP[uri] = (customization, extra_data_fn)
 
 
-def lookup(plugin: Plugin) -> PluginCustomization:
-    """Resolve the customization for a plugin by its URI.
-
-    Returns ``PluginCustomization()`` (all defaults) for unregistered URIs.
-    """
-    if not plugin.uri:
-        return _DEFAULT
-
-    c = _URI_MAP.get(plugin.uri)
-    return c if c is not None else _DEFAULT
+def lookup(
+    uri: str | None,
+    bundlepath: str = "",
+    instance_number: int | None = None,
+) -> PluginCustomization:
+    if not uri:
+        return PluginCustomization()
+    customization, parser = _URI_MAP.get(uri, (PluginCustomization(), None))
+    if parser is not None and instance_number is not None:
+        try:
+            ttl = (Path(bundlepath) / f"effect-{instance_number}" / "effect.ttl").read_text(encoding="utf-8")
+        except OSError:
+            return customization
+        extra = parser(ttl)
+        if extra is not None:
+            return replace(customization, extra_data=extra)
+    return customization
 
 
 def registered_uris() -> frozenset[str]:
-    """Return all URIs that have a registered customization."""
     return frozenset(_URI_MAP)

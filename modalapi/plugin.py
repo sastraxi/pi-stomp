@@ -17,11 +17,16 @@ from __future__ import annotations
 
 import json
 import re
-from functools import cached_property
-from pathlib import Path
+from dataclasses import replace
+from typing import TYPE_CHECKING
 
+from common.color import RectBorder
 from common.parameter import Parameter
+from modalapi.plugin_customization import PluginCustomization, PluginExtraData
 from pistomp.controller import Controller
+
+if TYPE_CHECKING:
+    from plugins.base import PluginPanel
 
 Point = tuple[int, int]
 
@@ -30,9 +35,6 @@ LcdPosition = tuple[int, int, int] | tuple[Point, Point, int]
 
 
 class Plugin:
-    _NOTES_RE = re.compile(r'<[^>]*notes#text>\s+"""(.*?)"""', re.DOTALL)
-    _MODEL_RE = re.compile(r'<[^>]*#model>\s+<([^>]+)>')
-
     def __init__(
         self,
         instance_id: str,
@@ -40,10 +42,14 @@ class Plugin:
         info: dict | None,
         category: str | None = None,
         uri: str | None = None,
-        notes_ttl_path: Path | None = None,
-        model_ttl_path: Path | None = None,
+        customization: PluginCustomization | None = None,
+        extra_data: PluginExtraData | None = None,
+        instance_number: int | None = None,
     ) -> None:
         self.instance_id: str = instance_id.lstrip("/")
+        # mod-host's numeric instance (pedal:instanceNumber). Names its JACK
+        # ports "effect_<N>:<symbol>", so panels that tap a plugin's audio need it.
+        self.instance_number: int | None = instance_number
         self.info: dict | None = info
         self.name: str = (info or {}).get("name") or self.instance_id
         self.parameters: dict[str, Parameter] = parameters
@@ -56,36 +62,53 @@ class Plugin:
         self.category: str | None = category
         self.uri: str | None = uri
         self.pedalboard_snapshot: dict[str, float] = {}
-        self._notes_ttl_path = notes_ttl_path
-        self._model_ttl_path = model_ttl_path
+        c: PluginCustomization = customization or PluginCustomization()
+        if extra_data is not None:
+            c = replace(c, extra_data=extra_data)
+        self.customization: PluginCustomization = c
 
-    @cached_property
-    def notes_text(self) -> str | None:
-        if self._notes_ttl_path is None:
-            return None
-        try:
-            content = self._notes_ttl_path.read_text(encoding="utf-8")
-        except OSError:
-            return None
-        m = self._NOTES_RE.search(content)
-        return m.group(1) if m else None
+    @property
+    def extra_data(self) -> PluginExtraData | None:
+        return self.customization.extra_data
 
-    @cached_property
-    def model_path(self) -> str | None:
-        if self._model_ttl_path is None:
-            return None
-        try:
-            content = self._model_ttl_path.read_text(encoding="utf-8")
-        except OSError:
-            return None
-        m = self._MODEL_RE.search(content)
-        return m.group(1) if m else None
-
-    @cached_property
+    @property
     def display_name(self) -> str:
+        c = self.customization
+        if c.display_name_fn:
+            override = c.display_name_fn(self)
+            if override is not None:
+                return override
+        if c.display_name:
+            return c.display_name
+        return self._heuristic_name()
+
+    def _heuristic_name(self) -> str:
         id_base = re.sub(r"_?\d+$", "", self.instance_id).lower()
         raw = self.name if len(self.name) < len(self.instance_id) or id_base in ("mono", "stereo") else self.instance_id
         return raw.replace("_", "")
+
+    @property
+    def subtitle(self) -> str | None:
+        c = self.customization
+        if c.subtitle_fn:
+            return c.subtitle_fn(self)
+        return None
+
+    @property
+    def tile_active_color(self) -> tuple[int, int, int] | None:
+        return self.customization.tile_active_color
+
+    @property
+    def tile_border(self) -> RectBorder | None:
+        return self.customization.tile_border
+
+    @property
+    def panel_cls(self) -> type[PluginPanel] | None:
+        return self.customization.panel_cls
+
+    @property
+    def intercept_shortpress(self) -> bool:
+        return self.customization.intercept_shortpress
 
     def is_bypassed(self) -> bool:
         param = self.parameters.get(":bypass")

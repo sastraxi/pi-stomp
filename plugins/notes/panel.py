@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+import re
+from dataclasses import dataclass
+
 from typing_extensions import override
 
 import common.token as Token
-from plugins.base import PluginPanel
+from modalapi.plugin import Plugin
+from modalapi.plugin_customization import PluginExtraData, extra_data_as
+from plugins.fullscreen import FullscreenPluginPanel
 from plugins.customization import PluginCustomization, register
 from plugins.notes import NOTES_URI
 from pistomp.input.event import ControllerEvent, EncoderEvent
@@ -15,6 +20,26 @@ from uilib.misc import TextHAlign, get_text_size
 from uilib.paint import PaintContext
 from uilib.text import TextWidget
 from uilib.widget import Widget
+
+_NOTES_RE = re.compile(r'<[^>]*notes#text>\s+"""(.*?)"""', re.DOTALL)
+
+
+@dataclass(frozen=True)
+class NotesData(PluginExtraData):
+    """The note text embedded in a Notes instance's effect TTL."""
+
+    text: str
+
+
+def _parse_notes(ttl: str) -> NotesData | None:
+    m = _NOTES_RE.search(ttl)
+    return NotesData(text=m.group(1)) if m else None
+
+
+def _notes_text(plugin: Plugin) -> str:
+    data = extra_data_as(plugin, NotesData)
+    return data.text if data is not None else ""
+
 
 # layout constants (shared with base)
 _W = 320
@@ -79,7 +104,7 @@ def _wrap_lines(text: str, font, max_w: int) -> list[str]:
     return out
 
 
-class NotesPanel(PluginPanel[None]):
+class NotesPanel(FullscreenPluginPanel[None]):
     """Read-only text viewer for Notes plugin instances.
 
     Nav encoder scrolls line by line; all other encoder and footswitch
@@ -103,7 +128,7 @@ class NotesPanel(PluginPanel[None]):
         self._line_h = max(1, line_h)
         self._vis_count = max(1, (_CONTENT_H - _MARGIN) // self._line_h)
 
-        raw = self.plugin.notes_text or ""
+        raw = _notes_text(self.plugin)
         text_w = _W - 2 * _MARGIN - _SB_W - 2
         self._lines = _wrap_lines(raw, font, text_w)
         self._top = 0
@@ -158,10 +183,20 @@ class NotesPanel(PluginPanel[None]):
             self._scrollbar.update(self._top)
 
 
-def _notes_shortname(plugin) -> str | None:
-    if plugin.notes_text:
-        return "✎" + plugin.notes_text.split('\n')[0].strip()
+def _notes_shortname(plugin: Plugin) -> str | None:
+    text = _notes_text(plugin)
+    if text:
+        return "✎" + text.split("\n")[0].strip()
     return None
 
 
-register(NOTES_URI, customization=PluginCustomization(panel_cls=NotesPanel, intercept_shortpress=True, display_name_fn=_notes_shortname))
+register(
+    NOTES_URI,
+    customization=PluginCustomization(
+        panel_cls=NotesPanel,
+        intercept_shortpress=True,
+        display_name_fn=_notes_shortname,
+        tile_active_color=(214, 217, 111),
+    ),
+    extra_data_fn=_parse_notes,
+)
