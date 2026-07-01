@@ -10,20 +10,29 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
-from common.parameter import Parameter, Type
+from common.parameter import Parameter
 from plugins.window import PluginWindow
 from uilib.box import Box
 from uilib.config import Config
 from uilib.glyphs.arc_ring import ArcRingGlyph
-from uilib.misc import InputEvent, get_text_size
+from uilib.misc import INACTIVE_SHADE, InputEvent, get_text_size, shade_color, step_for_param
 from uilib.widget import Widget
 
 # ── layout constants ──────────────────────────────────────────────────────────
 
 _ARC_RADIUS = 28
 _ARC_MARGIN = 2
-_ROW_H = 70  # vertical space one arc-ring row (ring + label) wants
 _MAX_H = 236  # never exceed the 240px LCD (2px breathing room)
+
+
+def _slot_box_size() -> tuple[int, int]:
+    """(width, height) one arc-ring slot needs, ring + label included."""
+    ring_wh = ArcRingGlyph(radius=_ARC_RADIUS).size + _ARC_MARGIN * 2
+    cfg = Config()
+    label_font = cfg.get_font("tiny") or cfg.get_font("small") or cfg.get_font("default")
+    assert label_font is not None
+    _, label_h = get_text_size("Ag", label_font)
+    return ring_wh, ring_wh + label_h + _ARC_MARGIN
 
 
 @dataclass(frozen=True)
@@ -60,7 +69,8 @@ class MultibandWindow(PluginWindow[None]):
         cols = 4 if n > 4 else n
         rows = (n + cols - 1) // cols
         top, bottom = self._chrome_overhead()
-        return (self.WIN_W, min(_MAX_H, top + rows * _ROW_H + bottom))
+        _, row_h = _slot_box_size()
+        return (self.WIN_W, min(_MAX_H, top + rows * row_h + bottom))
 
     def snapshot_state(self) -> None:
         return None
@@ -76,7 +86,7 @@ class MultibandWindow(PluginWindow[None]):
         assert value_font is not None and label_font is not None
 
         self._ring = ArcRingGlyph(radius=_ARC_RADIUS)
-        self._slot_widgets: list[_ParamSlotWidget] = []
+        self._slot_widgets: list[ParamSlotWidget] = []
 
         cb = self.content_box
         n = len(self.slots)
@@ -84,15 +94,15 @@ class MultibandWindow(PluginWindow[None]):
         rows = (n + cols - 1) // cols
         cell_w = cb.width // cols
         cell_h = cb.height // rows
-        ring_wh = self._ring.size + _ARC_MARGIN * 2
+        ring_wh, box_h = _slot_box_size()
 
         for i, slot in enumerate(self.slots):
             col = i % cols
             row = i // cols
             cx = cb.x0 + col * cell_w + cell_w // 2
             cy = cb.y0 + row * cell_h + cell_h // 2
-            box = Box.xywh(cx - ring_wh // 2, cy - ring_wh // 2, ring_wh, ring_wh)
-            w = _ParamSlotWidget(
+            box = Box.xywh(cx - ring_wh // 2, cy - box_h // 2, ring_wh, box_h)
+            w = ParamSlotWidget(
                 box=box,
                 slot=slot,
                 owner=self,
@@ -105,12 +115,12 @@ class MultibandWindow(PluginWindow[None]):
             self.add_sel_widget(w)
 
     def on_encoder_rotation(self, encoder_id: int, rotations: int) -> bool:
-        if encoder_id == 1 and isinstance(self.sel_ref, _ParamSlotWidget):
+        if encoder_id == 1 and isinstance(self.sel_ref, ParamSlotWidget):
             return self.sel_ref.on_encoder_rotation(rotations)
         return False
 
 
-class _ParamSlotWidget(Widget):
+class ParamSlotWidget(Widget):
     """Single arc-ring + label + value slot. Edits route through the owner window."""
 
     def __init__(
@@ -131,7 +141,14 @@ class _ParamSlotWidget(Widget):
         self._value_font = value_font
         self._label_font = label_font
         self._value: float | None = None
+        self._bypassed: bool = False
         self.sync()
+
+    def set_bypassed(self, bypassed: bool) -> None:
+        if bypassed == self._bypassed:
+            return
+        self._bypassed = bypassed
+        self.refresh()
 
     def _param(self) -> Parameter | None:
         return self._owner.plugin.parameters.get(self.slot.symbol)
@@ -179,22 +196,11 @@ class _ParamSlotWidget(Widget):
         param = self._param()
         if param is None or self._value is None:
             return False
-        new_value = self._value + rotations * self._compute_step(param)
+        new_value = self._value + rotations * step_for_param(param)
         new_value = max(param.minimum, min(param.maximum, new_value))
         if new_value != self._value:
             self.set_param(new_value)
         return True
-
-    @staticmethod
-    def _compute_step(param: Parameter) -> float:
-        t = param.type
-        if t in (Type.ENUMERATION, Type.INTEGER, Type.TOGGLED):
-            return 1.0
-        if t == Type.LOGARITHMIC:
-            # Multiplicative step: ~1/12 octave per detent.
-            ratio = 2.0 ** (1.0 / 12.0)
-            return max(0.01, (param.value or param.minimum) * (ratio - 1.0))
-        return max(0.01, (param.maximum - param.minimum) / 100.0)
 
     def set_selected(self, selected: bool) -> None:  # type: ignore[override]
         self.selected = selected
@@ -204,20 +210,22 @@ class _ParamSlotWidget(Widget):
         ctx.draw_rectangle(ctx.bounds, fill=self.bkgnd_color)
 
     def _draw(self, ctx) -> None:
+        shade = INACTIVE_SHADE if self._bypassed else 1.0
         ring_surf = self._ring.render(
             self._value_as_t(),
-            filled_color=self.slot.color,
-            empty_color=(60, 60, 60),
-            tip_color=(255, 255, 255),
+            filled_color=shade_color(self.slot.color, shade),
+            empty_color=shade_color((60, 60, 60), shade),
+            tip_color=shade_color((255, 255, 255), shade),
         )
         half = self._ring.half_size
         cx = ctx.width // 2
-        cy = ctx.height // 2
+        cy = half
         ctx.paste(ring_surf, (cx - half, cy - half))
 
         value_text = self._format_value()
         tw, th = get_text_size(value_text, self._value_font)
-        ctx.draw_text(((ctx.width - tw) // 2, cy - th // 2), value_text, fill=(255, 255, 255), font=self._value_font)
+        ctx.draw_text(((ctx.width - tw) // 2, cy - th // 2), value_text, fill=shade_color((255, 255, 255), shade), font=self._value_font)
 
-        lw, _ = get_text_size(self.slot.label, self._label_font)
-        ctx.draw_text(((ctx.width - lw) // 2, cy + half + 2), self.slot.label, fill=(180, 180, 180), font=self._label_font)
+        label = self.slot.label.upper()
+        lw, _ = get_text_size(label, self._label_font)
+        ctx.draw_text(((ctx.width - lw) // 2, 2 * half + _ARC_MARGIN), label, fill=shade_color((180, 180, 180), shade), font=self._label_font)
