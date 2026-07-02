@@ -76,24 +76,16 @@ def _blit_rgb_alpha(surface: pygame.Surface, rgb_arr: np.ndarray, alpha_arr: np.
 def _sdf_rounded_rect(width: int, height: int, radius: Radius) -> np.ndarray:
     """Signed distance from each pixel center to the nearest edge of a rounded rect.
 
-    Negative inside, positive outside, with the magnitude equal to the
-    distance in pixels. Pixel centers sit at (i + 0.5, j + 0.5) so a
-    pixel exactly on the edge has SDF = 0.
-
-    With a uniform radius this is the standard Inigo Quilez box-SDF:
+    Negative inside, positive outside; pixel centers at (i+0.5, j+0.5) so an
+    edge pixel has SDF = 0. Uniform radius uses the Inigo Quilez box-SDF:
       q = |p - center| - half_size + radius
       sdf = length(max(q, 0)) + min(max(q.x, q.y), 0) - radius
 
-    With per-corner radii, each corner's IQ box-SDF is exact only within
-    its own quadrant (the region where that corner is the nearest box
-    corner); outside it the formula returns a misleading value (deep in
-    the interior it goes hugely negative, which would let ``min`` wrongly
-    pick a far corner). Mask each corner's SDF to +inf outside its
-    quadrant, then take the element-wise min: each corner's SDF is the
-    correct local distance inside its quadrant and +inf (ignored by min)
-    outside it, so the min is the true SDF to the rounded rect. A square
-    corner (r=0) degenerates to the axis-aligned box-corner SDF, so the
-    min naturally picks the edge distance there.
+    Per-corner: each corner's IQ box-SDF is exact only within its own quadrant
+    — elsewhere it goes hugely negative and would let ``min`` wrongly pick a
+    far corner. Mask each to +inf outside its quadrant, then element-wise min
+    yields the true SDF. r=0 corners degenerate to the box-corner SDF so the
+    edge distance wins there.
     """
     tl, tr, bl, br = radius.top_left, radius.top_right, radius.bottom_left, radius.bottom_right
 
@@ -111,17 +103,6 @@ def _sdf_rounded_rect(width: int, height: int, radius: Radius) -> np.ndarray:
         inside = np.minimum(np.maximum(qx, qy), 0.0)
         return outside + inside - rr
 
-    # Per-corner: each corner's IQ box-SDF is exact only within its own
-    # quadrant (the region where that corner is the nearest box corner).
-    # Outside its quadrant the formula returns a misleading value (e.g.
-    # deep in the interior it goes hugely negative, which would let ``min``
-    # wrongly pick a far corner as the nearest boundary). Mask each corner's
-    # SDF to +inf outside its quadrant, then take the element-wise min: the
-    # min over the four corner SDFs is then the true SDF to the rounded
-    # rect, since each corner's SDF is the correct local distance inside
-    # its quadrant and +inf (ignored by min) outside it. A square corner
-    # (r=0) degenerates to the axis-aligned box-corner SDF, so the min
-    # naturally picks the edge distance there.
     INF = np.inf
     half_w = width / 2.0
     half_h = height / 2.0
@@ -179,8 +160,7 @@ def _render_filled_rounded_rect(
     if border_width < 0:
         border_width = 0
 
-    # Clamp each corner to the smaller adjacent edge so it can't round past
-    # the opposite edge; 0 is a square corner.
+    # Clamp each corner to half the smaller adjacent edge; 0 = square.
     r_tl = max(0, min(r_tl, width // 2, height // 2))
     r_tr = max(0, min(r_tr, width // 2, height // 2))
     r_br = max(0, min(r_br, width // 2, height // 2))
@@ -231,12 +211,10 @@ def _render_filled_rounded_rect(
 
         on_ring = (sdf >= -bw - 0.5) & (sdf <= 0.5)
         if on_ring.any():
-            # Per-pixel band: the radius of the nearest corner, or 0 in the
-            # edge bands. This makes the top/bottom border-color band thick
-            # near deep corners and thin near shallow (or square) ones, so a
-            # square top corner doesn't bleed the top-edge color down into
-            # the side edge. Falls back to the uniform scalar when all four
-            # corners match (the common leaf-widget case).
+            # Per-pixel band = nearest corner's radius (or 0 in the edge
+            # bands), so a square corner keeps its edge color thin and
+            # doesn't bleed across into the adjacent edge. Uniform scalar
+            # fast-path for the common all-corners-equal leaf widget.
             if r_tl == r_tr == r_br == r_bl:
                 band = max(float(r_tl), bw)
                 band_h = np.full((height, 1), float(band), dtype=np.float32)
@@ -253,37 +231,31 @@ def _render_filled_rounded_rect(
                     np.where(left, float(r_bl), float(r_br)),
                 )  # (H, W)
                 near = np.maximum(near, bw)
-                band_h = near  # (H, W) — top/bottom band depth per column
-                band_v = near  # (H, W) — left/right band depth per row
+                band_h = near
+                band_v = near
 
-            # Band weights with 1-pixel linear transition at the boundaries.
-            # top_w: 1.0 in the top band → 0.0 in the middle, transition at y=band.
-            # bot_w: 1.0 in the bottom band → 0.0 in the middle.
+            # 1px linear transition at the band boundaries.
             top_w = np.clip(band_h + 0.5 - Ycol, 0.0, 1.0)
             bot_w = np.clip(Ycol - (float(height) - band_h - 0.5), 0.0, 1.0)
-            # Zero out where the color is None (that edge has no border).
+            # Zero where that edge has no border.
             if border_top is None:
                 top_w = np.zeros_like(top_w)
             if border_bottom is None:
                 bot_w = np.zeros_like(bot_w)
             h_weight = top_w + bot_w
 
-            # Top vs bottom fraction for horizontal color.
             top_frac = top_w / (h_weight + 1e-10)
 
-            # Vertical edge validity: 1.0 on the left/right edge, 0.0 elsewhere.
-            # This prevents the vertical color from leaking to the top-center
-            # when the top color is None (fill flows through that edge).
+            # Vertical validity: gates the vertical color to the left/right
+            # edge so it can't leak to the top-center when border_top is None.
             v_valid = np.zeros((height, width), dtype=np.float32)
             if border_left is not None:
                 v_valid += np.clip(band_v + 0.5 - Xrow, 0.0, 1.0)
             if border_right is not None:
                 v_valid += np.clip(Xrow - (float(width) - band_v - 0.5), 0.0, 1.0)
-            v_valid = np.clip(v_valid, 0.0, 1.0)  # (H, W)
+            v_valid = np.clip(v_valid, 0.0, 1.0)
 
-            # Left vs right fraction for vertical color.
-            # Hard split at width/2 — the ring doesn't span the center, so
-            # the left and right edges never meet.
+            # Hard split at width/2 — the ring never spans the center.
             if border_left is not None and border_right is not None:
                 left_frac = np.where(Xrow < float(width) / 2.0, 1.0, 0.0)
             elif border_left is not None:
@@ -291,8 +263,7 @@ def _render_filled_rounded_rect(
             else:
                 left_frac = np.zeros_like(Xrow)
 
-            # Resolve colors to float arrays (None → (0,0,0), but v_valid/h_weight
-            # will be 0 there so the color never contributes).
+            # None → (0,0,0); v_valid/h_weight are 0 there so it never contributes.
             top_c = np.array(_to_rgb(border_top) or (0, 0, 0), dtype=np.float32)
             bot_c = np.array(_to_rgb(border_bottom) or (0, 0, 0), dtype=np.float32)
             left_c = np.array(_to_rgb(border_left) or (0, 0, 0), dtype=np.float32)
@@ -398,10 +369,9 @@ class RoundedRectGlyph:
 
 @lru_cache(maxsize=256)
 def render_rounded_mask(width: int, height: int, radius: Radius) -> pygame.Surface:
-    """Analytically-AA white rounded-rect alpha mask for ``BLEND_RGBA_MULT``.
+    """Analytic-AA white rounded-rect mask for ``BLEND_RGBA_MULT`` corner-cutting.
 
-    Use to cut corners off an already-rendered square fill: multiply this
-    mask into the surface and the corners go transparent with 1px AA
+    Multiply into a square fill and the corners go transparent with 1px AA
     falloff. Cached by ``(width, height, radius)``.
     """
     return RoundedRectGlyph(width, height, radius, fill=(255, 255, 255), border=None).render()

@@ -63,8 +63,8 @@ class DialogDecorator(PanelDecorator):
 
     @override
     def _draw_erase(self, ctx):
-        # Paint only the titlebar strip — the panel body owns its own pixels,
-        # and filling under it would leak through any transparent areas.
+        # Titlebar strip only — the panel body owns its pixels; filling under
+        # it would leak through any transparent areas.
         pb = self.panel.box
         if pb is None or self.box is None:
             return
@@ -81,13 +81,13 @@ class DialogDecorator(PanelDecorator):
 
     @override
     def _draw_outline(self, ctx):
-        # The decorator's bounding box spans titlebar + body as one rounded
-        # rect (top corners round via the titlebar, bottom corners round via
-        # the body mask). Use the analytic-AA corner-tile outline instead of
-        # the base Widget's jaggy pygame.draw.rect stroke.
+        # Decorator box spans titlebar + body as one rounded rect; analytic-AA
+        # tiles instead of the base Widget's jaggy pygame.draw.rect stroke.
         if self.outline != 0:
             color = self.outline_color if self.outline_color is not None else self.fgnd_color
-            surf = render_rounded_outline(ctx.width, ctx.height, Radius.uniform(self.outline_radius or 0), color, self.outline)
+            surf = render_rounded_outline(
+                ctx.width, ctx.height, Radius.uniform(self.outline_radius or 0), color, self.outline
+            )
             ctx.paste(surf, (0, 0))
 
 
@@ -124,9 +124,8 @@ class Dialog(RoundedPanel):
 
     @override
     def _build_shape_mask(self) -> pygame.Surface:
-        # Only the bottom corners round — the titlebar decorator owns the top
-        # corners and the panel's top edge must stay square to meet it
-        # seamlessly.
+        # Bottom corners only — the titlebar owns the top, so the panel's top
+        # edge must stay square to meet it seamlessly.
         return render_rounded_mask(int(self.box.width), int(self.box.height), Radius.bottom(self.radius))
 
     def tick(self) -> None:
