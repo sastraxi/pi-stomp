@@ -359,7 +359,7 @@ class RoundedRectGlyph:
         width: int,
         height: int,
         radius: Radius,
-        fill: ColorRGB | None = None,
+        fill: ColorLike | None = None,
         border: RectBorder | None = None,
         border_width: int = 1,
     ) -> None:

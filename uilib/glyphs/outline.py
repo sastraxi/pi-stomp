@@ -22,7 +22,8 @@ from functools import lru_cache
 import pygame
 
 from common.color import ColorRGB, RectBorder
-from uilib.glyphs.rounded_rect import RoundedRectGlyph
+from uilib.glyphs.rounded_rect import RoundedRectGlyph, _to_rgb
+from uilib.paint import ColorLike
 from uilib.radius import Radius
 
 
@@ -59,8 +60,8 @@ def _corner_outline_tile(rc: int, border_width: int, color: ColorRGB, corner: st
 def render_rounded_outline(
     width: int,
     height: int,
-    radius: Radius,
-    color: ColorRGB,
+    radius: Radius | int | None,
+    color: ColorLike,
     border_width: int,
 ) -> pygame.Surface:
     """Border-only rounded-rect outline on a transparent SRCALPHA surface.
@@ -73,11 +74,13 @@ def render_rounded_outline(
     if border_width <= 0:
         return surf
     r = Radius._coerce(radius)
+    rgb = _to_rgb(color)
+    assert rgb is not None, "render_rounded_outline requires a non-None color"
     # Corner tiles — each sliced from the matching quadrant of its exemplar.
-    tl_tile = _corner_outline_tile(r.top_left, border_width, color, "tl")
-    tr_tile = _corner_outline_tile(r.top_right, border_width, color, "tr")
-    bl_tile = _corner_outline_tile(r.bottom_left, border_width, color, "bl")
-    br_tile = _corner_outline_tile(r.bottom_right, border_width, color, "br")
+    tl_tile = _corner_outline_tile(r.top_left, border_width, rgb, "tl")
+    tr_tile = _corner_outline_tile(r.top_right, border_width, rgb, "tr")
+    bl_tile = _corner_outline_tile(r.bottom_left, border_width, rgb, "bl")
+    br_tile = _corner_outline_tile(r.bottom_right, border_width, rgb, "br")
     surf.blit(tl_tile, (0, 0))
     surf.blit(tr_tile, (width - tr_tile.get_width(), 0))
     surf.blit(bl_tile, (0, height - bl_tile.get_height()))
@@ -107,8 +110,8 @@ def render_rounded_outline(
 def render_rounded_fill(
     width: int,
     height: int,
-    radius: Radius,
-    color: ColorRGB,
+    radius: Radius | int | None,
+    color: ColorLike,
 ) -> pygame.Surface:
     """Opaque rounded-rect fill on a transparent SRCALPHA surface.
 
@@ -116,4 +119,4 @@ def render_rounded_fill(
     with 1px AA falloff at the corners. Used for the titlebar strip, whose
     bottom is square (meets the panel body) and whose top corners round.
     """
-    return RoundedRectGlyph(width, height, radius, fill=color, border=None).render()
+    return RoundedRectGlyph(width, height, Radius._coerce(radius), fill=color, border=None).render()

@@ -70,7 +70,7 @@ class DialogDecorator(PanelDecorator):
             return
         titlebar_h = pb.y0 - self.box.y0  # decorator-local
         strip = Box(0, 0, self.box.width, titlebar_h)
-        surf = render_rounded_fill(strip.width, strip.height, Radius.top(self.outline_radius), self.bkgnd_color)
+        surf = render_rounded_fill(strip.width, strip.height, Radius.top(self.outline_radius or 0), self.bkgnd_color)
         ctx.paste(surf, (0, 0))
 
     def _draw(self, ctx):
@@ -87,7 +87,7 @@ class DialogDecorator(PanelDecorator):
         # the base Widget's jaggy pygame.draw.rect stroke.
         if self.outline != 0:
             color = self.outline_color if self.outline_color is not None else self.fgnd_color
-            surf = render_rounded_outline(ctx.width, ctx.height, Radius.uniform(self.outline_radius), color, self.outline)
+            surf = render_rounded_outline(ctx.width, ctx.height, Radius.uniform(self.outline_radius or 0), color, self.outline)
             ctx.paste(surf, (0, 0))
 
 
