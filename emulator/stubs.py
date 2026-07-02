@@ -29,7 +29,9 @@ from typing import Callable, Optional
 from modalapi.ethernet import EthernetManager
 from modalapi.wifi import SavedConnection, ScannedNetwork, WifiStatus
 from modalapi.wifi.commands import CommandQueue
+from modalapi.wifi.manager import WifiManager
 from pistomp.audiocard import Audiocard
+import pistomp.relay
 
 
 class VirtualAudiocard(Audiocard):
@@ -50,36 +52,37 @@ class VirtualAudiocard(Audiocard):
         self._bypass_left  = False
         self._bypass_right = False
 
-    def get_volume_parameter(self, symbol):
-        return self._volumes.get(symbol, 0.0)
+    def get_volume_parameter(self, param_name):
+        return self._volumes.get(param_name, 0.0)
 
-    def set_volume_parameter(self, symbol, value):
-        self._volumes[symbol] = value
-
-    def get_switch_parameter(self, symbol):
-        return self._switches.get(symbol, False)
-
-    def set_switch_parameter(self, symbol, value):
-        self._switches[symbol] = value
+    def set_volume_parameter(self, param_name, value, store=True):
+        self._volumes[param_name] = value
         return True
 
-    def get_bypass_left(self):
+    def get_switch_parameter(self, param_name):
+        return self._switches.get(param_name, False)
+
+    def set_switch_parameter(self, param_name, value, store=True):
+        self._switches[param_name] = value
+        return True
+
+    def get_bypass_left(self) -> bool:
         return self._bypass_left
 
-    def set_bypass_left(self, value):
-        self._bypass_left = value
+    def set_bypass_left(self, bypass):
+        self._bypass_left = bypass
 
-    def get_bypass_right(self):
+    def get_bypass_right(self) -> bool:
         return self._bypass_right
 
-    def set_bypass_right(self, value):
-        self._bypass_right = value
+    def set_bypass_right(self, bypass):
+        self._bypass_right = bypass
 
     def set_output_muted(self, muted: bool) -> None:
         pass
 
 
-class StubWifiManager:
+class StubWifiManager(WifiManager):
     """In-memory wifi manager; exercises the full WifiManager interface
     against a fake scan list and saved-profile store.
 
@@ -275,8 +278,7 @@ class StubEthernetManager(EthernetManager):
     def read_jack_settings(self) -> tuple[Optional[int], Optional[int]]:
         return (48000, 128)
 
-    @staticmethod
-    def read_xrun_buckets() -> tuple[int, int, int]:
+    def read_xrun_buckets(self) -> tuple[int, int, int]:
         return (0, 0, 0)
 
     def start_service(self) -> None:
@@ -307,7 +309,7 @@ class StubJackMute:
         self._muted = False
 
 
-class StubRelay:
+class StubRelay(pistomp.relay.Relay):
     """No-op relay; satisfies the Relay interface without GPIO."""
 
     def __init__(self):

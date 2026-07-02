@@ -27,10 +27,10 @@ from pistomp.input.event import SwitchEvent, SwitchEventKind
 
 class Footswitch(controller.Controller):
 
-    def __init__(self, id, led_pin, pixel, midi_CC, midi_channel, refresh_callback,
+    def __init__(self, id: int | None, led_pin, pixel, midi_CC, midi_channel, refresh_callback,
                  gpio_input=None, adc_input=None, spi=None, taptempo=None):
         super(Footswitch, self).__init__(midi_channel, midi_CC)
-        self.id: int = id
+        self.id = id
         self.display_label = None
         self.toggled = False
         self.led = None

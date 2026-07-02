@@ -1,4 +1,3 @@
-import os
 from pathlib import Path
 from PIL import ImageFont
 
@@ -8,7 +7,9 @@ _orig_truetype = ImageFont.truetype
 
 
 def _resolve_truetype(font=None, size=10, **kwargs):
-    if isinstance(font, str) and not Path(font).is_absolute() and not Path(font).exists():
+    if font is None:
+        font = str(FONTS_DIR / "DejaVuSans.ttf")
+    elif isinstance(font, str) and not Path(font).is_absolute() and not Path(font).exists():
         candidate = FONTS_DIR / font
         if candidate.exists():
             font = str(candidate)

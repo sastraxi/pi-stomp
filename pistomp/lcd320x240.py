@@ -17,30 +17,52 @@ import logging
 import os
 import time
 import socket
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 from common.fonts import font_path
 import common.token as Token
-import common.parameter as Parameter
+import common.util as util
+from common.parameter import Parameter, Type
 from ui.ethernet_menu import EthernetMenu
 from ui.wifi_menu import WifiMenu
 import pistomp.category as Category
-import pistomp.lcd as abstract_lcd
 import pistomp.switchstate as switchstate
 import pygame
 
-from uilib import *
+from uilib import (
+    Box,
+    Config,
+    ContainerWidget,
+    FootswitchWidget,
+    get_text_size,
+    Icon,
+    ImageWidget,
+    InputEvent,
+    load_surface,
+    Menu,
+    MessageDialog,
+    Panel,
+    PanelStack,
+    Parameterdialog,
+    ScrollingText,
+    ShroudedPanel,
+    TextWidget,
+)
 from uilib import profiling
 from uilib.gridpanel import GridPanel, TILE_W, CHANNEL
 from uilib.pygame_init import font as _make_font
-from uilib.lcd_ili9341 import *
+from uilib.lcd_ili9341 import LcdIli9341
 from uilib.text import PluginTile
 from modalapi.layout import build_layout_compress
 
 from pistomp.input.event import ControllerEvent
+from pistomp.input.sink import InputSink
 from pistomp.analogmidicontrol import AnalogMidiControl, as_midi_value
 from pistomp.encoder_controller import EncoderController
 from blend.manager import BlendMode
 from plugins.base import PluginPanel
+
+if TYPE_CHECKING:
+    from modalapi.modhandler import Modhandler
 
 # Parameter dialog auto-dismiss timeout (seconds)
 PARAMETER_DIALOG_TIMEOUT = 1.0
@@ -88,14 +110,14 @@ class Subtitle(TextWidget):
             self.parent.redraw_region(old.union(new))
 
 
-class Lcd(abstract_lcd.Lcd):
+class Lcd:
     CAPTURE_SOCKET_PATH = "/tmp/pistomp-lcd.sock"
 
-    def __init__(self, cwd, handler=None, flip=False, display=None, spi_speed_mhz=50):
+    def __init__(self, cwd, handler: "Modhandler", flip=False, display=None, spi_speed_mhz=50):
         self.cwd = cwd
         self.imagedir = os.path.join(cwd, "images")
         Config(os.path.join(cwd, 'ui', 'config.json'))
-        self.handler = handler
+        self.handler: "Modhandler" = handler
         self.flip = flip
         self.spi_speed_mhz = spi_speed_mhz
 
@@ -164,7 +186,6 @@ class Lcd(abstract_lcd.Lcd):
             for i in range(1, 4)
         ]
         self._wifi_frame_idx = -1  # -1 = static (not spinning)
-        self.wifi_menu: Optional[WifiMenu] = None
         self.ethernet_menu: EthernetMenu = EthernetMenu(self)
         self.w_eq = None
         self.w_power = None
@@ -174,7 +195,6 @@ class Lcd(abstract_lcd.Lcd):
         self.w_preset = None
         self.w_plugins = []
         self.grid_panel: Optional[GridPanel] = None
-        self._fullscreen_panel = None
         self.w_footswitches = []
         self.w_controls = []
         self.w_splash = None
@@ -188,17 +208,20 @@ class Lcd(abstract_lcd.Lcd):
         self.pstack = PanelStack(display, image_format='RGB', use_dimming=True)
         self.splash_panel = Panel(box=Box.xywh(0, 0, self.display_width, self.display_height))
         self.pstack.push_panel(self.splash_panel, refresh=False)
-        self.main_panel = Panel(box=Box.xywh(0, 0, self.display_width, self.display_height))
+        self.main_panel = Panel(
+            box=Box.xywh(0, 0, self.display_width, self.display_height), persist_on_board_change=True
+        )
         self.main_panel_pushed = False
         self._is_pedalboard_load = False
         self.footswitch_panel = ShroudedPanel(box=Box.xywh(0, self.display_height - self.footswitch_height,
                                                             self.display_width, self.footswitch_height),
                                               shroud_alpha=255, gradient_start=0, gradient_pos=0.2, no_dim=True, accepts_input=False)
-        self._fullscreen_panel: Panel | None = None
 
         self.pedalboards = {}
 
-        self.wifi_menu = WifiMenu(self)
+        # Constructed here (not with ethernet_menu above) because WifiMenu needs
+        # the PanelStack, which is created earlier in this block.
+        self.wifi_menu: WifiMenu = WifiMenu(self)
 
         if not display.has_system_splash:
             self.splash_show(True)
@@ -272,12 +295,10 @@ class Lcd(abstract_lcd.Lcd):
         #self.main_panel.refresh()
 
     def handle(self, event: ControllerEvent) -> bool:
-        # When a fullscreen panel is top-most and is an InputSink, ask it first.
-        # It returns True to stop the event from reaching the normal handler cascade.
-        if self._fullscreen_panel is not None:
-            if self._fullscreen_panel.handle(event):
-                return True
-        return False
+        # Ask the top input-accepting panel first. It returns True to stop the
+        # event from reaching the normal handler cascade.
+        top = self.pstack.current
+        return top.handle(event) if isinstance(top, InputSink) else False
 
     def poll_updates(self):
         with profiling.measure("poll_updates"):
@@ -294,8 +315,8 @@ class Lcd(abstract_lcd.Lcd):
             wfs.tick()
 
         self.pstack.poll_updates()
-        if self._fullscreen_panel is not None and self.pstack.current is self._fullscreen_panel:
-            self._fullscreen_panel.tick()
+        if self.pstack.current is not None:
+            self.pstack.current.tick()
         self._poll_capture_socket()
 
         # Update control progress bars (analog controls and encoders)
@@ -321,12 +342,13 @@ class Lcd(abstract_lcd.Lcd):
                 elif isinstance(icon.object, EncoderController):
                     midi_value = icon.object.midi_value
                 elif isinstance(icon.object, BlendMode):
-                    input_ctrl = icon.object.input_controller.controlled_input
-                    if input_ctrl:
+                    ic = icon.object.input_controller
+                    input_ctrl = ic.controlled_input if ic is not None else None
+                    if ic is not None and input_ctrl is not None:
                         position = input_ctrl.get_normalized_value()
                         midi_value = int(position * 127)
 
-                        stops = icon.object.input_controller.stops
+                        stops = ic.stops
                         closest_stop = min(stops, key=lambda s: abs(s.position - position))
                         snapshot_name = self.handler.current.presets.get(closest_stop.snapshot_index, "")
                         if snapshot_name and snapshot_name != icon.text:
@@ -386,22 +408,6 @@ class Lcd(abstract_lcd.Lcd):
         self.pstack.set_capture_callback(None)
         logging.info("LCD capture disabled")
 
-    def show_fullscreen_panel(self, panel: Panel) -> None:
-        self._fullscreen_panel = panel
-        self.pstack.push_panel(panel)
-        panel.refresh()
-
-    def hide_fullscreen_panel(self) -> None:
-        if self._fullscreen_panel is not None:
-            self.pstack.pop_panel(self._fullscreen_panel)
-        self._fullscreen_panel = None
-
-    def has_active_fullscreen_panel(self) -> bool:
-        return self._fullscreen_panel is not None
-
-    @property
-    def plugin_panel(self) -> PluginPanel | None:
-        return self._fullscreen_panel if isinstance(self._fullscreen_panel, PluginPanel) else None
 
     #
     # Toolbar
@@ -446,7 +452,7 @@ class Lcd(abstract_lcd.Lcd):
         items = [("Left",  self.handler.change_bypass_preference, Token.LEFT, pref == Token.LEFT),
                  ("Right", self.handler.change_bypass_preference, Token.RIGHT, pref == Token.RIGHT),
                  ("Left & Right",  self.handler.change_bypass_preference, Token.LEFT_RIGHT,
-                  pref == Token.LEFT_RIGHT or pref == None)]
+                  pref == Token.LEFT_RIGHT or pref is None)]
         self.draw_selection_menu(items, "Bypass Preference", auto_dismiss=True)
 
     #
@@ -639,7 +645,7 @@ class Lcd(abstract_lcd.Lcd):
 
 
     def color_plugin(self, widget, plugin):
-        if plugin.is_bypassed() == True:
+        if plugin.is_bypassed():
             widget.set_outline(1, self.get_plugin_color(plugin))
             widget.set_background(self.background)
             widget.set_foreground(self.foreground)
@@ -658,8 +664,9 @@ class Lcd(abstract_lcd.Lcd):
         for w in self.w_plugins:
             plugin = w.object
             self.color_plugin(w, plugin)
-        if self.plugin_panel is not None:
-            self.plugin_panel.refresh()
+        panel = self.pstack.find_panel_type(PluginPanel)
+        if panel is not None:
+            panel.refresh()
         self.main_panel.refresh()
 
     def refresh_plugin(self, plugin):
@@ -717,13 +724,13 @@ class Lcd(abstract_lcd.Lcd):
         # Create a new dialog
         title = parameter.instance_id + ":" + parameter.name
         current_value = parameter.value
-        if parameter.type == Parameter.Type.ENUMERATION:
+        if parameter.type == Type.ENUMERATION:
             items = []
             for (label, value) in parameter.get_enum_value_list():
                 item = (label, self.parameter_commit_enum, (parameter, value), value==current_value)
                 items.append(item)
             d = self.draw_selection_menu(items, title, auto_dismiss=True)
-        elif parameter.type == Parameter.Type.TOGGLED:
+        elif parameter.type == Type.TOGGLED:
             items = [ ("On",  self.parameter_commit_enum, (parameter, 1), current_value==1),
                       ("Off", self.parameter_commit_enum, (parameter, 0), current_value==0)]
             d = self.draw_selection_menu(items, title, auto_dismiss=True)
@@ -799,7 +806,7 @@ class Lcd(abstract_lcd.Lcd):
                     slot_w = wfs.box.width if wfs.box is not None else self.footswitch_width
                     footswitch.set_display_label(self.footswitch_label(footswitch, slot_w))
                     wfs.color = Category.get_category_color(footswitch.category)
-                wfs.toggle(footswitch.toggled == False)
+                wfs.toggle(not footswitch.toggled)
                 wfs.label = footswitch.get_display_label() or ""
                 wfs.refresh()
                 break
@@ -874,7 +881,7 @@ class Lcd(abstract_lcd.Lcd):
 
     def draw_bank_menu(self, event):
         current_bank = self.handler.get_bank()
-        items = [("None (All pedalboards)", self.handler.set_bank, None, current_bank==None)]
+        items = [("None (All pedalboards)", self.handler.set_bank, None, current_bank is None)]
         for k,v in self.handler.get_banks().items():
             items.append((k, self.handler.set_bank, k, k==current_bank))
         self.draw_selection_menu(items, "Bank Select", auto_dismiss=True)
@@ -904,9 +911,9 @@ class Lcd(abstract_lcd.Lcd):
         self.pstack.push_panel(d)
         return d
 
-    def display_parameter_value(self, parameter: Parameter.Parameter, value: float) -> None:
+    def display_parameter_value(self, parameter: Parameter, value: float) -> None:
         d = self.draw_parameter_dialog(parameter, timeout=PARAMETER_DIALOG_TIMEOUT)
-        if d:
+        if isinstance(d, Parameterdialog):
             d.update_value(value)
 
     def draw_vu_calibration_dialog(self, symbol, value, commit_callback):
@@ -918,7 +925,7 @@ class Lcd(abstract_lcd.Lcd):
             Token.SYMBOL: symbol,
             Token.RANGES: {Token.MINIMUM: 0, Token.MAXIMUM: 1023}
         }
-        param = Parameter.Parameter(info, value, None)
+        param = Parameter(info, value, None)
         d = Parameterdialog(self.pstack, param,
                             width=270, height=130, auto_destroy=False, title=name, timeout=PARAMETER_DIALOG_TIMEOUT,
                             action=commit_callback, object=symbol)
@@ -937,8 +944,10 @@ class Lcd(abstract_lcd.Lcd):
         self.splash_panel.refresh()
 
     def cleanup(self):
-        if self.pstack.current is not None:
-            self.pstack.pop_panel(None)
+        # Walk every input-accepting panel (dialogs, tuner, plugin panels, …)
+        # so buried panels are destroyed too, not just the top-most one.
+        while self.pstack.current is not None:
+            self.pstack.pop_panel(self.pstack.current)
         if self.footswitch_panel in self.pstack.stack:
             self.pstack.pop_panel(self.footswitch_panel)
         if self.main_panel_pushed and self.main_panel in self.pstack.stack:
@@ -1098,11 +1107,13 @@ class Lcd(abstract_lcd.Lcd):
                 text_color = self.default_plugin_color
                 color = self.default_plugin_color
                 # Initialize label and progress bar from the current input position.
-                input_ctrl = icon_object.input_controller.controlled_input
-                if input_ctrl:
-                    blend_initial_progress = input_ctrl.get_normalized_value()
-                    stops = icon_object.input_controller.stops
-                    closest_stop = min(stops, key=lambda s: abs(s.position - blend_initial_progress))
+                ic = icon_object.input_controller
+                input_ctrl = ic.controlled_input if ic is not None else None
+                if ic is not None and input_ctrl is not None:
+                    position = input_ctrl.get_normalized_value()
+                    blend_initial_progress = position
+                    stops = ic.stops
+                    closest_stop = min(stops, key=lambda s: abs(s.position - position))
                     snapshot_name = self.handler.current.presets.get(closest_stop.snapshot_index, "")
                     if snapshot_name:
                         name = snapshot_name

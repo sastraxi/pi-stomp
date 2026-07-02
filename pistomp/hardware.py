@@ -19,9 +19,7 @@ import sys
 
 import common.token as Token
 import common.util as Util
-import common.parameter as Parameter
-from common.parameter import TTL_PROPERTIES, TTL_INTEGER
-from pistomp.analogcontrol import AnalogControl
+from common.parameter import Parameter, TTL_PROPERTIES, TTL_INTEGER
 import pistomp.analogmidicontrol as AnalogMidiControl
 import pistomp.encoder_controller as EncoderController
 import pistomp.footswitch as Footswitch
@@ -308,7 +306,7 @@ class Hardware(ABC):
                           (adc_input, midi_channel, midi_cc))
 
     @abstractmethod
-    def add_encoder(self, id, type, callback, longpress_callback, midi_channel, midi_cc) -> EncoderController.EncoderController:
+    def add_encoder(self, id, type, callback, longpress_callback, midi_channel, midi_cc) -> EncoderController.EncoderController | None:
         # This should be implemented by hardware subclasses that support tweak encoders (Tre at least)
         ...
 
@@ -336,7 +334,10 @@ class Hardware(ABC):
             # midi_port routing is applied later in __apply_midi_routing (external_midi is None here)
             try:
                 control = self.add_encoder(id, type, None, longpress_callback, midi_channel, midi_cc)
-                self.encoders.append(control)
+                # FIXME: add_encoder returns None for emulator v1/v2 stubs that don't
+                # implement config-driven encoders, forcing the return type to be optional.
+                if control is not None:
+                    self.encoders.append(control)
             except Exception:
                 logging.exception("Failed to create encoder with config: %s" % c)
                 continue
@@ -369,7 +370,7 @@ class Hardware(ABC):
             TTL_PROPERTIES: [TTL_INTEGER]
         }
         val = getattr(controller, 'midi_value', 0)
-        return Parameter.Parameter(info, val, f"{midi_channel}:{midi_cc}", EXTERNAL_INSTANCE_ID)
+        return Parameter(info, val, f"{midi_channel}:{midi_cc}", EXTERNAL_INSTANCE_ID)
 
     def __validate_midi_port(self, port_name):
         if self.external_midi is None:

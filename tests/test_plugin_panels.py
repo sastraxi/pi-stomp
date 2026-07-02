@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable
 
 import pytest
 
@@ -11,9 +10,8 @@ from common.parameter import Parameter
 from modalapi.plugin import Plugin
 from plugins import lookup, register, PluginCustomization
 from plugins.fullscreen import FullscreenPluginPanel
+from pistomp.controller import Controller
 from pistomp.input.event import EncoderEvent, SwitchEvent, SwitchEventKind
-from uilib.box import Box
-from uilib.panel import PanelStack
 
 
 # ── minimal fake infrastructure ─────────────────────────────────────────────
@@ -175,6 +173,7 @@ class TestPluginPanel:
         assert ("pedalboard/demo", ":bypass", 1.0) in fake_handler.ws_bridge.sent
 
 
-class _FakeEnc:
+class _FakeEnc(Controller):
     def __init__(self, id: int = 0):
+        super().__init__(midi_channel=0, midi_CC=None)
         self.id = id

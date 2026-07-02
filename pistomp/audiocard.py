@@ -18,7 +18,6 @@ import mmap
 import os
 import re
 import subprocess
-from enum import Enum
 
 
 class Audiocard:
@@ -65,7 +64,7 @@ class Audiocard:
                                 self.store()
                             break
                     f.close()
-                except:
+                except Exception:
                     logging.error("Failed trying to restore audio card settings from: %s" % fname)
 
     def store(self):
@@ -75,7 +74,7 @@ class Audiocard:
         try:
             subprocess.run(['/usr/sbin/alsactl', '-f', self.config_file, 'store'], stderr=subprocess.DEVNULL)
             logging.info("audio card settings saved to: %s" % self.config_file)
-        except:
+        except Exception:
             logging.error("Failed trying to store audio card settings to: %s" % self.config_file)
 
     def _amixer_sget(self, param_name):
@@ -84,7 +83,7 @@ class Audiocard:
             output = subprocess.check_output(cmd, shell=True)
         except subprocess.CalledProcessError:
             logging.error("Failed trying to get audio card parameter")
-            return None
+            return ""
         return output.decode()
 
     def _amixer_sset(self, param_name, value, store):
@@ -101,11 +100,11 @@ class Audiocard:
             self.store()
         return True
 
-    def get_bypass_left(self):
-        pass
+    def get_bypass_left(self) -> bool:
+        return False
 
-    def get_bypass_right(self):
-        pass
+    def get_bypass_right(self) -> bool:
+        return False
 
     def set_bypass_left(self, bypass):
         pass

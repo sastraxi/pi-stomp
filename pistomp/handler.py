@@ -16,7 +16,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from pistomp.analogmidicontrol import AnalogMidiControl
 from pistomp.current import Current
@@ -33,16 +33,45 @@ if TYPE_CHECKING:
 
 
 class Handler(InputSink):
-    ws_bridge: "AsyncWebSocketBridge | None" = None
+    _ws_bridge: "AsyncWebSocketBridge | None" = None
+
+    @property
+    def ws_bridge(self) -> "AsyncWebSocketBridge":
+        # Always constructed by MOD handlers in __init__; MIDI-only hosts never
+        # access it. Assign via the setter (tests/subclasses set it directly).
+        assert self._ws_bridge is not None, "WebSocket bridge has not been initialized"
+        return self._ws_bridge
+
+    @ws_bridge.setter
+    def ws_bridge(self, bridge: "AsyncWebSocketBridge") -> None:
+        self._ws_bridge = bridge
 
     def __init__(self):
         self.homedir = None
         self.lcd = None
         self.chord_helper = FootswitchChords()
-        self.current: Current | None = None
+        self._current: Current | None = None
+        self._hardware: "Hardware | None" = None
 
     @property
-    def hardware(self) -> "Hardware": ...
+    def current(self) -> Current:
+        # Guaranteed set once a pedalboard is loaded (before the polling loop
+        # runs). Use self._current for genuine "is a board loaded?" checks.
+        assert self._current is not None, "No pedalboard is loaded"
+        return self._current
+
+    @current.setter
+    def current(self, value: "Current | None") -> None:
+        self._current = value
+
+    @property
+    def hardware(self) -> "Hardware":
+        assert self._hardware is not None, "Hardware has not been initialized"
+        return self._hardware
+
+    @hardware.setter
+    def hardware(self, value: "Hardware | None") -> None:
+        self._hardware = value
 
     @property
     def lcd_poll_divisor(self) -> int:
@@ -182,6 +211,10 @@ class Handler(InputSink):
     def set_tuner_source_factory(self, factory: "TunerSourceFactory") -> None:
         pass
 
+    def set_tuner_source_spec(self, spec: str) -> None:
+        # No-op for handlers without a tuner (v1/generic); Modhandler overrides.
+        pass
+
     def is_symbol_locked(self, instance_id: str, symbol: str) -> bool:
         return False
 
@@ -198,7 +231,7 @@ class Handler(InputSink):
         # A MIDI mapping was learned in mod-ui. Update the matching parameter's
         # binding and wire its hardware controller so the LCD reflects it without
         # a pedalboard reload. Idempotent: replayed connect-dump maps are no-ops.
-        if self.current is None:
+        if self._current is None:
             return
         plugin = next((p for p in self.current.pedalboard.plugins if p is not None and p.instance_id == instance), None)
         if plugin is None or plugin.parameters is None:

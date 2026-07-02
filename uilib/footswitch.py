@@ -96,6 +96,7 @@ class FootswitchWidget(Widget):
     small_font: pygame._freetype.Font | None
     label: str | None
     color: Color | None
+    num: int | None
     is_bypassed: bool
     taptempo: TapTempoProtocol | None
     _pulse_on: bool
@@ -112,10 +113,11 @@ class FootswitchWidget(Widget):
     ):
         self._init_attrs(Widget.INH_ATTRS, kwargs)
         super(FootswitchWidget, self).__init__(box, **kwargs)
-        self.font = Config().get_font("footswitch")
+        self.font = Config().get_font("footswitch")  # pyright: ignore[reportAttributeAccessIssue]
         self.small_font = small_font
         self.label = label
         self.color = color
+        self.num = None
         self.is_bypassed = is_bypassed
         self.taptempo = taptempo
         self._pulse_on = True

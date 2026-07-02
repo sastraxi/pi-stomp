@@ -16,8 +16,6 @@
 from common.fonts import font_path
 import common.token as Token
 import common.util as util
-import os
-import pistomp.lcd as abstract_lcd
 
 from typing import Any
 import pygame
@@ -26,7 +24,7 @@ from uilib.pygame_init import font as _make_font
 
 from pistomp.footswitch import Footswitch  # TODO would like to avoid this module knowing such details
 
-class Lcd(abstract_lcd.Lcd):
+class Lcd:
     __single = None
 
     def __init__(self, cwd, lcd=None, backlight=None, touch=None):
@@ -457,6 +455,7 @@ class Lcd(abstract_lcd.Lcd):
             for c in p.controllers:
                 if isinstance(c, Footswitch):
                     fs_id = c.id
+                    assert fs_id is not None
                     assert c.parameter
                     fss[fs_id] = None
                     if c.parameter.symbol != ":bypass":  # TODO token

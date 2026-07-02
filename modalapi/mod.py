@@ -28,7 +28,7 @@ import common.token as Token
 import common.util as util
 import pistomp.switchstate as switchstate
 import modalapi.pedalboard as Pedalboard
-import common.parameter as Parameter
+from common.parameter import Parameter
 import modalapi.wifi as Wifi
 import modalapi.external_midi as ExternalMidi
 from pistomp.encoder_controller import EncoderController
@@ -118,7 +118,7 @@ class Mod(Handler):
 
         logging.info("Init mod")
         if Mod.__single:
-            raise Mod.__single
+            raise RuntimeError("Mod already instantiated")
         Mod.__single = self
 
         self.audiocard = audiocard
@@ -138,8 +138,6 @@ class Mod(Handler):
 
         self.plugin_dict = {}
 
-        self._hardware = None
-
         self.top_encoder_mode = TopEncoderMode.DEFAULT
         self.bot_encoder_mode = BotEncoderMode.DEFAULT
         self.universal_encoder_mode = UniversalEncoderMode.DEFAULT
@@ -149,7 +147,7 @@ class Mod(Handler):
         self.software_version = None
         self.git_describe = None
 
-        self.current: Current | None = None
+        self._current: Current | None = None
         self.deep = None     # pointer to current Deep class
 
         # Stores snapshot index from loading_end until pedalboard change is detected
@@ -191,11 +189,6 @@ class Mod(Handler):
         self.blend_modes: dict[str, Any] = {}  # {snapshot_name: BlendMode}
         self.active_blend_mode: Any | None = None  # Currently active blend mode
 
-    def __del__(self):
-        logging.info("Handler cleanup")
-        if self.wifi_manager:
-            del self.wifi_manager
-
     def cleanup(self):
         if self.lcd is not None:
             self.lcd.cleanup()
@@ -218,11 +211,6 @@ class Mod(Handler):
     #
     # Hardware
     #
-
-    @property
-    def hardware(self):
-        assert self._hardware is not None, "Hardware has not been initialized"
-        return self._hardware
 
     def add_hardware(self, hardware):
         self._hardware = hardware
@@ -576,7 +564,7 @@ class Mod(Handler):
                 logging.debug(f"WebSocket: Pre-switch snapshot changed to {msg.snapshot_id}")
                 self.next_pedalboard_preset_index = msg.snapshot_id
             else:
-                assert self.current is not None, "Received snapshot message but no current pedalboard is set"
+                assert self._current is not None, "Received snapshot message but no current pedalboard is set"
                 logging.debug(f"WebSocket: Snapshot changed to {msg.snapshot_id} ({msg.snapshot_name})")
 
                 if msg.snapshot_id not in self.current.presets:
@@ -587,7 +575,7 @@ class Mod(Handler):
 
         elif isinstance(msg, (PluginBypassMessage, AddPluginMessage)):
             # PluginBypassMessage: live delta. AddPluginMessage: (re)connect dump
-            if self.current is not None:
+            if self._current is not None:
                 for plugin in self.current.pedalboard.plugins:
                     if plugin.instance_id == msg.instance:
                         logging.debug(f"WebSocket: Plugin {msg.instance} bypass -> {msg.bypassed}")
@@ -607,7 +595,7 @@ class Mod(Handler):
             # at the current value) and sync any bound control. The connect-dump
             # delivers the real mod-ui state here — :bypass aside, nothing else
             # repaints a non-bypass footswitch.
-            if self.current is not None:
+            if self._current is not None:
                 for plugin in self.current.pedalboard.plugins:
                     if plugin.instance_id == msg.instance:
                         plugin.set_param_value(msg.symbol, msg.value)
@@ -664,7 +652,7 @@ class Mod(Handler):
 
         try:
             resp = req.get(url)
-        except:  # TODO
+        except Exception:  # TODO
             logging.error("Cannot connect to mod-host")
             sys.exit()
 
@@ -700,10 +688,10 @@ class Mod(Handler):
         self.active_blend_mode = None
 
         # Delete previous "current"
-        del self.current
+        del self._current
 
         # Create a new "current"
-        self.current = Current(pedalboard)
+        self._current = Current(pedalboard)
 
         if self.next_pedalboard_preset_index is not None:
             self.current.preset_index = self.next_pedalboard_preset_index
@@ -854,7 +842,7 @@ class Mod(Handler):
             resp = req.get(url)
             if resp.status_code == 200:
                 pass
-        except:
+        except Exception:
             return None
         dict = json.loads(resp.text)
         for key, name in dict.items():
@@ -1224,7 +1212,7 @@ class Mod(Handler):
                 logging.error("Bad Rest request: %s status: %d" % (url, resp.status_code))
             else:
                 logging.debug("saved")
-        except:
+        except Exception:
             logging.error("status %s" % resp.status_code)  # pyright: ignore[reportPossiblyUnboundVariable]
             return
 
@@ -1350,7 +1338,7 @@ class Mod(Handler):
     def system_menu_parameter(self, title, param_name, info):
         value = self.audiocard.get_volume_parameter(param_name)
         self.deep = self.Deep(None)
-        param = Parameter.Parameter(info, value, None)
+        param = Parameter(info, value, None)
         self.deep.selected_parameter = param
         self.lcd.draw_value_edit_graph(param, value)
         self.lcd.draw_info_message(title)
@@ -1494,7 +1482,7 @@ class Mod(Handler):
     def update_lcd_fs(self, footswitch=None, bypass_change=False):
         if bypass_change:
             self.lcd.update_bypass(self.hardware.relay.enabled)
-        if self.current and self.current.pedalboard:
+        if self._current is not None and self._current.pedalboard:
             self.lcd.draw_bound_plugins(self.current.pedalboard.plugins, self.hardware.footswitches)
 
     # TODO these should be implemented for mod.py (v1 hardware) eventually

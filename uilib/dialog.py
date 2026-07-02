@@ -44,6 +44,8 @@ class DialogDecorator(PanelDecorator):
     def _adjust_box(self):
         trace(self, "DialogDecorator adjusting box ! pb=", self.panel.box)
         pb = self.panel.box
+        if pb is None:
+            return
 
         # Outline width
         o = self.outline
@@ -63,7 +65,10 @@ class DialogDecorator(PanelDecorator):
     def _draw_erase(self, ctx):
         # Paint only the titlebar strip — the panel body owns its own pixels,
         # and filling under it would leak through any transparent areas.
-        titlebar_h = self.panel.box.y0 - self.box.y0  # decorator-local
+        pb = self.panel.box
+        if pb is None or self.box is None:
+            return
+        titlebar_h = pb.y0 - self.box.y0  # decorator-local
         strip = Box(0, 0, self.box.width, titlebar_h)
         surf = render_rounded_fill(strip.width, strip.height, Radius.top(self.outline_radius), self.bkgnd_color)
         ctx.paste(surf, (0, 0))
@@ -94,13 +99,28 @@ class Dialog(RoundedPanel):
     must stay square (otherwise we'd clip the top of the first content widget).
     """
 
+    # nudge the whole dialog down if it's close to full height
+    _TRUE_CENTER_MIN_HEIGHT = 190
+
     def __init__(self, width, height, title, title_font=None, **kwargs):
         box = Box.xywh(0, 0, width, height)
         radius = 10
         if title_font is None:
             title_font = Config().get_font("default_title")
+        self._title_strip_h = get_text_size(title, title_font)[1] + 2
         deco = functools.partial(DialogDecorator, title=title, title_font=title_font, outline_radius=radius)
         super(Dialog, self).__init__(box=box, align=WidgetAlign.CENTRE, radius=radius, decorator=deco, **kwargs)
+
+    def _adjust_box(self):
+        super()._adjust_box()
+        if (
+            self.align & WidgetAlign.CENTRE_V
+            and self.box is not None
+            and self.box.height >= self._TRUE_CENTER_MIN_HEIGHT
+        ):
+            offset = self._title_strip_h / 2
+            self.box.y0 += offset
+            self.box.y1 += offset
 
     @override
     def _build_shape_mask(self) -> pygame.Surface:
@@ -117,7 +137,8 @@ class MessageDialog(Dialog):
     def __init__(self, panelstack, message, title="Error", width=200, height=90):
         super(MessageDialog, self).__init__(width=width, height=height, title=title, auto_destroy=True)
 
-        char_w = Config().get_font("default_title").get_rect("a").width
+        font = Config().get_font("default_title")
+        char_w = font.get_rect("a").width if font else 0
         chars_per_line = width // max(1, int(char_w))
         chunks = textwrap.wrap(message, width=chars_per_line)
         wrapped = "\n".join(chunks)

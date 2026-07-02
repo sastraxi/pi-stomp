@@ -70,7 +70,8 @@ class EmulatorMod(Mod):
 
     def system_info_load(self):
         self.eq_status = self.audiocard.get_switch_parameter(self.audiocard.DAC_EQ)
-        self.lcd.update_eq(self.eq_status)
+        if self.lcd is not None:
+            self.lcd.update_eq(self.eq_status)
 
     # -------------------------------------------------------------------------
     # System menu: shutdown exits the emulator; everything else is a no-op
@@ -82,12 +83,14 @@ class EmulatorMod(Mod):
 
     def system_menu_reboot(self):
         logging.info("Emulator: reboot is a no-op")
+        raise KeyboardInterrupt
 
     def system_menu_restart_sound(self):
         logging.info("Emulator: restart sound is a no-op")
 
     def system_menu_reload(self):
         logging.info("Emulator: reload configs is a no-op")
+        raise KeyboardInterrupt
 
     # -------------------------------------------------------------------------
     # Window integration — drain events every tick; couple LCD flush +

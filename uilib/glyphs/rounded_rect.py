@@ -144,7 +144,6 @@ def _sdf_rounded_rect(width: int, height: int, radius: Radius) -> np.ndarray:
     return np.minimum(np.minimum(tl_s, tr_s), np.minimum(bl_s, br_s))
 
 
-@lru_cache(maxsize=256)
 def _render_filled_rounded_rect(
     width: int,
     height: int,
@@ -197,10 +196,9 @@ def _render_filled_rounded_rect(
     rgb = np.zeros((H, W, 3), dtype=np.uint8)
     alpha = np.zeros((H, W), dtype=np.float32)
 
+    fill_rgb = _to_rgb(fill) if has_fill else (0, 0, 0)
     if has_fill:
-        # Normalize the fill so we can broadcast it to the rgb array
-        # (pygame accepts color names, but numpy needs an int tuple).
-        fill_rgb = _to_rgb(fill)
+        assert fill_rgb is not None
         # Fill is opaque for sdf < -bw - 0.5, transparent for sdf > 0.5.
         # Inside the border ring, the border overrides the fill color.
         fill_mask = sdf < bw + 0.5 if has_border else sdf < 0.5
@@ -304,7 +302,9 @@ def _render_filled_rounded_rect(
             # h_color: top or bottom, depending on which band. (H, 1, 3)
             # v_color: left or right, depending on X position. (1, W, 3)
             h_color = top_c[None, None, :] * top_frac[:, :, None] + bot_c[None, None, :] * (1.0 - top_frac[:, :, None])
-            v_color = left_c[None, None, :] * left_frac[:, :, None] + right_c[None, None, :] * (1.0 - left_frac[:, :, None])
+            v_color = left_c[None, None, :] * left_frac[:, :, None] + right_c[None, None, :] * (
+                1.0 - left_frac[:, :, None]
+            )
 
             # Border weight: horizontal takes priority (corner rule), vertical fills in.
             # At a top-left corner: h_weight=1, v_valid=1 → border_weight=1, h_frac=1 → top color.
