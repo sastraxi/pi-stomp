@@ -28,8 +28,9 @@ from uilib.glyphs.ethernet_cable import EthernetCableGlyph
 from uilib.glyphs.expression_pedal import ExpressionPedalGlyph
 from uilib.glyphs.keycap_corner import KeycapCornerGlyph
 from uilib.glyphs.knob import KnobGlyph
+from uilib.glyphs.outline import render_rounded_fill, render_rounded_outline
 from uilib.glyphs.pill import PillGlyph
-from uilib.glyphs.rounded_rect import RoundedRectGlyph
+from uilib.glyphs.rounded_rect import RoundedRectGlyph, render_rounded_mask
 from uilib.glyphs.signal_bars import SignalBarsGlyph
 from uilib.glyphs.spinner import SpinnerGlyph
 
@@ -37,6 +38,7 @@ __all__ = [
     "DEFAULT_COLOR",
     "FONTS_DIR",
     "ArcDialWidget",
+    "RectBorder",
     "ArcRingGlyph",
     "DialFormatter",
     "DialVariant",
@@ -52,4 +54,7 @@ __all__ = [
     "SignalBarsGlyph",
     "SpinnerGlyph",
     "paint_arc_dial",
+    "render_rounded_fill",
+    "render_rounded_mask",
+    "render_rounded_outline",
 ]
