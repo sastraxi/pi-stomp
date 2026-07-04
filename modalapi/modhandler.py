@@ -1070,6 +1070,19 @@ class Modhandler(Handler):
                 output = subprocess.check_output(["dpkg-query", "--showformat=${Version}", "--show", "pi-stomp"])
                 self.software_version = output.decode().strip()
                 logging.info("pi-Stomp Software Version (pkg): %s" % self.software_version)
+                # dpkg equivalent of `git describe --dirty=*`: append an
+                # asterisk when on-disk package contents have drifted from
+                # the .deb's recorded md5sums (e.g. after ./deploy.sh or
+                # manual edits). Skipped silently on non-dpkg systems.
+                try:
+                    verify = subprocess.run(
+                        ["dpkg", "--verify", "pi-stomp"],
+                        capture_output=True, text=True, check=False,
+                    )
+                    if verify.stdout.strip() or verify.stderr.strip():
+                        self.software_version += "*"
+                except (FileNotFoundError, OSError):
+                    pass
             except subprocess.CalledProcessError:
                 logging.error("Cannot obtain software version info")
 
