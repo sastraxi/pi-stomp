@@ -1049,23 +1049,28 @@ class Modhandler(Handler):
     # System Menu
     #
     def system_info_load(self):
-        try:
-            output = subprocess.check_output(
-                [
-                    "git",
-                    "--git-dir",
-                    self.homedir + "/.git",
-                    "--work-tree",
-                    self.homedir,
-                    "describe",
-                    "--dirty=*",
-                    "--always",
-                ]
-            )
-            if output:
-                self.software_version = output.decode()
-                logging.info("pi-Stomp Software Version: %s" % self.software_version)
-        except subprocess.CalledProcessError:
+        # see util/expand-git.sh
+        expanded = Path(self.homedir + "/.git/EXPANDED").exists()
+        if expanded:
+            try:
+                output = subprocess.check_output(
+                    [
+                        "git",
+                        "--git-dir",
+                        self.homedir + "/.git",
+                        "--work-tree",
+                        self.homedir,
+                        "describe",
+                        "--dirty=*",
+                        "--always",
+                    ]
+                )
+                if output:
+                    self.software_version = output.decode()
+                    logging.info("pi-Stomp Software Version: %s" % self.software_version)
+            except subprocess.CalledProcessError:
+                logging.error("Cannot obtain git software version info")
+        else:
             try:
                 output = subprocess.check_output(["dpkg-query", "--showformat=${Version}", "--show", "pi-stomp"])
                 self.software_version = output.decode().strip()
