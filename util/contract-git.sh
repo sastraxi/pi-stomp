@@ -1,45 +1,27 @@
 #!/bin/bash
-# contract-git.sh — revert the pi-stomp tree to its packaged state.
+# contract-git.sh — revert the pi-stomp tree to its packaged (non-git) state.
 #
-# Inverse of expand-git.sh: removes the EXPANDED marker and resets the
-# working tree + HEAD to the single packaged commit, so `dpkg --verify`
-# passes and pistomp-recovery can apt-upgrade pi-stomp again.
+# Inverse of expand-git.sh: removes the .git directory entirely. The files
+# on disk are untouched — they're whatever dpkg last unpacked — so this
+# just drops the git metadata expand-git.sh added. With no .git/EXPANDED
+# marker (and no .git at all), pi-stomp and pistomp-recovery treat the tree
+# as packaged again and `apt upgrade pi-stomp` works normally.
 #
 # Run on the device:
 #     ~/pi-stomp/util/contract-git.sh
 #
-# WARNING: discards any uncommitted changes and local commits on the
-# current branch. The full git history fetched by expand-git.sh is
-# preserved (no `git gc`), so you can re-expand to recover it.
+# WARNING: discards any fetched history and local commits. There's no
+# packaged commit to fall back to — re-run expand-git.sh from scratch if
+# you need git again later.
 set -euo pipefail
 
 SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 if [ ! -d "$SRC_DIR/.git" ]; then
-    echo "Error: $SRC_DIR is not a git repo" >&2
-    exit 1
+    echo "Not expanded — nothing to do."
+    exit 0
 fi
 
-if [ -f "$SRC_DIR/.git/EXPANDED" ]; then
-    rm -f "$SRC_DIR/.git/EXPANDED"
-fi
-
-# Find the original packaged commit — it's the root commit that
-# postinst created (message starts with "pi-stomp" and contains
-# "(packaged)"). We reset to it so the working tree matches the .deb.
-PACKAGED_SHA=$(git -C "$SRC_DIR" rev-list --max-parents=0 HEAD 2>/dev/null | while read -r sha; do
-    if git -C "$SRC_DIR" log -1 --format='%s' "$sha" | grep -q '(packaged)'; then
-        echo "$sha"
-        break
-    fi
-done)
-
-if [ -z "$PACKAGED_SHA" ]; then
-    echo "Warning: could not find the packaged root commit; resetting to HEAD." >&2
-    PACKAGED_SHA=$(git -C "$SRC_DIR" rev-parse HEAD)
-fi
-
-git -C "$SRC_DIR" reset --hard "$PACKAGED_SHA"
-echo "==> Reverted to packaged state"
-git -C "$SRC_DIR" describe --dirty='*' --always || true
+rm -rf "$SRC_DIR/.git"
+echo "==> Removed .git — tree is back to packaged (non-git) state"
 echo "==> apt upgrades for pi-stomp re-enabled"

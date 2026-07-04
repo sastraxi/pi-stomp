@@ -1,11 +1,13 @@
 #!/bin/bash
-# expand-git.sh — fetch full history + tags into the packaged pi-stomp tree.
+# expand-git.sh — turn a packaged pi-stomp install into a real git repo.
 #
-# The .deb ships a bare `git init`-seeded repo (single commit, no history) so
-# `git describe --dirty=*` works out of the box. This script fetches the
-# complete history and tags from the remote recorded at build time, turning
-# the shallow repo into a real clone that `git pull`, `git log`, and rich
-# `git describe` (e.g. "v3.0.4-224-g…") all work against.
+# The .deb ships no .git directory, just .git-meta/ (origin URL, branch,
+# and the exact commit that was packaged). This script initializes a repo,
+# fetches full history + tags from that origin, and points the branch at
+# the recorded built-sha — the commit whose tree matches what's already on
+# disk — so the working tree lines up with HEAD without touching any files.
+# From there `git pull`, `git log`, and rich `git describe` (e.g.
+# "v3.0.4-224-g…") all work as they would on a normal clone.
 #
 # Run on the device:
 #     ~/pi-stomp/util/expand-git.sh
@@ -16,42 +18,34 @@ set -euo pipefail
 SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 META_DIR="$SRC_DIR/.git-meta"
 
-if [ ! -d "$SRC_DIR/.git" ]; then
-    echo "Error: $SRC_DIR is not a git repo (postinst git init not run?)" >&2
-    exit 1
-fi
-
-ORIGIN=$(git -C "$SRC_DIR" remote get-url origin 2>/dev/null || true)
-if [ -z "$ORIGIN" ] && [ -f "$META_DIR/origin-url" ]; then
-    ORIGIN=$(cat "$META_DIR/origin-url")
-    git -C "$SRC_DIR" remote add origin "$ORIGIN"
-fi
-if [ -z "$ORIGIN" ]; then
-    echo "Error: no origin remote and no .git-meta/origin-url" >&2
+if [ ! -f "$META_DIR/origin-url" ]; then
+    echo "Error: $META_DIR/origin-url not found (not a git-packaged install?)" >&2
     exit 1
 fi
 
 BRANCH=$(cat "$META_DIR/branch" 2>/dev/null || echo "main")
+BUILT_SHA=$(cat "$META_DIR/built-sha" 2>/dev/null || true)
+
+if [ ! -d "$SRC_DIR/.git" ]; then
+    echo "==> Initializing git repo"
+    git init -q -b "$BRANCH" "$SRC_DIR"
+    git -C "$SRC_DIR" config user.email "pi-stomp@local"
+    git -C "$SRC_DIR" config user.name "pi-stomp"
+    git -C "$SRC_DIR" remote add origin "$(cat "$META_DIR/origin-url")"
+fi
+
+ORIGIN=$(git -C "$SRC_DIR" remote get-url origin)
 
 echo "==> Fetching full history + tags from $ORIGIN ($BRANCH)"
-# Fetch the branch with full depth, plus all tags.
 git -C "$SRC_DIR" fetch --tags origin "$BRANCH"
 
-# Point the local branch at the fetched commit so the working tree aligns
-# with the real history. We don't reset --hard (the working tree already
-# matches HEAD from the packaged commit); we just update the ref to the
-# fetched commit and fast-forward if possible.
-FETCHED=$(git -C "$SRC_DIR" rev-parse "origin/$BRANCH")
-CURRENT=$(git -C "$SRC_DIR" rev-parse HEAD)
-
-if [ "$FETCHED" != "$CURRENT" ]; then
-    # The packaged commit and the remote tip differ. Reset the branch ref
-    # to the fetched tip so history is walkable. The working tree is already
-    # clean (packaged state), so reset --soft keeps staged changes empty.
-    git -C "$SRC_DIR" reset --soft "origin/$BRANCH"
-    git -C "$SRC_DIR" branch -f "$BRANCH" "origin/$BRANCH"
-    git -C "$SRC_DIR" symbolic-ref HEAD "refs/heads/$BRANCH"
-fi
+# Point the branch at the exact commit that was packaged (built-sha, if we
+# have one — otherwise fall back to the fetched tip) and update the index
+# to match. reset --mixed never touches the working tree, which already
+# holds the packaged files, so this can't clobber anything on disk.
+TARGET="${BUILT_SHA:-origin/$BRANCH}"
+git -C "$SRC_DIR" symbolic-ref HEAD "refs/heads/$BRANCH"
+git -C "$SRC_DIR" reset --mixed "$TARGET" >/dev/null
 
 echo "==> Done"
 # Write the EXPANDED marker so pi-stomp knows to use `git describe --dirty=*`
