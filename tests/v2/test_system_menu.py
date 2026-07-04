@@ -1,6 +1,5 @@
 """v2-specific system menu behaviour."""
 
-import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
